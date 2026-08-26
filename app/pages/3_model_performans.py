@@ -1,8 +1,15 @@
 """Transparent offline and live model performance metrics."""
 
+import sys
+from pathlib import Path
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.data import load_latest_model_metadata, load_prediction_performance
 from app.components.ui import configure_page, disclaimer

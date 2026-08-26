@@ -1,9 +1,15 @@
 """Tracked leagues, quota status, and manual data refresh."""
 
 from datetime import date, timedelta
+import sys
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.data import clear_app_cache, fetch_api_status, get_db
 from app.components.ui import configure_page
