@@ -13,6 +13,7 @@ import numpy as np
 
 from config.settings import PROJECT_ROOT, get_settings
 from db.db_client import SupabaseRestClient
+from models.calibration import apply_binary_temperature, apply_multiclass_temperature
 from models.feature_engineering import FEATURE_COLUMNS, build_upcoming_features
 from models.train_model import load_completed_matches
 
@@ -78,9 +79,19 @@ def generate_prediction_rows(
         ordered_upcoming,
         team_form_by_id=team_form_by_id,
     )
-    result_probabilities = bundle["result_model"].predict_proba(features)
-    over_probabilities = bundle["over_2_5_model"].predict_proba(features)[:, 1]
-    btts_probabilities = bundle["btts_model"].predict_proba(features)[:, 1]
+    calibration = bundle.get("calibration", {})
+    result_probabilities = apply_multiclass_temperature(
+        bundle["result_model"].predict_proba(features),
+        float(calibration.get("result_temperature", 1.0)),
+    )
+    over_probabilities = apply_binary_temperature(
+        bundle["over_2_5_model"].predict_proba(features)[:, 1],
+        float(calibration.get("over_2_5_temperature", 1.0)),
+    )
+    btts_probabilities = apply_binary_temperature(
+        bundle["btts_model"].predict_proba(features)[:, 1],
+        float(calibration.get("btts_temperature", 1.0)),
+    )
 
     if result_probabilities.shape != (len(ordered_upcoming), 3):
         raise RuntimeError("Result model returned an unexpected probability shape")
