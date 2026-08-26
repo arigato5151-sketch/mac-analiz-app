@@ -1,0 +1,1 @@
+"""API-Football ingestion package."""

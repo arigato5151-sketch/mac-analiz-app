@@ -1,0 +1,13 @@
+.env
+.streamlit/secrets.toml
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+dist/
+build/
+models/saved_models/*.joblib
+!models/saved_models/.gitkeep
