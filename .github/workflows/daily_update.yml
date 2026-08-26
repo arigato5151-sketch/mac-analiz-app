@@ -2,9 +2,10 @@ name: Daily data update
 
 on:
   schedule:
-    # Turkey is UTC+3 year-round: 06:00 and 23:30 local time.
+    # Turkey is UTC+3 year-round: 06:00, 23:30, and a late 02:30 result sweep.
     - cron: "0 3 * * *"
     - cron: "30 20 * * *"
+    - cron: "30 23 * * *"
   workflow_dispatch:
     inputs:
       task:
@@ -52,6 +53,7 @@ jobs:
   night:
     if: >-
       github.event.schedule == '30 20 * * *' ||
+      github.event.schedule == '30 23 * * *' ||
       github.event.inputs.task == 'night' ||
       github.event.inputs.task == 'full'
     runs-on: ubuntu-latest
