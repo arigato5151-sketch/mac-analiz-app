@@ -174,12 +174,17 @@ def save_model_bundle(bundle: dict[str, Any], output_dir: Path) -> tuple[Path, P
     version = datetime.now(timezone.utc).strftime("v%Y%m%dT%H%M%SZ")
     model_path = output_dir / f"model_{version}.joblib"
     metadata_path = output_dir / f"model_{version}.json"
+    versioned_bundle = {**bundle, "model_version": model_path.stem}
     temporary_path = model_path.with_suffix(".tmp")
-    joblib.dump(bundle, temporary_path, compress=3)
+    joblib.dump(versioned_bundle, temporary_path, compress=3)
     os.replace(temporary_path, model_path)
     metadata_path.write_text(
         json.dumps(
-            {key: value for key, value in bundle.items() if not key.endswith("_model")},
+            {
+                key: value
+                for key, value in versioned_bundle.items()
+                if not key.endswith("_model")
+            },
             ensure_ascii=False,
             indent=2,
         ),
@@ -188,7 +193,7 @@ def save_model_bundle(bundle: dict[str, Any], output_dir: Path) -> tuple[Path, P
 
     latest_path = output_dir / "latest.joblib"
     temporary_latest = output_dir / "latest.tmp"
-    joblib.dump(bundle, temporary_latest, compress=3)
+    joblib.dump(versioned_bundle, temporary_latest, compress=3)
     os.replace(temporary_latest, latest_path)
     return model_path, metadata_path
 

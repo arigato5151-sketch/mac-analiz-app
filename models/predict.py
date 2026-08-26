@@ -24,6 +24,9 @@ def resolve_model_path(model_path: Path | None = None) -> Path:
         return model_path
 
     model_dir = PROJECT_ROOT / "models" / "saved_models"
+    latest_path = model_dir / "latest.joblib"
+    if latest_path.is_file():
+        return latest_path
     candidates = sorted(model_dir.glob("model_v*.joblib"))
     if not candidates:
         raise FileNotFoundError("No versioned trained model was found")
@@ -122,13 +125,13 @@ def main() -> None:
         bundle,
         historical,
         upcoming,
-        model_version=model_path.stem,
+        model_version=str(bundle.get("model_version", model_path.stem)),
     )
     persisted = persist_predictions(db, rows)
     print(
         json.dumps(
             {
-                "model_version": model_path.stem,
+                "model_version": str(bundle.get("model_version", model_path.stem)),
                 "historical_matches": len(historical),
                 "upcoming_matches": len(upcoming),
                 "predictions_written": len(persisted),

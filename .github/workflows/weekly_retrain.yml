@@ -1,0 +1,49 @@
+name: Weekly model retraining
+
+on:
+  schedule:
+    # Monday 05:00 Turkey time.
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: weekly-model-retraining
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+      - name: Run unit tests
+        run: python -m pytest -q
+      - name: Train and validate models
+        run: python -m models.train_model
+      - name: Refresh upcoming predictions
+        run: python -m models.predict --model models/saved_models/latest.joblib --days 3
+      - name: Publish validated model artifact
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f models/saved_models/latest.joblib
+          git add models/saved_models/model_v*.json
+          if git diff --cached --quiet; then
+            echo "No model artifact changes"
+          else
+            git commit -m "chore(model): weekly automated retraining"
+            git push
+          fi

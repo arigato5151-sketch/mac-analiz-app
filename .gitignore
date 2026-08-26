@@ -11,3 +11,4 @@ dist/
 build/
 models/saved_models/*.joblib
 !models/saved_models/.gitkeep
+!models/saved_models/latest.joblib
