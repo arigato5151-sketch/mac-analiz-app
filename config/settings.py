@@ -34,6 +34,15 @@ class Settings:
     request_timeout_seconds: float = 30.0
 
 
+@dataclass(frozen=True, slots=True)
+class PublicSupabaseSettings:
+    """Read-only settings safe to provide to the Streamlit frontend."""
+
+    supabase_url: str
+    supabase_anon_key: str
+    request_timeout_seconds: float = 30.0
+
+
 def get_settings(env_file: Path | None = None) -> Settings:
     _load_env_file(env_file or PROJECT_ROOT / ".env")
 
@@ -55,3 +64,25 @@ def get_settings(env_file: Path | None = None) -> Settings:
         supabase_url=values["SUPABASE_URL"],
         supabase_service_role_key=values["SUPABASE_SERVICE_ROLE_KEY"],
     )
+
+
+def get_public_supabase_settings(
+    env_file: Path | None = None,
+) -> PublicSupabaseSettings:
+    """Load the least-privileged credentials used by the UI only."""
+    _load_env_file(env_file or PROJECT_ROOT / ".env")
+    url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+    anon_key = os.getenv("SUPABASE_ANON_KEY", "").strip()
+    missing = [
+        name
+        for name, value in {
+            "SUPABASE_URL": url,
+            "SUPABASE_ANON_KEY": anon_key,
+        }.items()
+        if not value
+    ]
+    if missing:
+        raise ConfigurationError(
+            f"Missing public Supabase settings: {', '.join(missing)}"
+        )
+    return PublicSupabaseSettings(supabase_url=url, supabase_anon_key=anon_key)

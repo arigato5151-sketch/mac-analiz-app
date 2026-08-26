@@ -155,3 +155,13 @@ class SupabaseRestClient:
         if not filters:
             raise ValueError("Delete requires at least one filter")
         self._request("DELETE", table, params=filters)
+
+
+class PublicSupabaseRestClient(SupabaseRestClient):
+    """Query-only client for the deployed Streamlit UI."""
+
+    def upsert(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        raise PermissionError("Public Supabase client is read-only")
+
+    def delete(self, *args: Any, **kwargs: Any) -> None:
+        raise PermissionError("Public Supabase client is read-only")
