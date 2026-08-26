@@ -1,0 +1,46 @@
+{
+  "feature_columns": [
+    "league_id",
+    "home_win_rate_5",
+    "away_win_rate_5",
+    "home_win_rate_10",
+    "away_win_rate_10",
+    "home_goal_diff_5",
+    "away_goal_diff_5",
+    "home_venue_win_rate_5",
+    "away_venue_win_rate_5",
+    "home_venue_goals_for_5",
+    "away_venue_goals_for_5",
+    "home_elo",
+    "away_elo",
+    "elo_diff",
+    "home_rest_days",
+    "away_rest_days",
+    "h2h_home_win_rate_5",
+    "h2h_draw_rate_5",
+    "poisson_home_win",
+    "poisson_draw",
+    "poisson_away_win",
+    "poisson_over_2_5",
+    "poisson_btts"
+  ],
+  "class_labels": [
+    "home_win",
+    "draw",
+    "away_win"
+  ],
+  "trained_rows": 24905,
+  "training_end": "2026-08-26T00:30:00+00:00",
+  "metrics": {
+    "log_loss": 1.010939598083496,
+    "brier_score": 0.6050851193974195,
+    "accuracy": 0.5033125878337683,
+    "baseline_log_loss": 1.0716652255536796,
+    "over_2_5_log_loss": 0.6842159032821655,
+    "btts_log_loss": 0.6873639225959778,
+    "test_size": 4981,
+    "test_start": "2025-11-01T17:30:00+00:00",
+    "test_end": "2026-08-26T00:30:00+00:00"
+  },
+  "model_version": "model_v20260826T172341Z"
+}

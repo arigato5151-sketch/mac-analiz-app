@@ -66,9 +66,12 @@ def sync_team_form(
     *,
     team_id: int,
     season: int,
+    elo_rating: float | None = None,
 ) -> dict[str, Any]:
     fixtures = api.get("fixtures", {"team": team_id, "season": season, "last": 5})
     row = build_team_form(fixtures, team_id)
+    if elo_rating is not None:
+        row["elo_rating"] = float(elo_rating)
     db.upsert("team_form", [row], on_conflict="team_id,calculated_at")
     return row
 

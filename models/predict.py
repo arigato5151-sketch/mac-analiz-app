@@ -62,6 +62,7 @@ def generate_prediction_rows(
     upcoming_matches: list[dict[str, Any]],
     *,
     model_version: str,
+    team_form_by_id: dict[int, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     expected_columns = list(FEATURE_COLUMNS)
     if bundle.get("feature_columns") != expected_columns:
@@ -72,7 +73,11 @@ def generate_prediction_rows(
     ordered_upcoming = sorted(
         upcoming_matches, key=lambda row: (row["match_date"], int(row["id"]))
     )
-    features = build_upcoming_features(historical_matches, ordered_upcoming)
+    features = build_upcoming_features(
+        historical_matches,
+        ordered_upcoming,
+        team_form_by_id=team_form_by_id,
+    )
     result_probabilities = bundle["result_model"].predict_proba(features)
     over_probabilities = bundle["over_2_5_model"].predict_proba(features)[:, 1]
     btts_probabilities = bundle["btts_model"].predict_proba(features)[:, 1]
@@ -100,6 +105,28 @@ def generate_prediction_rows(
     return rows
 
 
+def load_latest_team_forms(
+    db: SupabaseRestClient, team_ids: set[int]
+) -> dict[int, dict[str, Any]]:
+    """Return the latest stored context row for each upcoming team."""
+    if not team_ids:
+        return {}
+    rows = db.select_all(
+        "team_form",
+        columns=(
+            "team_id,calculated_at,elo_rating,avg_goals_scored_last5,"
+            "avg_goals_conceded_last5,win_rate_last5,home_away_split"
+        ),
+        order="calculated_at.desc",
+    )
+    latest: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        team_id = int(row["team_id"])
+        if team_id in team_ids and team_id not in latest:
+            latest[team_id] = row
+    return latest
+
+
 def persist_predictions(
     db: SupabaseRestClient, rows: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -121,11 +148,18 @@ def main() -> None:
     now = datetime.now(timezone.utc)
     historical = load_completed_matches(db)
     upcoming = load_upcoming_matches(db, now=now, horizon_days=args.days)
+    upcoming_team_ids = {
+        int(team_id)
+        for match in upcoming
+        for team_id in (match["home_team_id"], match["away_team_id"])
+    }
+    team_forms = load_latest_team_forms(db, upcoming_team_ids)
     rows = generate_prediction_rows(
         bundle,
         historical,
         upcoming,
         model_version=str(bundle.get("model_version", model_path.stem)),
+        team_form_by_id=team_forms,
     )
     persisted = persist_predictions(db, rows)
     print(
@@ -135,6 +169,7 @@ def main() -> None:
                 "historical_matches": len(historical),
                 "upcoming_matches": len(upcoming),
                 "predictions_written": len(persisted),
+                "teams_with_live_form": len(team_forms),
             },
             ensure_ascii=False,
             indent=2,

@@ -55,17 +55,24 @@ def sync_injuries(
     db: SupabaseRestClient,
     *,
     league_id: int,
+    team_ids: set[int] | None = None,
 ) -> int:
     league = LEAGUES_BY_ID.get(league_id)
     if league is None:
         raise ValueError(f"League {league_id} is not configured")
     injuries = api.get("injuries", {"league": league_id, "season": league.season})
     teams, rows = transform_injuries(injuries, league_id)
+    if team_ids is not None:
+        teams = [team for team in teams if int(team["id"]) in team_ids]
+        rows = [row for row in rows if int(row["team_id"]) in team_ids]
     db.upsert("teams", teams, on_conflict="id")
 
-    # Replace each affected team's snapshot to avoid stale availability rows.
-    for team in teams:
-        db.delete("player_availability", filters={"team_id": f"eq.{team['id']}"})
+    # Clear every requested team, including teams that are no longer injured.
+    refreshed_team_ids = team_ids if team_ids is not None else {
+        int(team["id"]) for team in teams
+    }
+    for team_id in refreshed_team_ids:
+        db.delete("player_availability", filters={"team_id": f"eq.{team_id}"})
     if rows:
         db.upsert("player_availability", rows)
     return len(rows)

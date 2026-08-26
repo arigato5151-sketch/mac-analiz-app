@@ -6,6 +6,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+import json
 
 import numpy as np
 import pandas as pd
@@ -252,6 +253,8 @@ def build_training_dataset(
 def build_upcoming_features(
     historical_matches: list[dict[str, Any]],
     upcoming_matches: list[dict[str, Any]],
+    *,
+    team_form_by_id: dict[int, dict[str, Any]] | None = None,
 ) -> pd.DataFrame:
     """Build target features without updating state from unknown outcomes."""
     completed = [
@@ -272,4 +275,27 @@ def build_upcoming_features(
     for row in completed:
         state.update(row)
     rows = [state.feature_row(row) for row in targets]
+    if team_form_by_id:
+        for features, match in zip(rows, targets, strict=True):
+            home_id = int(match["home_team_id"])
+            away_id = int(match["away_team_id"])
+            for prefix, team_id, venue_key in (
+                ("home", home_id, "home_win_rate"),
+                ("away", away_id, "away_win_rate"),
+            ):
+                form = team_form_by_id.get(team_id)
+                if not form:
+                    continue
+                features[f"{prefix}_win_rate_5"] = float(form["win_rate_last5"])
+                features[f"{prefix}_goal_diff_5"] = float(
+                    form["avg_goals_scored_last5"]
+                ) - float(form["avg_goals_conceded_last5"])
+                split = form.get("home_away_split") or {}
+                if isinstance(split, str):
+                    split = json.loads(split)
+                venue_value = split.get(venue_key)
+                if venue_value is not None:
+                    features[f"{prefix}_venue_win_rate_5"] = float(venue_value)
+                features[f"{prefix}_elo"] = float(form["elo_rating"])
+            features["elo_diff"] = features["home_elo"] - features["away_elo"]
     return pd.DataFrame(rows, index=[int(row["id"]) for row in targets], columns=FEATURE_COLUMNS)
