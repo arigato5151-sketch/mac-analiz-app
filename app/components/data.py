@@ -118,6 +118,31 @@ def load_prediction_performance() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def load_match_availability(
+    home_team_id: int, away_team_id: int
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Load the latest public squad context for the two teams in a fixture."""
+    team_filter = f"(team_id.eq.{home_team_id},team_id.eq.{away_team_id})"
+    db = get_db()
+    players = pd.DataFrame(
+        db.select_all(
+            "player_availability",
+            columns="team_id,player_name,status,updated_at",
+            filters={"or": team_filter},
+            order="updated_at.desc",
+        )
+    )
+    snapshots = pd.DataFrame(
+        db.select_all(
+            "team_availability_status",
+            columns="team_id,refreshed_at,available_count",
+            filters={"or": team_filter},
+        )
+    )
+    return players, snapshots
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def load_evaluated_predictions(limit: int = 250) -> pd.DataFrame:
     """Load evaluated predictions from the RLS-protected database view."""
     if limit < 1 or limit > 1_000:

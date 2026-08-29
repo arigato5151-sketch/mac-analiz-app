@@ -11,7 +11,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.components.data import load_match_baseline, load_upcoming_dashboard
+from app.components.availability import summarize_availability
+from app.components.data import load_match_availability, load_match_baseline, load_upcoming_dashboard
 from app.components.ui import (
     configure_page,
     disclaimer,
@@ -90,6 +91,62 @@ st.plotly_chart(
     ).update_layout(showlegend=False),
     use_container_width=True,
 )
+
+st.subheader("Kadro durumu")
+try:
+    availability_rows, availability_snapshots = load_match_availability(
+        int(selected["home_team_id"]), int(selected["away_team_id"])
+    )
+    snapshots_by_team = {
+        int(row["team_id"]): row.to_dict()
+        for _, row in availability_snapshots.iterrows()
+    }
+    availability_data = availability_rows.to_dict("records")
+    availability_now = pd.Timestamp.now(tz="UTC").to_pydatetime()
+    availability_columns = st.columns(2)
+    for column, team_id, team_name in (
+        (availability_columns[0], int(selected["home_team_id"]), selected["home_team"]),
+        (availability_columns[1], int(selected["away_team_id"]), selected["away_team"]),
+    ):
+        summary = summarize_availability(
+            availability_data,
+            snapshots_by_team.get(team_id),
+            team_id=team_id,
+            now=availability_now,
+        )
+        column.markdown(f"**{team_name}** · {summary.status}")
+        if summary.status == "Güncel":
+            column.caption(
+                f"Sakat: {summary.injured} · Cezalı: {summary.suspended} · Şüpheli: {summary.doubtful}"
+            )
+        elif summary.status == "Güncel değil":
+            column.warning("Kadro verisi 30 saati geçti; tahmine ek bağlam olarak kullanmayın.")
+        else:
+            column.info("Bu takım için doğrulanmış güncel kadro verisi yok.")
+    if not availability_rows.empty:
+        display_availability = availability_rows.copy()
+        display_availability["Durum"] = display_availability["status"].map(
+            {"injured": "Sakat", "suspended": "Cezalı", "doubtful": "Şüpheli"}
+        )
+        display_availability["Takım"] = display_availability["team_id"].map(
+            {
+                int(selected["home_team_id"]): selected["home_team"],
+                int(selected["away_team_id"]): selected["away_team"],
+            }
+        )
+        st.dataframe(
+            display_availability[["Takım", "player_name", "Durum"]].rename(
+                columns={"player_name": "Oyuncu"}
+            ),
+            hide_index=True,
+            use_container_width=True,
+        )
+    st.caption(
+        "Kadro verisi doğrulanmış güncellik bağlamıdır; tarihsel oyuncu erişilebilirliği olmadığı için "
+        "kalibre edilmiş model olasılıklarına doğrudan ağırlık uygulanmaz."
+    )
+except Exception as exc:
+    st.warning(f"Kadro durumu şu anda yüklenemedi: {exc}")
 
 try:
     detail = load_match_baseline(int(selected_id))

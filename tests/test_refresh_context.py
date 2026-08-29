@@ -25,8 +25,10 @@ class EmptyApi:
 class DeleteTrackingDb:
     def __init__(self) -> None:
         self.deleted_team_ids: list[str] = []
+        self.upserts: list[tuple[str, list[dict[str, Any]]]] = []
 
-    def upsert(self, *_: Any, **__: Any) -> list[dict[str, Any]]:
+    def upsert(self, table: str, rows: list[dict[str, Any]], **__: Any) -> list[dict[str, Any]]:
+        self.upserts.append((table, rows))
         return []
 
     def delete(self, table: str, *, filters: dict[str, str]) -> None:
@@ -77,3 +79,6 @@ def test_injury_sync_clears_teams_with_no_current_injuries() -> None:
 
     assert written == 0
     assert set(db.deleted_team_ids) == {"eq.10", "eq.20"}
+    snapshots = next(rows for table, rows in db.upserts if table == "team_availability_status")
+    assert {row["team_id"] for row in snapshots} == {10, 20}
+    assert {row["available_count"] for row in snapshots} == {0}

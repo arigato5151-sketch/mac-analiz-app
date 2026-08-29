@@ -71,10 +71,26 @@ def sync_injuries(
     refreshed_team_ids = team_ids if team_ids is not None else {
         int(team["id"]) for team in teams
     }
+    refreshed_at = datetime.now(timezone.utc).isoformat()
     for team_id in refreshed_team_ids:
         db.delete("player_availability", filters={"team_id": f"eq.{team_id}"})
     if rows:
         db.upsert("player_availability", rows)
+    counts_by_team = {team_id: 0 for team_id in refreshed_team_ids}
+    for row in rows:
+        counts_by_team[int(row["team_id"])] += 1
+    db.upsert(
+        "team_availability_status",
+        [
+            {
+                "team_id": team_id,
+                "refreshed_at": refreshed_at,
+                "available_count": count,
+            }
+            for team_id, count in counts_by_team.items()
+        ],
+        on_conflict="team_id",
+    )
     return len(rows)
 
 
