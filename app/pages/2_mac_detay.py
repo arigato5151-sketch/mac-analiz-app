@@ -12,7 +12,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.data import load_match_baseline, load_upcoming_dashboard
-from app.components.ui import configure_page, disclaimer, probability_percent
+from app.components.ui import (
+    configure_page,
+    disclaimer,
+    prediction_signal,
+    probability_percent,
+)
 
 
 configure_page("Maç Detay")
@@ -46,6 +51,15 @@ selected = matches.loc[matches["id"] == selected_id].iloc[0]
 
 st.subheader(f"{selected['home_team']} — {selected['away_team']}")
 st.caption(f"{selected['league_name']} · {selected['match_date'].strftime('%d.%m.%Y %H:%M')}")
+
+market, confidence_probability, confidence = prediction_signal(selected)
+if confidence_probability is None:
+    st.info("Bu maç için model tahmini henüz hazırlanmadı.")
+else:
+    st.info(
+        f"En güçlü model sinyali: **{market}** ({probability_percent(confidence_probability)}) · "
+        f"güven seviyesi: **{confidence}**. Bu, kesin sonuç değil istatistiksel olasılıktır."
+    )
 
 metrics = st.columns(5)
 for column, label, key in zip(
