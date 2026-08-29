@@ -117,6 +117,65 @@ def load_prediction_performance() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def load_evaluated_predictions(limit: int = 250) -> pd.DataFrame:
+    """Load evaluated predictions with the real fixture and model context."""
+    if limit < 1 or limit > 1_000:
+        raise ValueError("limit must be between 1 and 1000")
+
+    db = get_db()
+    performance = pd.DataFrame(
+        db.select_all(
+            "prediction_performance",
+            columns=(
+                "prediction_id,match_id,actual_result,was_correct,brier_score,"
+                "evaluated_at"
+            ),
+            order="evaluated_at.desc",
+        )[:limit]
+    )
+    if performance.empty:
+        return performance
+
+    matches = pd.DataFrame(
+        db.select_all(
+            "matches",
+            columns=(
+                "id,league_id,home_team_id,away_team_id,match_date,home_score,away_score"
+            ),
+        )
+    )
+    predictions = pd.DataFrame(
+        db.select_all(
+            "predictions",
+            columns=(
+                "id,prob_home_win,prob_draw,prob_away_win,prob_over_2_5,prob_btts,"
+                "model_version,predicted_at"
+            ),
+        )
+    )
+    teams = pd.DataFrame(db.select_all("teams", columns="id,name"))
+    leagues = pd.DataFrame(db.select_all("leagues", columns="id,name"))
+    if matches.empty or predictions.empty or teams.empty:
+        return pd.DataFrame()
+
+    home = teams.rename(columns={"id": "home_team_id", "name": "home_team"})
+    away = teams.rename(columns={"id": "away_team_id", "name": "away_team"})
+    league_names = leagues.rename(columns={"id": "league_id", "name": "league_name"})
+    frame = performance.merge(matches, left_on="match_id", right_on="id", how="inner")
+    frame = frame.merge(predictions, left_on="prediction_id", right_on="id", how="inner")
+    frame = frame.merge(home[["home_team_id", "home_team"]], on="home_team_id", how="left")
+    frame = frame.merge(away[["away_team_id", "away_team"]], on="away_team_id", how="left")
+    frame = frame.merge(league_names[["league_id", "league_name"]], on="league_id", how="left")
+    frame["match_date"] = pd.to_datetime(frame["match_date"], utc=True).dt.tz_convert(
+        "Europe/Istanbul"
+    )
+    frame["evaluated_at"] = pd.to_datetime(frame["evaluated_at"], utc=True).dt.tz_convert(
+        "Europe/Istanbul"
+    )
+    return frame.sort_values("evaluated_at", ascending=False).reset_index(drop=True)
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_latest_model_metadata() -> dict[str, Any] | None:
     model_dir = PROJECT_ROOT / "models" / "saved_models"

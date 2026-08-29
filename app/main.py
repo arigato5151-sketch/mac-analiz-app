@@ -48,3 +48,4 @@ else:
     )
 
 st.caption("Detaylı analiz için sol menüden Maç Detay sayfasını açın.")
+st.caption("“En güçlü sinyal”, 1-X-2, Üst 2.5 ve KG Var piyasaları arasındaki en yüksek model olasılığını gösterir.")

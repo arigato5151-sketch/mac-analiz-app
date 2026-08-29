@@ -70,6 +70,33 @@ def prediction_signal_text(row: pd.Series) -> str:
     return f"{market} · {probability_percent(probability)} · {confidence}"
 
 
+def evaluated_result_display(frame: pd.DataFrame) -> pd.DataFrame:
+    """Format completed-match evaluations for the user-facing audit table."""
+    result_labels = {
+        "home_win": "Ev kazandı",
+        "draw": "Beraberlik",
+        "away_win": "Deplasman kazandı",
+    }
+    rows = frame.copy()
+    signals = rows.apply(prediction_signal, axis=1)
+    rows["Model tahmini"] = [
+        f"{market} ({probability_percent(probability)})"
+        if probability is not None
+        else market
+        for market, probability, _ in signals
+    ]
+    rows["Sonuç"] = rows["actual_result"].map(result_labels).fillna("—")
+    rows["Durum"] = rows["was_correct"].map({True: "✓ Doğru", False: "✗ Yanlış"})
+    rows["Skor"] = rows.apply(
+        lambda row: f"{int(row['home_score'])} – {int(row['away_score'])}", axis=1
+    )
+    rows["Maç"] = rows["home_team"] + " — " + rows["away_team"]
+    rows["Tarih"] = rows["match_date"].dt.strftime("%d.%m.%Y %H:%M")
+    rows["Brier"] = rows["brier_score"].astype(float).map(lambda value: f"{value:.3f}")
+    return rows[
+        ["Tarih", "league_name", "Maç", "Skor", "Sonuç", "Model tahmini", "Durum", "Brier"]
+    ].rename(columns={"league_name": "Lig"})
+
 def dashboard_display(frame: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(
         {

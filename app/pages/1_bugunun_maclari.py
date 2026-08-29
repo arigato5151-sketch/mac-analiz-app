@@ -46,4 +46,7 @@ if league:
 st.dataframe(
     dashboard_display(filtered), hide_index=True, use_container_width=True, height=680
 )
-st.caption(f"{len(filtered)} maç gösteriliyor. %60 üzerindeki değerler güçlü olasılık sinyali olarak yorumlanabilir; kesinlik değildir.")
+st.caption(
+    f"{len(filtered)} maç gösteriliyor. “En güçlü sinyal”, 1-X-2, Üst 2.5 ve KG Var "
+    "olasılıkları içindeki en yüksek değerdir. %60 ve üzeri güçlü, %50–59.9 orta sinyaldir; kesinlik değildir."
+)
