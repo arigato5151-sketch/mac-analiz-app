@@ -73,6 +73,12 @@ jobs:
         run: python -m data_pipeline.fetch_results
       - name: Evaluate completed predictions
         run: python -m evaluation.track_performance
+      - name: Send evaluated-match Telegram messages
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m notifications.final_results
       - name: Send Telegram performance summary
         continue-on-error: true
         env:
