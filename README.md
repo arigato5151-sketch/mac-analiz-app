@@ -88,8 +88,9 @@ olur; böylece sorun sessizce canlıya taşınmaz.
 
 ## Telegram bildirimleri
 
-Bildirimler isteğe bağlıdır. Yapılandırıldığında sabah iş akışı en güçlü
-yaklaşan tahminleri, gece iş akışı ise son 30 değerlendirmedeki 1-X-2
+Bildirimler isteğe bağlıdır. Yapılandırıldığında sabah iş akışı her yaklaşan
+maç için ayrı bir mesaj gönderir; mesaj 1-X-2, Üst/Alt 2.5 ve KG Var/Yok
+olasılıklarını içerir. Gece iş akışı son 30 değerlendirmedeki 1-X-2
 performansını gönderir. Kurulum:
 
 1. Telegram'da `@BotFather` ile bir bot oluşturun ve bot tokenını alın.

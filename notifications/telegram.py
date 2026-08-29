@@ -44,3 +44,14 @@ def send_from_environment(text: str) -> bool:
         return False
     send_telegram_message(text, bot_token=bot_token, chat_id=chat_id)
     return True
+
+
+def send_many_from_environment(messages: list[str]) -> int:
+    """Send one concise message per fixture when Telegram is configured."""
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    if not bot_token or not chat_id:
+        return 0
+    for message in messages:
+        send_telegram_message(message, bot_token=bot_token, chat_id=chat_id)
+    return len(messages)

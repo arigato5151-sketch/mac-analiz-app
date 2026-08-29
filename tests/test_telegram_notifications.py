@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from notifications.daily_summary import build_morning_message, build_night_message
-from notifications.telegram import TelegramError, send_telegram_message
+from notifications.daily_summary import build_morning_messages, build_night_message
+from notifications.telegram import TelegramError, send_many_from_environment, send_telegram_message
 
 
 class FakeResponse:
@@ -46,15 +46,28 @@ def test_telegram_error_does_not_include_credentials() -> None:
         raise AssertionError("TelegramError expected")
 
 
-def test_morning_and_night_messages_include_useful_summary() -> None:
-    morning = build_morning_message(
+def test_morning_message_contains_all_prediction_markets_for_one_fixture() -> None:
+    messages = build_morning_messages(
         [{"id": 1, "league_id": 39, "home_team_id": 10, "away_team_id": 20, "match_date": "2026-08-30T16:00:00+00:00"}],
         [{"match_id": 1, "prob_home_win": 0.62, "prob_draw": 0.20, "prob_away_win": 0.18, "prob_over_2_5": 0.55, "prob_btts": 0.45, "predicted_at": "2026-08-29T10:00:00+00:00"}],
         [{"id": 10, "name": "Ev"}, {"id": 20, "name": "Deplasman"}],
         [{"id": 39, "name": "Premier League"}],
     )
+    assert len(messages) == 1
+    assert "Ev — Deplasman" in messages[0]
+    assert "1-X-2: 1 %62 · X %20 · 2 %18" in messages[0]
+    assert "Üst/Alt 2.5: Üst %55 · Alt %45" in messages[0]
+    assert "KG Var/Yok: Var %45 · Yok %55" in messages[0]
+
+
+def test_night_message_includes_recent_performance() -> None:
     night = build_night_message([{"was_correct": True, "brier_score": 0.2}])
 
-    assert "Ev — Deplasman" in morning
-    assert "Ev kazanır (%62)" in morning
     assert "%100.0" in night
+
+
+def test_send_many_skips_when_credentials_are_missing(monkeypatch) -> None:
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+
+    assert send_many_from_environment(["one", "two"]) == 0

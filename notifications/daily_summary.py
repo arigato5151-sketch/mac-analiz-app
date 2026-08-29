@@ -9,18 +9,51 @@ from zoneinfo import ZoneInfo
 
 from config.settings import get_settings
 from db.db_client import SupabaseRestClient
-from notifications.telegram import send_from_environment
+from notifications.telegram import send_from_environment, send_many_from_environment
 
 
-def _prediction_signal(row: dict[str, Any]) -> tuple[str, float]:
-    candidates = (
-        ("Ev kazanır", float(row["prob_home_win"])),
-        ("Beraberlik", float(row["prob_draw"])),
-        ("Deplasman kazanır", float(row["prob_away_win"])),
-        ("Üst 2.5", float(row["prob_over_2_5"])),
-        ("KG Var", float(row["prob_btts"])),
-    )
-    return max(candidates, key=lambda item: item[1])
+def build_morning_messages(
+    matches: list[dict[str, Any]],
+    predictions: list[dict[str, Any]],
+    teams: list[dict[str, Any]],
+    leagues: list[dict[str, Any]],
+) -> list[str]:
+    """Build one compact, complete probability card per upcoming fixture."""
+    teams_by_id = {int(row["id"]): str(row["name"]) for row in teams}
+    leagues_by_id = {int(row["id"]): str(row["name"]) for row in leagues}
+    latest_predictions: dict[int, dict[str, Any]] = {}
+    for row in sorted(predictions, key=lambda item: str(item["predicted_at"]), reverse=True):
+        latest_predictions.setdefault(int(row["match_id"]), row)
+
+    messages: list[str] = []
+    for match in sorted(matches, key=lambda item: str(item["match_date"])):
+        prediction = latest_predictions.get(int(match["id"]))
+        if prediction is None:
+            continue
+        home = teams_by_id.get(int(match["home_team_id"]), "Ev sahibi")
+        away = teams_by_id.get(int(match["away_team_id"]), "Deplasman")
+        league = leagues_by_id.get(int(match["league_id"]), "Lig")
+        kickoff = datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
+        messages.append(
+            "\n".join(
+                (
+                    f"⚽ {home} — {away}",
+                    f"{league} · {kickoff.astimezone(ZoneInfo('Europe/Istanbul')).strftime('%d.%m %H:%M')}",
+                    "1-X-2: "
+                    f"1 %{float(prediction['prob_home_win']) * 100:.0f} · "
+                    f"X %{float(prediction['prob_draw']) * 100:.0f} · "
+                    f"2 %{float(prediction['prob_away_win']) * 100:.0f}",
+                    "Üst/Alt 2.5: "
+                    f"Üst %{float(prediction['prob_over_2_5']) * 100:.0f} · "
+                    f"Alt %{(1 - float(prediction['prob_over_2_5'])) * 100:.0f}",
+                    "KG Var/Yok: "
+                    f"Var %{float(prediction['prob_btts']) * 100:.0f} · "
+                    f"Yok %{(1 - float(prediction['prob_btts'])) * 100:.0f}",
+                    "İstatistiksel olasılıktır; kesin sonuç değildir.",
+                )
+            )
+        )
+    return messages
 
 
 def build_morning_message(
@@ -29,33 +62,9 @@ def build_morning_message(
     teams: list[dict[str, Any]],
     leagues: list[dict[str, Any]],
 ) -> str:
-    """Build a bounded, readable upcoming-fixture summary without betting language."""
-    teams_by_id = {int(row["id"]): str(row["name"]) for row in teams}
-    leagues_by_id = {int(row["id"]): str(row["name"]) for row in leagues}
-    latest_predictions: dict[int, dict[str, Any]] = {}
-    for row in sorted(predictions, key=lambda item: str(item["predicted_at"]), reverse=True):
-        latest_predictions.setdefault(int(row["match_id"]), row)
-
-    lines = ["⚽ Maç Analiz · Günlük tahmin özeti"]
-    for match in sorted(matches, key=lambda item: str(item["match_date"])):
-        prediction = latest_predictions.get(int(match["id"]))
-        if prediction is None:
-            continue
-        signal, probability = _prediction_signal(prediction)
-        home = teams_by_id.get(int(match["home_team_id"]), "Ev sahibi")
-        away = teams_by_id.get(int(match["away_team_id"]), "Deplasman")
-        league = leagues_by_id.get(int(match["league_id"]), "Lig")
-        kickoff = datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
-        lines.append(
-            f"• {kickoff.astimezone(ZoneInfo('Europe/Istanbul')).strftime('%d.%m %H:%M')} · {league}\n"
-            f"  {home} — {away}: {signal} (%{probability * 100:.0f})"
-        )
-        if len(lines) == 6:
-            break
-    if len(lines) == 1:
-        lines.append("Önümüzdeki 3 gün için gönderilebilir tahmin bulunamadı.")
-    lines.append("Tahminler istatistiksel olasılıktır; kesin sonuç değildir.")
-    return "\n".join(lines)
+    """Compatibility helper for text previews and the no-fixture case."""
+    messages = build_morning_messages(matches, predictions, teams, leagues)
+    return "\n\n".join(messages) if messages else "Önümüzdeki 3 gün için tahmin bulunamadı."
 
 
 def build_night_message(performance: list[dict[str, Any]]) -> str:
@@ -107,7 +116,15 @@ def main() -> None:
     settings = get_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     if args.mode == "morning":
-        message = build_morning_message(*_morning_data(db))
+        messages = build_morning_messages(*_morning_data(db))
+        sent = send_many_from_environment(messages)
+        if messages and sent:
+            print(f"Telegram morning messages sent: {sent}")
+        elif messages:
+            print("Telegram notification skipped: credentials are not configured")
+        else:
+            print("Telegram morning notification skipped: no predictions available")
+        return
     else:
         message = build_night_message(
             db.select("prediction_performance", columns="was_correct,brier_score", limit=30, order="evaluated_at.desc")
