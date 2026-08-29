@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.data import load_latest_model_metadata, load_prediction_performance
+from app.components.live_performance import summarize_live_performance
 from app.components.ui import configure_page, disclaimer
 from config.leagues import LEAGUES_BY_ID
 
@@ -86,6 +87,42 @@ else:
     performance["evaluated_at"] = pd.to_datetime(performance["evaluated_at"], utc=True)
     performance["rolling_accuracy"] = performance["was_correct"].astype(float).rolling(30, min_periods=1).mean()
     performance["rolling_brier"] = performance["brier_score"].astype(float).rolling(30, min_periods=1).mean()
+    reference_brier = metrics.get("brier_score") if metadata else None
+    summary = summarize_live_performance(
+        performance["was_correct"].tolist(),
+        performance["brier_score"].tolist(),
+        reference_brier_score=reference_brier,
+    )
+
+    summary_columns = st.columns(4)
+    summary_columns[0].metric("Değerlendirilen maç", str(summary.sample_size))
+    summary_columns[1].metric("Canlı isabet", f"%{summary.accuracy * 100:.1f}")
+    summary_columns[2].metric(
+        "%95 güven aralığı",
+        f"%{summary.accuracy_lower * 100:.1f} – %{summary.accuracy_upper * 100:.1f}",
+    )
+    summary_columns[3].metric("Canlı Brier", f"{summary.brier_score:.3f}")
+
+    if summary.status == "Yetersiz örneklem":
+        st.info(
+            f"Canlı örneklem henüz {summary.sample_size}/50 maç. Güven aralığı, "
+            "mevcut isabet oranının belirsizliğini gösterir; sonuçları kesin performans "
+            "olarak yorumlamayın."
+        )
+    elif summary.status == "İzlenmeli":
+        st.warning(
+            "Canlı Brier skoru, kronolojik test referansının %15 üzerinde. "
+            "Veri kalitesi ve model sapması incelenmeli."
+        )
+    else:
+        st.success("Canlı Brier skoru, belirlenen performans izleme eşiği içinde.")
+
+    if summary.reference_brier_score is not None:
+        st.caption(
+            f"Referans: son kronolojik test Brier {summary.reference_brier_score:.3f}. "
+            "Sapma uyarısı, en az 50 maçta referansın %15 üzerindeki canlı Brier için verilir."
+        )
+
     chart_data = performance.melt(
         id_vars="evaluated_at",
         value_vars=["rolling_accuracy", "rolling_brier"],
@@ -97,6 +134,6 @@ else:
         use_container_width=True,
     )
     last_30 = performance.tail(30)
-    cols = st.columns(2)
-    cols[0].metric("Son 30 isabet", f"%{last_30['was_correct'].mean() * 100:.1f}")
-    cols[1].metric("Son 30 Brier", f"{last_30['brier_score'].astype(float).mean():.3f}")
+    st.caption(
+        f"Grafik, son {len(last_30)} değerlendirmelik kayan ortalamayı gösterir."
+    )
