@@ -64,6 +64,7 @@ db/schema.sql
 db/public_read_policies.sql
 db/evaluated_prediction_results.sql
 db/availability_context.sql
+db/pre_match_notifications.sql
 ```
 
 Mevcut bir kurulumda son iki dosya sonuç ekranının tek-sorgu görünümünü ve
@@ -91,7 +92,9 @@ olur; böylece sorun sessizce canlıya taşınmaz.
 Bildirimler isteğe bağlıdır. Yapılandırıldığında sabah iş akışı her yaklaşan
 maç için ayrı bir mesaj gönderir; mesaj 1-X-2, Üst/Alt 2.5 ve KG Var/Yok
 olasılıklarını içerir. Gece iş akışı son 30 değerlendirmedeki 1-X-2
-performansını gönderir. Kurulum:
+performansını gönderir. `Pre-match Telegram notifications` iş akışı her 15
+dakikada bir kontrol yapar; maçtan 45–75 dakika önce ilgili iki takımın form
+ve kadro bağlamını yeniler, tahmini günceller ve tek mesaj gönderir. Kurulum:
 
 1. Telegram'da `@BotFather` ile bir bot oluşturun ve bot tokenını alın.
 2. Botunuza Telegram'dan `/start` gönderin.
