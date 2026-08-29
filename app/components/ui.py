@@ -13,6 +13,7 @@ OUTCOME_COLUMNS: tuple[tuple[str, str], ...] = (
     ("prob_over_2_5", "Üst 2.5"),
     ("prob_btts", "KG Var"),
 )
+RESULT_COLUMNS = OUTCOME_COLUMNS[:3]
 
 
 def configure_page(title: str) -> None:
@@ -70,6 +71,21 @@ def prediction_signal_text(row: pd.Series) -> str:
     return f"{market} · {probability_percent(probability)} · {confidence}"
 
 
+def outcome_prediction_signal(row: pd.Series) -> tuple[str, float | None, str]:
+    """Return the strongest 1-X-2 prediction used by the evaluated outcome."""
+    candidates = [
+        (label, float(row[column]))
+        for column, label in RESULT_COLUMNS
+        if column in row and pd.notna(row[column])
+    ]
+    if not candidates:
+        return "Tahmin bekleniyor", None, "—"
+
+    market, probability = max(candidates, key=lambda item: item[1])
+    confidence = "Güçlü" if probability >= 0.60 else "Orta" if probability >= 0.50 else "Düşük"
+    return market, probability, confidence
+
+
 def evaluated_result_display(frame: pd.DataFrame) -> pd.DataFrame:
     """Format completed-match evaluations for the user-facing audit table."""
     result_labels = {
@@ -78,7 +94,8 @@ def evaluated_result_display(frame: pd.DataFrame) -> pd.DataFrame:
         "away_win": "Deplasman kazandı",
     }
     rows = frame.copy()
-    signals = rows.apply(prediction_signal, axis=1)
+    # ``was_correct`` evaluates the 1-X-2 outcome, so do not mix in goal markets here.
+    signals = rows.apply(outcome_prediction_signal, axis=1)
     rows["Model tahmini"] = [
         f"{market} ({probability_percent(probability)})"
         if probability is not None
@@ -87,6 +104,7 @@ def evaluated_result_display(frame: pd.DataFrame) -> pd.DataFrame:
     ]
     rows["Sonuç"] = rows["actual_result"].map(result_labels).fillna("—")
     rows["Durum"] = rows["was_correct"].map({True: "✓ Doğru", False: "✗ Yanlış"})
+    rows["Güven"] = [confidence for _, _, confidence in signals]
     rows["Skor"] = rows.apply(
         lambda row: f"{int(row['home_score'])} – {int(row['away_score'])}", axis=1
     )
@@ -94,7 +112,7 @@ def evaluated_result_display(frame: pd.DataFrame) -> pd.DataFrame:
     rows["Tarih"] = rows["match_date"].dt.strftime("%d.%m.%Y %H:%M")
     rows["Brier"] = rows["brier_score"].astype(float).map(lambda value: f"{value:.3f}")
     return rows[
-        ["Tarih", "league_name", "Maç", "Skor", "Sonuç", "Model tahmini", "Durum", "Brier"]
+        ["Tarih", "league_name", "Maç", "Skor", "Sonuç", "Model tahmini", "Güven", "Durum", "Brier"]
     ].rename(columns={"league_name": "Lig"})
 
 def dashboard_display(frame: pd.DataFrame) -> pd.DataFrame:

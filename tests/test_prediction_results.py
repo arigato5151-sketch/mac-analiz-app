@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from app.components.ui import evaluated_result_display
+from app.components.ui import evaluated_result_display, outcome_prediction_signal
 
 
 def test_result_display_shows_score_prediction_and_correctness() -> None:
@@ -24,4 +24,18 @@ def test_result_display_shows_score_prediction_and_correctness() -> None:
 
     assert displayed.loc[0, "Skor"] == "2 – 1"
     assert displayed.loc[0, "Model tahmini"] == "Ev kazanır (%61.0)"
+    assert displayed.loc[0, "Güven"] == "Güçlü"
     assert displayed.loc[0, "Durum"] == "✓ Doğru"
+
+
+def test_result_prediction_uses_only_the_evaluated_1x2_market() -> None:
+    row = pd.Series(
+        {
+            "prob_home_win": 0.48,
+            "prob_draw": 0.21,
+            "prob_away_win": 0.31,
+            "prob_over_2_5": 0.70,
+        }
+    )
+
+    assert outcome_prediction_signal(row) == ("Ev kazanır", 0.48, "Düşük")
