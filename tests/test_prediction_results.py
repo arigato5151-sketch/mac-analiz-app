@@ -26,6 +26,12 @@ def test_result_display_shows_score_prediction_and_correctness() -> None:
     assert displayed.loc[0, "Model tahmini"] == "Ev kazanır (%61.0)"
     assert displayed.loc[0, "Güven"] == "Güçlü"
     assert displayed.loc[0, "Durum"] == "✓ Doğru"
+    assert displayed.loc[0, "Üst 2.5 tahmini"] == "Üst (%57.0)"
+    assert displayed.loc[0, "Üst 2.5 sonucu"] == "Üst"
+    assert displayed.loc[0, "Üst 2.5 durum"] == "✓ Doğru"
+    assert displayed.loc[0, "KG tahmini"] == "KG Yok (%52.0)"
+    assert displayed.loc[0, "KG sonucu"] == "KG Var"
+    assert displayed.loc[0, "KG durum"] == "✗ Yanlış"
 
 
 def test_result_prediction_uses_only_the_evaluated_1x2_market() -> None:

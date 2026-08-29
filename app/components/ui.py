@@ -86,6 +86,31 @@ def outcome_prediction_signal(row: pd.Series) -> tuple[str, float | None, str]:
     return market, probability, confidence
 
 
+def binary_market_evaluation(
+    probability: object,
+    *,
+    actual_positive: bool,
+    positive_label: str,
+    negative_label: str,
+) -> tuple[str, str, bool | None]:
+    """Format one binary market and evaluate its >=50% classification."""
+    if pd.isna(probability):
+        return "Tahmin yok", "—", None
+
+    positive_probability = float(probability)
+    predicted_positive = positive_probability >= 0.5
+    selected_label = positive_label if predicted_positive else negative_label
+    selected_probability = (
+        positive_probability if predicted_positive else 1 - positive_probability
+    )
+    actual_label = positive_label if actual_positive else negative_label
+    return (
+        f"{selected_label} ({probability_percent(selected_probability)})",
+        actual_label,
+        predicted_positive == actual_positive,
+    )
+
+
 def evaluated_result_display(frame: pd.DataFrame) -> pd.DataFrame:
     """Format completed-match evaluations for the user-facing audit table."""
     result_labels = {
@@ -105,6 +130,36 @@ def evaluated_result_display(frame: pd.DataFrame) -> pd.DataFrame:
     rows["Sonuç"] = rows["actual_result"].map(result_labels).fillna("—")
     rows["Durum"] = rows["was_correct"].map({True: "✓ Doğru", False: "✗ Yanlış"})
     rows["Güven"] = [confidence for _, _, confidence in signals]
+    over_evaluations = [
+        binary_market_evaluation(
+            row.get("prob_over_2_5"),
+            actual_positive=int(row["home_score"]) + int(row["away_score"]) >= 3,
+            positive_label="Üst",
+            negative_label="Alt",
+        )
+        for _, row in rows.iterrows()
+    ]
+    btts_evaluations = [
+        binary_market_evaluation(
+            row.get("prob_btts"),
+            actual_positive=int(row["home_score"]) > 0 and int(row["away_score"]) > 0,
+            positive_label="KG Var",
+            negative_label="KG Yok",
+        )
+        for _, row in rows.iterrows()
+    ]
+    rows["Üst 2.5 tahmini"] = [prediction for prediction, _, _ in over_evaluations]
+    rows["Üst 2.5 sonucu"] = [actual for _, actual, _ in over_evaluations]
+    rows["Üst 2.5 durum"] = [
+        "✓ Doğru" if correct is True else "✗ Yanlış" if correct is False else "—"
+        for _, _, correct in over_evaluations
+    ]
+    rows["KG tahmini"] = [prediction for prediction, _, _ in btts_evaluations]
+    rows["KG sonucu"] = [actual for _, actual, _ in btts_evaluations]
+    rows["KG durum"] = [
+        "✓ Doğru" if correct is True else "✗ Yanlış" if correct is False else "—"
+        for _, _, correct in btts_evaluations
+    ]
     rows["Skor"] = rows.apply(
         lambda row: f"{int(row['home_score'])} – {int(row['away_score'])}", axis=1
     )
@@ -112,7 +167,11 @@ def evaluated_result_display(frame: pd.DataFrame) -> pd.DataFrame:
     rows["Tarih"] = rows["match_date"].dt.strftime("%d.%m.%Y %H:%M")
     rows["Brier"] = rows["brier_score"].astype(float).map(lambda value: f"{value:.3f}")
     return rows[
-        ["Tarih", "league_name", "Maç", "Skor", "Sonuç", "Model tahmini", "Güven", "Durum", "Brier"]
+        [
+            "Tarih", "league_name", "Maç", "Skor", "Sonuç", "Model tahmini", "Güven", "Durum",
+            "Üst 2.5 tahmini", "Üst 2.5 sonucu", "Üst 2.5 durum",
+            "KG tahmini", "KG sonucu", "KG durum", "Brier",
+        ]
     ].rename(columns={"league_name": "Lig"})
 
 def dashboard_display(frame: pd.DataFrame) -> pd.DataFrame:
