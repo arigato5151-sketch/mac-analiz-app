@@ -86,6 +86,22 @@ bağlamını çalışma özetine yazar. API-Football kota uyarıları ilgili ad�
 günlüklerinde görünür. Eksik veya eski bağlam bulunduğunda iş akışı başarısız
 olur; böylece sorun sessizce canlıya taşınmaz.
 
+## Telegram bildirimleri
+
+Bildirimler isteğe bağlıdır. Yapılandırıldığında sabah iş akışı en güçlü
+yaklaşan tahminleri, gece iş akışı ise son 30 değerlendirmedeki 1-X-2
+performansını gönderir. Kurulum:
+
+1. Telegram'da `@BotFather` ile bir bot oluşturun ve bot tokenını alın.
+2. Botunuza Telegram'dan `/start` gönderin.
+3. Kişisel mesaj için `@userinfobot` ile sayısal chat ID'nizi alın.
+4. GitHub deposunda **Settings → Secrets and variables → Actions** alanına
+   `TELEGRAM_BOT_TOKEN` ve `TELEGRAM_CHAT_ID` secrets değerlerini ekleyin.
+
+Tokenı veya chat ID'yi kaynak koda, issue'ya ya da sohbete yazmayın. Secrets
+yoksa iş akışı bildirim adımını güvenle atlar; Telegram hatası veri
+güncellemesini durdurmaz.
+
 ## Güvenlik
 
 - `.env` ve `.streamlit/secrets.toml` repoya alınmaz.
