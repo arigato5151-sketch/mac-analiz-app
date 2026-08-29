@@ -53,12 +53,6 @@ jobs:
         run: python -m models.predict --model models/saved_models/latest.joblib --days 3
       - name: Validate data quality
         run: python -m data_pipeline.data_quality --days 3 | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Send Telegram prediction summary
-        continue-on-error: true
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m notifications.daily_summary --mode morning
 
   night:
     if: >-
