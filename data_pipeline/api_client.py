@@ -34,6 +34,7 @@ class ApiFootballClient:
             "User-Agent": "mac-analiz-app/1.0",
         }
         self.last_rate_limit: dict[str, str] = {}
+        self.request_count = 0
 
     @staticmethod
     def _build_session() -> requests.Session:
@@ -57,6 +58,7 @@ class ApiFootballClient:
             headers=self._headers,
             timeout=self._timeout,
         )
+        self.request_count += 1
         self.last_rate_limit = {
             key: value
             for key, value in response.headers.items()
@@ -76,3 +78,26 @@ class ApiFootballClient:
         if not isinstance(data, list):
             raise ApiFootballError("Unexpected API-Football response shape")
         return data
+
+    def diagnostics(self) -> dict[str, Any]:
+        """Return non-sensitive request and quota diagnostics for job logs."""
+        normalized = {key.lower(): value for key, value in self.last_rate_limit.items()}
+        remaining = next(
+            (
+                value
+                for key, value in normalized.items()
+                if "remaining" in key
+            ),
+            None,
+        )
+        warning = None
+        try:
+            if remaining is not None and int(remaining) <= 50:
+                warning = "API-Football remaining quota is low"
+        except ValueError:
+            warning = "API-Football returned a non-numeric remaining quota header"
+        return {
+            "requests": self.request_count,
+            "rate_limit": self.last_rate_limit,
+            "warning": warning,
+        }

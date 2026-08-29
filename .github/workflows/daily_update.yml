@@ -51,6 +51,8 @@ jobs:
         run: python -m data_pipeline.refresh_context --days 3
       - name: Generate upcoming predictions
         run: python -m models.predict --model models/saved_models/latest.joblib --days 3
+      - name: Validate data quality
+        run: python -m data_pipeline.data_quality --days 3 | tee -a "$GITHUB_STEP_SUMMARY"
 
   night:
     if: >-

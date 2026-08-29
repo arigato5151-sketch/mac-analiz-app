@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 from typing import Any
 
@@ -143,7 +143,7 @@ def main() -> None:
     summary = sync_fixtures(
         api, db, start_date=today, end_date=today + timedelta(days=args.days - 1)
     )
-    print(summary)
+    print({"sync": asdict(summary), "api": api.diagnostics()})
 
 
 if __name__ == "__main__":

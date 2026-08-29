@@ -11,6 +11,7 @@ from data_pipeline.fetch_fixtures import (
     transform_fixtures,
 )
 from data_pipeline.fetch_injuries import transform_injuries
+from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_team_stats import build_team_form
 from data_pipeline.backfill import backfill_history
 
@@ -118,6 +119,17 @@ def test_transform_injuries_maps_status_and_deduplicates() -> None:
     assert len(teams) == 1
     assert len(rows) == 1
     assert rows[0]["status"] == "suspended"
+
+
+def test_api_diagnostics_warns_when_remaining_quota_is_low() -> None:
+    client = ApiFootballClient("test-key")
+    client.request_count = 12
+    client.last_rate_limit = {"x-ratelimit-requests-remaining": "50"}
+
+    diagnostics = client.diagnostics()
+
+    assert diagnostics["requests"] == 12
+    assert diagnostics["warning"] == "API-Football remaining quota is low"
 
 
 def test_backfill_only_writes_finished_matches() -> None:

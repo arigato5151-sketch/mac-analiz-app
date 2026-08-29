@@ -130,15 +130,14 @@ def main() -> None:
     parser.add_argument("--days", type=int, default=3)
     args = parser.parse_args()
     settings = get_settings()
+    api = ApiFootballClient(settings.api_football_key)
     summary = refresh_upcoming_context(
-        ApiFootballClient(settings.api_football_key),
-        SupabaseRestClient(
-            settings.supabase_url, settings.supabase_service_role_key
-        ),
+        api,
+        SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key),
         now=datetime.now(timezone.utc),
         horizon_days=args.days,
     )
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    print(json.dumps({**summary, "api": api.diagnostics()}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

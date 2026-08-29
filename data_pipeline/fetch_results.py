@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
 from datetime import date
 
 from config.settings import get_settings
@@ -25,14 +26,13 @@ def main() -> None:
     parser.add_argument("--date", type=date.fromisoformat, default=date.today())
     args = parser.parse_args()
     settings = get_settings()
+    api = ApiFootballClient(settings.api_football_key)
     summary = sync_results(
-        ApiFootballClient(settings.api_football_key),
-        SupabaseRestClient(
-            settings.supabase_url, settings.supabase_service_role_key
-        ),
+        api,
+        SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key),
         match_date=args.date,
     )
-    print(summary)
+    print({"sync": asdict(summary), "api": api.diagnostics()})
 
 
 if __name__ == "__main__":
