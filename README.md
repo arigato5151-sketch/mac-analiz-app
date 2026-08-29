@@ -16,9 +16,10 @@ Copy-Item .env.example .env
 streamlit run app/main.py
 ```
 
-`.env` içindeki `API_FOOTBALL_KEY`, `SUPABASE_URL` ve
-`SUPABASE_SERVICE_ROLE_KEY` alanlarını kendi değerlerinizle doldurun. Gizli
-dosyalar Git tarafından yok sayılır.
+Yerelde tüm veri hattını çalıştıracaksanız `.env` içindeki dört alanı da
+doldurun: `API_FOOTBALL_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY` ve
+`SUPABASE_SERVICE_ROLE_KEY`. Sadece Streamlit arayüzünü çalıştırmak için ilk
+iki Supabase alanı yeterlidir. Gizli dosyalar Git tarafından yok sayılır.
 
 ## Temel komutlar
 
@@ -53,9 +54,50 @@ API çağrıları zamanlanmış işler tarafından yapılır; Streamlit sayfalar
 kullanımda Supabase'deki önbelleklenmiş veriyi okur. Veri hattındaki tüm yazma
 işlemleri idempotent `upsert` kullanır.
 
+## Veritabanı kurulumu ve güncellemeler
+
+Yeni bir Supabase projesinde SQL Editor üzerinden şu dosyaları sırasıyla
+uygulayın:
+
+```text
+db/schema.sql
+db/public_read_policies.sql
+db/evaluated_prediction_results.sql
+db/availability_context.sql
+```
+
+Mevcut bir kurulumda son iki dosya sonuç ekranının tek-sorgu görünümünü ve
+kadro verisinin yenilik işaretçisini ekler. SQL dosyaları tekrarlanabilir
+olarak tasarlanmıştır; yine de üretim veritabanında uygulamadan önce gözden
+geçirin.
+
+## Dağıtım ve operasyon
+
+| Ortam | Gerekli değişkenler | Yetki |
+| --- | --- | --- |
+| Streamlit Cloud | `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Salt-okunur kullanıcı arayüzü |
+| GitHub Actions | `API_FOOTBALL_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Veri alma, yazma ve model üretimi |
+| Yerel tam çalışma | Dört değişkenin tamamı | Geliştirme ve bakım |
+
+`Daily data update` iş akışı sabah fikstür/form/kadro/tahmin güncellemesini,
+gece ise sonuç ve performans değerlendirmesini çalıştırır. Sabah çalışmasının
+sonunda veri kalite denetimi; eksik tahmin ve 36 saati aşmış form/kadro
+bağlamını çalışma özetine yazar. API-Football kota uyarıları ilgili adımın
+günlüklerinde görünür. Eksik veya eski bağlam bulunduğunda iş akışı başarısız
+olur; böylece sorun sessizce canlıya taşınmaz.
+
 ## Güvenlik
 
 - `.env` ve `.streamlit/secrets.toml` repoya alınmaz.
-- Supabase tabloları anonim erişime açık değildir.
-- Backend işlemleri yalnızca `service_role`/secret key ile çalışır.
-- Anahtarlar kaynak kodda tutulmaz.
+- Streamlit yalnızca `SUPABASE_ANON_KEY` kullanır; bu anahtar yazma yetkisi
+  vermez ve istemci kodu mutasyon çağrılarını engeller.
+- Anonim erişim, RLS ile yalnızca uygulamanın okuduğu sınırlı veri kümelerine
+  (`leagues`, `teams`, `matches`, `team_form`, `predictions`,
+  `prediction_performance`, kadro bağlamı ve sonuç görünümü) `SELECT` olarak
+  tanımlıdır. `INSERT`, `UPDATE` ve `DELETE` yoktur.
+- `SUPABASE_SERVICE_ROLE_KEY` ve `API_FOOTBALL_KEY` yalnızca GitHub Actions
+  veya güvenli yerel veri hattında tutulur; Streamlit Cloud secrets alanına
+  kesinlikle eklenmez.
+- Anahtarlar kaynak kodda, commit geçmişinde veya uygulama ekranlarında
+  tutulmaz/gösterilmez. Bir anahtar sızarsa ilgili sağlayıcıdan hemen
+  yenileyin.
