@@ -6,6 +6,15 @@ import pandas as pd
 import streamlit as st
 
 
+OUTCOME_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("prob_home_win", "Ev kazanır"),
+    ("prob_draw", "Beraberlik"),
+    ("prob_away_win", "Deplasman kazanır"),
+    ("prob_over_2_5", "Üst 2.5"),
+    ("prob_btts", "KG Var"),
+)
+
+
 def configure_page(title: str) -> None:
     st.set_page_config(
         page_title=f"{title} · Maç Analiz",
@@ -39,6 +48,28 @@ def probability_percent(value: object) -> str:
     return f"%{float(value) * 100:.1f}"
 
 
+def prediction_signal(row: pd.Series) -> tuple[str, float | None, str]:
+    """Return the strongest available market and a deliberately cautious label."""
+    candidates = [
+        (label, float(row[column]))
+        for column, label in OUTCOME_COLUMNS
+        if column in row and pd.notna(row[column])
+    ]
+    if not candidates:
+        return "Tahmin bekleniyor", None, "—"
+
+    market, probability = max(candidates, key=lambda item: item[1])
+    confidence = "Güçlü" if probability >= 0.60 else "Orta" if probability >= 0.50 else "Düşük"
+    return market, probability, confidence
+
+
+def prediction_signal_text(row: pd.Series) -> str:
+    market, probability, confidence = prediction_signal(row)
+    if probability is None:
+        return market
+    return f"{market} · {probability_percent(probability)} · {confidence}"
+
+
 def dashboard_display(frame: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(
         {
@@ -60,5 +91,6 @@ def dashboard_display(frame: pd.DataFrame) -> pd.DataFrame:
             "KG Var": frame.get("prob_btts", pd.Series(index=frame.index)).map(
                 probability_percent
             ),
+            "En güçlü sinyal": frame.apply(prediction_signal_text, axis=1),
         }
     )
