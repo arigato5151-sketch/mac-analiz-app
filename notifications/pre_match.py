@@ -21,6 +21,7 @@ from data_pipeline.odds import MatchOdds, fetch_match_odds
 from data_pipeline.refresh_context import current_elo_ratings
 from db.db_client import DatabaseError, SupabaseRestClient
 from models.predict import generate_prediction_rows, load_latest_team_forms, persist_predictions, resolve_model_path
+from models.shadow import run_shadow_predictions
 from models.train_model import load_completed_matches
 from notifications.telegram import send_telegram_message
 
@@ -201,7 +202,18 @@ def _refresh_and_predict(
         model_version=model_version,
         team_form_by_id=load_latest_team_forms(db, team_ids),
     )
-    return persist_predictions(db, rows), model_version
+    persisted = persist_predictions(db, rows)
+    try:
+        run_shadow_predictions(
+            db,
+            matches=matches,
+            historical_matches=historical,
+            team_form_by_id=load_latest_team_forms(db, team_ids),
+        )
+    except Exception as error:
+        # Shadow evaluation must never delay or suppress a production alert.
+        print(f"Shadow forecast skipped: {type(error).__name__}")
+    return persisted, model_version
 
 
 def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:

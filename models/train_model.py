@@ -275,7 +275,9 @@ def train_models(
     return bundle, metrics
 
 
-def save_model_bundle(bundle: dict[str, Any], output_dir: Path) -> tuple[Path, Path]:
+def save_model_bundle(
+    bundle: dict[str, Any], output_dir: Path, *, publish_latest: bool = False
+) -> tuple[Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     version = datetime.now(timezone.utc).strftime("v%Y%m%dT%H%M%SZ")
     model_path = output_dir / f"model_{version}.joblib"
@@ -297,10 +299,11 @@ def save_model_bundle(bundle: dict[str, Any], output_dir: Path) -> tuple[Path, P
         encoding="utf-8",
     )
 
-    latest_path = output_dir / "latest.joblib"
-    temporary_latest = output_dir / "latest.tmp"
-    joblib.dump(versioned_bundle, temporary_latest, compress=3)
-    os.replace(temporary_latest, latest_path)
+    if publish_latest:
+        latest_path = output_dir / "latest.joblib"
+        temporary_latest = output_dir / "latest.tmp"
+        joblib.dump(versioned_bundle, temporary_latest, compress=3)
+        os.replace(temporary_latest, latest_path)
     return model_path, metadata_path
 
 
@@ -327,13 +330,16 @@ def main() -> None:
         type=Path,
         default=PROJECT_ROOT / "models" / "saved_models",
     )
+    parser.add_argument("--publish-latest", action="store_true")
     args = parser.parse_args()
     settings = get_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     matches = load_completed_matches(db)
     features, labels = build_training_dataset(matches)
     bundle, metrics = train_models(features, labels)
-    model_path, metadata_path = save_model_bundle(bundle, args.output_dir)
+    model_path, metadata_path = save_model_bundle(
+        bundle, args.output_dir, publish_latest=args.publish_latest
+    )
     print(
         json.dumps(
             {

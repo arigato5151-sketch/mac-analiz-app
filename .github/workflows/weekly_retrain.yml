@@ -11,6 +11,10 @@ on:
         required: true
         default: false
         type: boolean
+      candidate_version:
+        description: Shadow candidate version to promote after it passes the live gate
+        required: false
+        type: string
 
 concurrency:
   group: weekly-model-retraining
@@ -39,19 +43,36 @@ jobs:
         run: python -m pytest -q
       - name: Train and validate models
         run: python -m models.train_model
+      - name: Register newest model as a shadow candidate
+        run: python -m models.shadow --register-newest
+      - name: Publish shadow candidate artifact
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f models/saved_models/model_v*.joblib models/saved_models/model_v*.json
+          if git diff --cached --quiet; then
+            echo "No candidate artifact changes"
+          else
+            git commit -m "chore(model): register shadow candidate"
+            git push
+          fi
+      - name: Promote proven shadow candidate
+        if: github.event_name == 'workflow_dispatch' && inputs.promote_candidate == true
+        run: |
+          test -n "${{ inputs.candidate_version }}"
+          python -m models.shadow --promote "${{ inputs.candidate_version }}"
       - name: Refresh upcoming predictions
         if: github.event_name == 'workflow_dispatch' && inputs.promote_candidate == true
         run: python -m models.predict --model models/saved_models/latest.joblib --days 3
-      - name: Publish validated model artifact
+      - name: Publish promoted model artifact
         if: github.event_name == 'workflow_dispatch' && inputs.promote_candidate == true
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -f models/saved_models/latest.joblib
-          git add models/saved_models/model_v*.json
           if git diff --cached --quiet; then
             echo "No model artifact changes"
           else
-            git commit -m "chore(model): weekly automated retraining"
+            git commit -m "chore(model): promote proven shadow candidate"
             git push
           fi

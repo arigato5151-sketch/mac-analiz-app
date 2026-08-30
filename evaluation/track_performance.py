@@ -8,6 +8,7 @@ from typing import Any
 
 from config.settings import get_settings
 from db.db_client import SupabaseRestClient
+from models.shadow import evaluate_shadow_predictions
 
 
 RESULT_LABELS = ("home_win", "draw", "away_win")
@@ -215,11 +216,13 @@ def main() -> None:
         settings.supabase_url, settings.supabase_service_role_key
     )
     rows = evaluate_pending_predictions(db)
+    shadow_rows = evaluate_shadow_predictions(db)
     print(
         json.dumps(
             {
                 "evaluated_predictions": len(rows),
                 "correct_predictions": sum(bool(row["was_correct"]) for row in rows),
+                "shadow_predictions_evaluated": len(shadow_rows),
             },
             ensure_ascii=False,
             indent=2,
