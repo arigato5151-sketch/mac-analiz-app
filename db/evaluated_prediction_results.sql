@@ -16,19 +16,20 @@ SELECT
     fixture.match_date,
     fixture.home_score,
     fixture.away_score,
-    prediction.prob_home_win,
-    prediction.prob_draw,
-    prediction.prob_away_win,
-    prediction.prob_over_2_5,
-    prediction.prob_btts,
-    prediction.model_version,
-    prediction.predicted_at,
+    COALESCE(snapshot.prob_home_win, prediction.prob_home_win) AS prob_home_win,
+    COALESCE(snapshot.prob_draw, prediction.prob_draw) AS prob_draw,
+    COALESCE(snapshot.prob_away_win, prediction.prob_away_win) AS prob_away_win,
+    COALESCE(snapshot.prob_over_2_5, prediction.prob_over_2_5) AS prob_over_2_5,
+    COALESCE(snapshot.prob_btts, prediction.prob_btts) AS prob_btts,
+    COALESCE(snapshot.model_version, prediction.model_version) AS model_version,
+    COALESCE(snapshot.captured_at, prediction.predicted_at) AS predicted_at,
     home.name AS home_team,
     away.name AS away_team,
     league.name AS league_name
 FROM public.live_prediction_performance AS performance
 JOIN public.matches AS fixture ON fixture.id = performance.match_id
 JOIN public.predictions AS prediction ON prediction.id = performance.prediction_id
+LEFT JOIN public.prediction_snapshots AS snapshot ON snapshot.id = performance.snapshot_id
 LEFT JOIN public.teams AS home ON home.id = fixture.home_team_id
 LEFT JOIN public.teams AS away ON away.id = fixture.away_team_id
 LEFT JOIN public.leagues AS league ON league.id = fixture.league_id;

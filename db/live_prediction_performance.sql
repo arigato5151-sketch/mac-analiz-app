@@ -14,9 +14,10 @@ WITH ranked AS (
         performance.was_correct,
         performance.brier_score,
         performance.evaluated_at,
+        performance.snapshot_id,
         ROW_NUMBER() OVER (
             PARTITION BY performance.match_id
-            ORDER BY prediction.predicted_at DESC, prediction.id DESC
+            ORDER BY performance.evaluated_at DESC, prediction.predicted_at DESC, prediction.id DESC
         ) AS row_rank
     FROM public.prediction_performance AS performance
     JOIN public.predictions AS prediction ON prediction.id = performance.prediction_id
@@ -27,7 +28,8 @@ SELECT
     actual_result,
     was_correct,
     brier_score,
-    evaluated_at
+    evaluated_at,
+    snapshot_id
 FROM ranked
 WHERE row_rank = 1;
 

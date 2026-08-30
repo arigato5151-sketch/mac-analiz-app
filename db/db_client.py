@@ -97,6 +97,21 @@ class SupabaseRestClient:
             headers={"Prefer": "resolution=merge-duplicates,return=representation"},
         )
 
+    def insert(
+        self,
+        table: str,
+        records: Sequence[Mapping[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Insert records without allowing a conflict to overwrite history."""
+        if not records:
+            return []
+        return self._request(
+            "POST",
+            table,
+            json=list(records),
+            headers={"Prefer": "return=representation"},
+        )
+
     def select(
         self,
         table: str,

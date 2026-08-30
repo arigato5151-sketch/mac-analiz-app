@@ -46,7 +46,7 @@ def build_performance_row(
         for probability, target in zip(probabilities, one_hot, strict=True)
     )
 
-    return {
+    row = {
         "prediction_id": int(prediction["id"]),
         "match_id": int(match["id"]),
         "actual_result": outcome,
@@ -54,6 +54,9 @@ def build_performance_row(
         "brier_score": float(brier_score),
         "evaluated_at": evaluated_at,
     }
+    if prediction.get("snapshot_id") is not None:
+        row["snapshot_id"] = int(prediction["snapshot_id"])
+    return row
 
 
 def select_official_predictions(
@@ -100,6 +103,30 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
     if not pending:
         return []
 
+    snapshots = db.select_all(
+        "prediction_snapshots",
+        columns=(
+            "id,source_prediction_id,match_id,model_version,prob_home_win,prob_draw,"
+            "prob_away_win,prob_over_2_5,prob_btts,captured_at"
+        ),
+        filters={"snapshot_type": "eq.pre_match_60m"},
+    )
+    snapshots_by_match = {
+        int(snapshot["match_id"]): {
+            "id": int(snapshot["source_prediction_id"]),
+            "snapshot_id": int(snapshot["id"]),
+            "match_id": int(snapshot["match_id"]),
+            "model_version": snapshot["model_version"],
+            "prob_home_win": snapshot["prob_home_win"],
+            "prob_draw": snapshot["prob_draw"],
+            "prob_away_win": snapshot["prob_away_win"],
+            "prob_over_2_5": snapshot["prob_over_2_5"],
+            "prob_btts": snapshot["prob_btts"],
+            "predicted_at": snapshot["captured_at"],
+        }
+        for snapshot in snapshots
+    }
+
     finished_matches = db.select_all(
         "matches",
         columns="id,status,match_date,home_score,away_score",
@@ -111,7 +138,14 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
     )
     matches_by_id = {int(row["id"]): row for row in finished_matches}
     evaluated_at = datetime.now(timezone.utc).isoformat()
-    official_predictions = select_official_predictions(pending)
+    fallback_predictions = {
+        int(prediction["match_id"]): prediction
+        for prediction in select_official_predictions(pending)
+    }
+    official_predictions = [
+        snapshots_by_match.get(match_id, prediction)
+        for match_id, prediction in fallback_predictions.items()
+    ]
     rows = [
         build_performance_row(prediction, match, evaluated_at=evaluated_at)
         for prediction in official_predictions

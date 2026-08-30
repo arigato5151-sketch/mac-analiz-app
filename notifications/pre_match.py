@@ -19,7 +19,7 @@ from data_pipeline.fetch_injuries import sync_injuries
 from data_pipeline.fetch_team_stats import sync_team_form
 from data_pipeline.odds import MatchOdds, fetch_match_odds
 from data_pipeline.refresh_context import current_elo_ratings
-from db.db_client import SupabaseRestClient
+from db.db_client import DatabaseError, SupabaseRestClient
 from models.predict import generate_prediction_rows, load_latest_team_forms, persist_predictions, resolve_model_path
 from models.train_model import load_completed_matches
 from notifications.telegram import send_telegram_message
@@ -28,6 +28,57 @@ from notifications.telegram import send_telegram_message
 NOTIFICATION_TYPE = "pre_match_60m"
 WINDOW_START_MINUTES = 45
 WINDOW_END_MINUTES = 75
+
+
+def persist_production_snapshot(
+    db: SupabaseRestClient,
+    prediction: dict[str, Any],
+    *,
+    match_id: int,
+    model_version: str,
+    captured_at: str,
+) -> dict[str, Any]:
+    """Store the user-facing pre-match output once; never rewrite it on retries."""
+    existing = db.select(
+        "prediction_snapshots",
+        columns="id,source_prediction_id,match_id,snapshot_type,model_version,prob_home_win,prob_draw,prob_away_win,prob_over_2_5,prob_btts,source_predicted_at,context,captured_at",
+        filters={"match_id": f"eq.{match_id}", "snapshot_type": f"eq.{NOTIFICATION_TYPE}"},
+        limit=1,
+    )
+    if existing:
+        return existing[0]
+
+    snapshot = {
+        "source_prediction_id": int(prediction["id"]),
+        "match_id": match_id,
+        "snapshot_type": NOTIFICATION_TYPE,
+        "model_version": model_version,
+        "prob_home_win": float(prediction["prob_home_win"]),
+        "prob_draw": float(prediction["prob_draw"]),
+        "prob_away_win": float(prediction["prob_away_win"]),
+        "prob_over_2_5": float(prediction["prob_over_2_5"]),
+        "prob_btts": float(prediction["prob_btts"]),
+        "source_predicted_at": str(prediction["predicted_at"]),
+        "context": {
+            "notification_type": NOTIFICATION_TYPE,
+            "notification_window_minutes": [WINDOW_START_MINUTES, WINDOW_END_MINUTES],
+        },
+        "captured_at": captured_at,
+    }
+    try:
+        return db.insert("prediction_snapshots", [snapshot])[0]
+    except DatabaseError:
+        # A concurrent retry can win the unique constraint race. Read its
+        # immutable winner instead of overwriting the historical record.
+        existing = db.select(
+            "prediction_snapshots",
+            columns="id,source_prediction_id,match_id,snapshot_type,model_version,prob_home_win,prob_draw,prob_away_win,prob_over_2_5,prob_btts,source_predicted_at,context,captured_at",
+            filters={"match_id": f"eq.{match_id}", "snapshot_type": f"eq.{NOTIFICATION_TYPE}"},
+            limit=1,
+        )
+        if existing:
+            return existing[0]
+        raise
 
 
 def due_matches(matches: list[dict[str, Any]], *, now: datetime) -> list[dict[str, Any]]:
@@ -150,8 +201,7 @@ def _refresh_and_predict(
         model_version=model_version,
         team_form_by_id=load_latest_team_forms(db, team_ids),
     )
-    persist_predictions(db, rows)
-    return rows, model_version
+    return persist_predictions(db, rows), model_version
 
 
 def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
@@ -184,6 +234,13 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
     for match in matches:
         match_id = int(match["id"])
         prediction = predictions_by_match[match_id]
+        snapshot = persist_production_snapshot(
+            db,
+            prediction,
+            match_id=match_id,
+            model_version=model_version,
+            captured_at=now.isoformat(),
+        )
         try:
             odds = fetch_match_odds(api, fixture_id=match_id)
         except Exception as error:  # Odds are optional; never suppress a prediction alert.
@@ -193,7 +250,7 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
             db.upsert(
                 "bookmaker_odds_snapshots",
                 [{
-                    "prediction_id": int(prediction["id"]),
+                    "prediction_id": int(snapshot["source_prediction_id"]),
                     "match_id": match_id,
                     "bookmaker": odds.bookmaker,
                     "source_updated_at": odds.source_updated_at,

@@ -69,3 +69,19 @@ def test_build_performance_row_requires_a_pre_kickoff_prediction() -> None:
     match = {"id": 7, "match_date": "2026-08-30T11:00:00+00:00"}
 
     assert str(prediction["predicted_at"]) <= str(match["match_date"])
+
+
+def test_build_performance_row_links_an_immutable_snapshot() -> None:
+    row = build_performance_row(
+        {
+            "id": 9,
+            "snapshot_id": 55,
+            "prob_home_win": 0.6,
+            "prob_draw": 0.25,
+            "prob_away_win": 0.15,
+        },
+        {"id": 100, "home_score": 2, "away_score": 1},
+        evaluated_at="2026-08-26T12:00:00+00:00",
+    )
+
+    assert row["snapshot_id"] == 55

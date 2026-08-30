@@ -130,6 +130,17 @@ def run_final_result_notifications() -> dict[str, int | str]:
             filters={"id": f"in.({prediction_ids})"},
         )
     }
+    snapshots = {
+        int(row["match_id"]): row
+        for row in db.select_all(
+            "prediction_snapshots",
+            columns=(
+                "match_id,model_version,prob_home_win,prob_draw,prob_away_win,"
+                "prob_over_2_5,prob_btts,captured_at"
+            ),
+            filters={"match_id": f"in.({match_ids})", "snapshot_type": "eq.pre_match_60m"},
+        )
+    }
     team_ids = {int(team_id) for match in matches.values() for team_id in (match["home_team_id"], match["away_team_id"])}
     league_ids = {int(match["league_id"]) for match in matches.values()}
     teams = {int(row["id"]): str(row["name"]) for row in db.select_all("teams", columns="id,name", filters={"id": f"in.({','.join(map(str, team_ids))})"})}
@@ -140,7 +151,9 @@ def run_final_result_notifications() -> dict[str, int | str]:
     delivered_at = datetime.now(timezone.utc)
     for evaluation in pending:
         match = matches.get(int(evaluation["match_id"]))
-        prediction = predictions.get(int(evaluation["prediction_id"]))
+        prediction = snapshots.get(int(evaluation["match_id"])) or predictions.get(
+            int(evaluation["prediction_id"])
+        )
         if match is None or prediction is None:
             continue
         try:
