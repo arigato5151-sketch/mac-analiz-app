@@ -44,7 +44,8 @@ def test_pre_match_message_includes_available_bookmaker_odds() -> None:
         odds=odds,
     )
 
-    assert "Bet365 1-X-2: 1 @ 1.80 · X @ 3.40 · 2 @ 4.20" in message
+    assert "📊 Bet365 oranları" in message
+    assert "1X2  1 @1.80 · X @ 3.40 · 2 @ 4.20" in message
 
 
 def test_closing_line_value_requires_valid_decimal_odds() -> None:

@@ -108,34 +108,39 @@ def pre_match_message(
     kickoff = datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
     lines = [
         f"⚽ {home_team} — {away_team}",
-        f"{league_name} · {kickoff.astimezone(ZoneInfo('Europe/Istanbul')).strftime('%d.%m %H:%M')}",
-        "1-X-2: "
+        f"📍 {league_name} · {kickoff.astimezone(ZoneInfo('Europe/Istanbul')).strftime('%d.%m %H:%M')}",
+        "──────────────",
+        "🤖 Model olasılıkları",
+        "1X2  "
         f"1 %{float(prediction['prob_home_win']) * 100:.0f} · "
         f"X %{float(prediction['prob_draw']) * 100:.0f} · "
         f"2 %{float(prediction['prob_away_win']) * 100:.0f}",
-        "Üst/Alt 2.5: "
+        "2.5  "
         f"Üst %{float(prediction['prob_over_2_5']) * 100:.0f} · "
         f"Alt %{(1 - float(prediction['prob_over_2_5'])) * 100:.0f}",
-        "KG Var/Yok: "
+        "KG   "
         f"Var %{float(prediction['prob_btts']) * 100:.0f} · "
         f"Yok %{(1 - float(prediction['prob_btts'])) * 100:.0f}",
     ]
     if odds is not None:
+        odds_lines = [f"📊 {odds.bookmaker} oranları"]
         if all((odds.home_win, odds.draw, odds.away_win)):
-            lines.append(
-                f"{odds.bookmaker} 1-X-2: 1 @ {odds.home_win} · "
+            odds_lines.append(
+                f"1X2  1 @{odds.home_win} · "
                 f"X @ {odds.draw} · 2 @ {odds.away_win}"
             )
         if all((odds.over_2_5, odds.under_2_5)):
-            lines.append(
-                f"{odds.bookmaker} Üst/Alt 2.5: Üst @ {odds.over_2_5} · "
+            odds_lines.append(
+                f"2.5  Üst @{odds.over_2_5} · "
                 f"Alt @ {odds.under_2_5}"
             )
         if all((odds.btts_yes, odds.btts_no)):
-            lines.append(
-                f"{odds.bookmaker} KG Var/Yok: Var @ {odds.btts_yes} · "
+            odds_lines.append(
+                f"KG   Var @{odds.btts_yes} · "
                 f"Yok @ {odds.btts_no}"
             )
+        if len(odds_lines) > 1:
+            lines.extend(odds_lines)
     lines.append("İstatistiksel olasılıktır; kesin sonuç değildir.")
     return "\n".join(lines)
 
