@@ -2,12 +2,12 @@ name: Pre-match Telegram notifications
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 concurrency:
   group: pre-match-notifications
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read

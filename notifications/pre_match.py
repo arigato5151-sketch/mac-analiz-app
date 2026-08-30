@@ -28,8 +28,8 @@ from notifications.telegram import send_telegram_message
 
 
 NOTIFICATION_TYPE = "pre_match_60m"
-WINDOW_START_MINUTES = 45
-WINDOW_END_MINUTES = 75
+WINDOW_START_MINUTES = 30
+WINDOW_END_MINUTES = 90
 LINEUP_LOOKAHEAD_MINUTES = 90
 
 
@@ -85,7 +85,7 @@ def persist_production_snapshot(
 
 
 def due_matches(matches: list[dict[str, Any]], *, now: datetime) -> list[dict[str, Any]]:
-    """Return scheduled fixtures within the 60-minute notification window."""
+    """Return scheduled fixtures around the 60-minute target despite scheduler delay."""
     start = now + timedelta(minutes=WINDOW_START_MINUTES)
     end = now + timedelta(minutes=WINDOW_END_MINUTES)
     eligible: list[dict[str, Any]] = []
