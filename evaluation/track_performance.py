@@ -24,6 +24,18 @@ def actual_result(home_score: int, away_score: int) -> str:
     return "draw"
 
 
+def binary_market_performance(
+    probability: float | None, *, actual_positive: bool
+) -> tuple[bool | None, float | None]:
+    """Evaluate one binary market without fabricating a missing prediction."""
+    if probability is None:
+        return None, None
+    if not 0 <= probability <= 1:
+        raise ValueError("Binary-market probability must be between 0 and 1")
+    target = float(actual_positive)
+    return (probability >= 0.5) == actual_positive, float((probability - target) ** 2)
+
+
 def build_performance_row(
     prediction: dict[str, Any], match: dict[str, Any], *, evaluated_at: str
 ) -> dict[str, Any]:
@@ -45,6 +57,22 @@ def build_performance_row(
         (probability - target) ** 2
         for probability, target in zip(probabilities, one_hot, strict=True)
     )
+    home_score = int(match["home_score"])
+    away_score = int(match["away_score"])
+    over_actual = home_score + away_score >= 3
+    btts_actual = home_score > 0 and away_score > 0
+    over_correct, over_brier = binary_market_performance(
+        (
+            float(prediction["prob_over_2_5"])
+            if prediction.get("prob_over_2_5") is not None
+            else None
+        ),
+        actual_positive=over_actual,
+    )
+    btts_correct, btts_brier = binary_market_performance(
+        float(prediction["prob_btts"]) if prediction.get("prob_btts") is not None else None,
+        actual_positive=btts_actual,
+    )
 
     row = {
         "prediction_id": int(prediction["id"]),
@@ -52,6 +80,12 @@ def build_performance_row(
         "actual_result": outcome,
         "was_correct": predicted_index == outcome_index,
         "brier_score": float(brier_score),
+        "over_2_5_actual": over_actual,
+        "over_2_5_was_correct": over_correct,
+        "over_2_5_brier_score": over_brier,
+        "btts_actual": btts_actual,
+        "btts_was_correct": btts_correct,
+        "btts_brier_score": btts_brier,
         "evaluated_at": evaluated_at,
     }
     if prediction.get("snapshot_id") is not None:

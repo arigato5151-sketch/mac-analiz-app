@@ -132,45 +132,41 @@ def evaluated_result_display(frame: pd.DataFrame) -> pd.DataFrame:
     rows["Güven"] = [confidence for _, _, confidence in signals]
     over_evaluations = [
         binary_market_evaluation(
-            row.get("prob_over_2_5"),
-            actual_positive=int(row["home_score"]) + int(row["away_score"]) >= 3,
-            positive_label="Üst",
-            negative_label="Alt",
+            row.get("prob_over_2_5"), actual_positive=bool(row["over_2_5_actual"]),
+            positive_label="Üst", negative_label="Alt"
         )
         for _, row in rows.iterrows()
     ]
     btts_evaluations = [
         binary_market_evaluation(
-            row.get("prob_btts"),
-            actual_positive=int(row["home_score"]) > 0 and int(row["away_score"]) > 0,
-            positive_label="KG Var",
-            negative_label="KG Yok",
+            row.get("prob_btts"), actual_positive=bool(row["btts_actual"]),
+            positive_label="KG Var", negative_label="KG Yok"
         )
         for _, row in rows.iterrows()
     ]
     rows["Üst 2.5 tahmini"] = [prediction for prediction, _, _ in over_evaluations]
     rows["Üst 2.5 sonucu"] = [actual for _, actual, _ in over_evaluations]
-    rows["Üst 2.5 durum"] = [
-        "✓ Doğru" if correct is True else "✗ Yanlış" if correct is False else "—"
-        for _, _, correct in over_evaluations
-    ]
+    rows["Üst 2.5 durum"] = rows["over_2_5_was_correct"].map({True: "✓ Doğru", False: "✗ Yanlış"}).fillna("—")
     rows["KG tahmini"] = [prediction for prediction, _, _ in btts_evaluations]
     rows["KG sonucu"] = [actual for _, actual, _ in btts_evaluations]
-    rows["KG durum"] = [
-        "✓ Doğru" if correct is True else "✗ Yanlış" if correct is False else "—"
-        for _, _, correct in btts_evaluations
-    ]
+    rows["KG durum"] = rows["btts_was_correct"].map({True: "✓ Doğru", False: "✗ Yanlış"}).fillna("—")
     rows["Skor"] = rows.apply(
         lambda row: f"{int(row['home_score'])} – {int(row['away_score'])}", axis=1
     )
     rows["Maç"] = rows["home_team"] + " — " + rows["away_team"]
     rows["Tarih"] = rows["match_date"].dt.strftime("%d.%m.%Y %H:%M")
     rows["Brier"] = rows["brier_score"].astype(float).map(lambda value: f"{value:.3f}")
+    rows["Üst Brier"] = rows["over_2_5_brier_score"].map(
+        lambda value: f"{float(value):.3f}" if pd.notna(value) else "—"
+    )
+    rows["KG Brier"] = rows["btts_brier_score"].map(
+        lambda value: f"{float(value):.3f}" if pd.notna(value) else "—"
+    )
     return rows[
         [
             "Tarih", "league_name", "Maç", "Skor", "Sonuç", "Model tahmini", "Güven", "Durum",
             "Üst 2.5 tahmini", "Üst 2.5 sonucu", "Üst 2.5 durum",
-            "KG tahmini", "KG sonucu", "KG durum", "Brier",
+            "KG tahmini", "KG sonucu", "KG durum", "Brier", "Üst Brier", "KG Brier",
         ]
     ].rename(columns={"league_name": "Lig"})
 

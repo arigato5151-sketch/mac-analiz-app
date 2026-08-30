@@ -109,8 +109,9 @@ def load_prediction_performance() -> pd.DataFrame:
     rows = db.select_all(
         "live_prediction_performance",
         columns=(
-            "id,prediction_id,match_id,actual_result,was_correct,brier_score,"
-            "evaluated_at"
+            "prediction_id,match_id,actual_result,was_correct,brier_score,"
+            "evaluated_at,over_2_5_actual,over_2_5_was_correct,over_2_5_brier_score,"
+            "btts_actual,btts_was_correct,btts_brier_score"
         ),
         order="evaluated_at.asc",
     )
@@ -155,7 +156,8 @@ def load_evaluated_predictions(limit: int = 250) -> pd.DataFrame:
             "prediction_id,match_id,actual_result,was_correct,brier_score,evaluated_at,"
             "league_id,match_date,home_score,away_score,prob_home_win,prob_draw,"
             "prob_away_win,prob_over_2_5,prob_btts,model_version,predicted_at,"
-            "home_team,away_team,league_name"
+            "home_team,away_team,league_name,over_2_5_actual,over_2_5_was_correct,"
+            "over_2_5_brier_score,btts_actual,btts_was_correct,btts_brier_score"
         ),
         limit=limit,
         order="evaluated_at.desc",

@@ -14,6 +14,8 @@ def test_result_display_shows_score_prediction_and_correctness() -> None:
                 "home_team": "Ev", "away_team": "Deplasman",
                 "home_score": 2, "away_score": 1,
                 "actual_result": "home_win", "was_correct": True, "brier_score": 0.21,
+                "over_2_5_actual": True, "over_2_5_was_correct": True, "over_2_5_brier_score": 0.185,
+                "btts_actual": True, "btts_was_correct": False, "btts_brier_score": 0.2704,
                 "prob_home_win": 0.61, "prob_draw": 0.22, "prob_away_win": 0.17,
                 "prob_over_2_5": 0.57, "prob_btts": 0.48,
             }

@@ -70,14 +70,10 @@ if filtered.empty:
     st.stop()
 
 summary[1].metric("1-X-2 isabet", f"%{filtered['was_correct'].mean() * 100:.1f}")
-over_actual = (filtered["home_score"].astype(int) + filtered["away_score"].astype(int) >= 3)
-over_available = filtered["prob_over_2_5"].notna()
-over_correct = (filtered.loc[over_available, "prob_over_2_5"].astype(float) >= 0.5) == over_actual[over_available]
-btts_actual = (filtered["home_score"].astype(int) > 0) & (filtered["away_score"].astype(int) > 0)
-btts_available = filtered["prob_btts"].notna()
-btts_correct = (filtered.loc[btts_available, "prob_btts"].astype(float) >= 0.5) == btts_actual[btts_available]
-summary[2].metric("Üst 2.5 isabet", f"%{over_correct.mean() * 100:.1f}" if not over_correct.empty else "—")
-summary[3].metric("KG Var isabet", f"%{btts_correct.mean() * 100:.1f}" if not btts_correct.empty else "—")
+over_correct = filtered["over_2_5_was_correct"].dropna()
+btts_correct = filtered["btts_was_correct"].dropna()
+summary[2].metric("Üst 2.5 isabet", f"%{over_correct.astype(bool).mean() * 100:.1f}" if not over_correct.empty else "—")
+summary[3].metric("KG Var isabet", f"%{btts_correct.astype(bool).mean() * 100:.1f}" if not btts_correct.empty else "—")
 summary[4].metric("Ortalama Brier", f"{filtered['brier_score'].astype(float).mean():.3f}")
 
 st.dataframe(evaluated_result_display(filtered), hide_index=True, use_container_width=True, height=680)

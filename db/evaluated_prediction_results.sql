@@ -25,7 +25,13 @@ SELECT
     COALESCE(snapshot.captured_at, prediction.predicted_at) AS predicted_at,
     home.name AS home_team,
     away.name AS away_team,
-    league.name AS league_name
+    league.name AS league_name,
+    performance.over_2_5_actual,
+    performance.over_2_5_was_correct,
+    performance.over_2_5_brier_score,
+    performance.btts_actual,
+    performance.btts_was_correct,
+    performance.btts_brier_score
 FROM public.live_prediction_performance AS performance
 JOIN public.matches AS fixture ON fixture.id = performance.match_id
 JOIN public.predictions AS prediction ON prediction.id = performance.prediction_id

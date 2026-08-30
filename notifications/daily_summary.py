@@ -74,9 +74,14 @@ def build_night_message(performance: list[dict[str, Any]]) -> str:
     recent = performance[:30]
     accuracy = sum(bool(row["was_correct"]) for row in recent) / len(recent)
     brier = sum(float(row["brier_score"]) for row in recent) / len(recent)
+    def binary_accuracy(column: str) -> str:
+        available = [bool(row[column]) for row in recent if row.get(column) is not None]
+        return f"%{sum(available) / len(available) * 100:.1f}" if available else "—"
     return (
         "⚽ Maç Analiz · Gece performans özeti\n"
         f"Son {len(recent)} değerlendirme: %{accuracy * 100:.1f} 1-X-2 isabet\n"
+        f"Üst/Alt 2.5: {binary_accuracy('over_2_5_was_correct')} · "
+        f"KG Var/Yok: {binary_accuracy('btts_was_correct')}\n"
         f"Ortalama Brier: {brier:.3f}\n"
         "Tahminler istatistiksel olasılıktır; kesin sonuç değildir."
     )
@@ -153,7 +158,10 @@ def main() -> None:
     else:
         performance_rows = db.select_all(
             "prediction_performance",
-            columns="prediction_id,match_id,was_correct,brier_score,evaluated_at",
+            columns=(
+                "prediction_id,match_id,was_correct,brier_score,over_2_5_was_correct,"
+                "btts_was_correct,evaluated_at"
+            ),
         )
         message = build_night_message(
             _official_performance_rows(

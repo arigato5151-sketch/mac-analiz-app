@@ -4,6 +4,7 @@ import pytest
 
 from evaluation.track_performance import (
     actual_result,
+    binary_market_performance,
     build_performance_row,
     select_official_predictions,
 )
@@ -23,6 +24,8 @@ def test_build_performance_row_calculates_multiclass_brier_score() -> None:
         "prob_home_win": 0.60,
         "prob_draw": 0.25,
         "prob_away_win": 0.15,
+        "prob_over_2_5": 0.55,
+        "prob_btts": 0.15,
     }
     match = {"id": 100, "home_score": 2, "away_score": 1}
 
@@ -33,6 +36,18 @@ def test_build_performance_row_calculates_multiclass_brier_score() -> None:
     assert row["actual_result"] == "home_win"
     assert row["was_correct"] is True
     assert row["brier_score"] == pytest.approx(0.245)
+    assert row["over_2_5_actual"] is True
+    assert row["over_2_5_was_correct"] is True
+    assert row["over_2_5_brier_score"] == pytest.approx(0.2025)
+    assert row["btts_actual"] is True
+    assert row["btts_was_correct"] is False
+    assert row["btts_brier_score"] == pytest.approx(0.7225)
+
+
+def test_binary_market_performance_uses_real_outcome_and_probability() -> None:
+    assert binary_market_performance(0.70, actual_positive=True) == (True, pytest.approx(0.09))
+    assert binary_market_performance(0.30, actual_positive=True) == (False, pytest.approx(0.49))
+    assert binary_market_performance(None, actual_positive=True) == (None, None)
 
 
 def test_build_performance_row_rejects_invalid_probability_sum() -> None:

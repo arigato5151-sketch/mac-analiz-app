@@ -15,6 +15,12 @@ WITH ranked AS (
         performance.brier_score,
         performance.evaluated_at,
         performance.snapshot_id,
+        performance.over_2_5_actual,
+        performance.over_2_5_was_correct,
+        performance.over_2_5_brier_score,
+        performance.btts_actual,
+        performance.btts_was_correct,
+        performance.btts_brier_score,
         ROW_NUMBER() OVER (
             PARTITION BY performance.match_id
             ORDER BY performance.evaluated_at DESC, prediction.predicted_at DESC, prediction.id DESC
@@ -29,7 +35,13 @@ SELECT
     was_correct,
     brier_score,
     evaluated_at,
-    snapshot_id
+    snapshot_id,
+    over_2_5_actual,
+    over_2_5_was_correct,
+    over_2_5_brier_score,
+    btts_actual,
+    btts_was_correct,
+    btts_brier_score
 FROM ranked
 WHERE row_rank = 1;
 

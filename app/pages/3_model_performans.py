@@ -105,6 +105,34 @@ else:
     )
     summary_columns[3].metric("Canlı Brier", f"{summary.brier_score:.3f}")
 
+    market_rows = [
+        {
+            "Pazar": "1-X-2",
+            "Örneklem": len(performance),
+            "İsabet": summary.accuracy,
+            "Brier": summary.brier_score,
+        }
+    ]
+    for label, correct_column, brier_column in (
+        ("Üst/Alt 2.5", "over_2_5_was_correct", "over_2_5_brier_score"),
+        ("KG Var/Yok", "btts_was_correct", "btts_brier_score"),
+    ):
+        market = performance.dropna(subset=[correct_column, brier_column])
+        if not market.empty:
+            market_rows.append(
+                {
+                    "Pazar": label,
+                    "Örneklem": len(market),
+                    "İsabet": market[correct_column].astype(bool).mean(),
+                    "Brier": market[brier_column].astype(float).mean(),
+                }
+            )
+    market_frame = pd.DataFrame(market_rows)
+    market_frame["İsabet"] = market_frame["İsabet"].map(lambda value: f"%{value * 100:.1f}")
+    market_frame["Brier"] = market_frame["Brier"].map(lambda value: f"{value:.3f}")
+    st.subheader("Pazar bazlı canlı performans")
+    st.dataframe(market_frame, hide_index=True, use_container_width=True)
+
     if summary.status == "Yetersiz örneklem":
         st.info(
             f"Canlı örneklem henüz {summary.sample_size}/100 maç. Güven aralığı, "

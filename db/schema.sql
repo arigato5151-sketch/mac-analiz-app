@@ -111,6 +111,12 @@ CREATE TABLE IF NOT EXISTS prediction_performance (
     actual_result TEXT NOT NULL CHECK (actual_result IN ('home_win', 'draw', 'away_win')),
     was_correct BOOLEAN NOT NULL,
     brier_score NUMERIC NOT NULL CHECK (brier_score BETWEEN 0 AND 2),
+    over_2_5_actual BOOLEAN,
+    over_2_5_was_correct BOOLEAN,
+    over_2_5_brier_score NUMERIC CHECK (over_2_5_brier_score IS NULL OR over_2_5_brier_score BETWEEN 0 AND 1),
+    btts_actual BOOLEAN,
+    btts_was_correct BOOLEAN,
+    btts_brier_score NUMERIC CHECK (btts_brier_score IS NULL OR btts_brier_score BETWEEN 0 AND 1),
     evaluated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
