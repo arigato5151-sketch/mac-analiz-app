@@ -5,6 +5,12 @@ on:
     # Monday 05:00 Turkey time.
     - cron: "0 2 * * 1"
   workflow_dispatch:
+    inputs:
+      promote_candidate:
+        description: Publish this validated candidate as the live model
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: weekly-model-retraining
@@ -34,8 +40,10 @@ jobs:
       - name: Train and validate models
         run: python -m models.train_model
       - name: Refresh upcoming predictions
+        if: github.event_name == 'workflow_dispatch' && inputs.promote_candidate == true
         run: python -m models.predict --model models/saved_models/latest.joblib --days 3
       - name: Publish validated model artifact
+        if: github.event_name == 'workflow_dispatch' && inputs.promote_candidate == true
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
