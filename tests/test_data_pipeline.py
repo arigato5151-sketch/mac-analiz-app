@@ -11,6 +11,7 @@ from data_pipeline.fetch_fixtures import (
     transform_fixtures,
 )
 from data_pipeline.fetch_injuries import transform_injuries
+from data_pipeline.fetch_lineups import transform_lineups
 from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_team_stats import build_team_form
 from data_pipeline.fetch_results import sync_recent_results
@@ -133,6 +134,25 @@ def test_transform_injuries_maps_status_and_deduplicates() -> None:
     assert len(teams) == 1
     assert len(rows) == 1
     assert rows[0]["status"] == "suspended"
+
+
+def test_transform_lineups_accepts_only_complete_official_xis() -> None:
+    full_xi = [
+        {"player": {"id": index, "name": f"Player {index}", "pos": "M"}}
+        for index in range(11)
+    ]
+    rows = transform_lineups(
+        99,
+        [
+            {"team": {"id": 1}, "formation": "4-3-3", "coach": {"name": "Coach"}, "startXI": full_xi, "substitutes": []},
+            {"team": {"id": 2}, "startXI": full_xi[:10]},
+        ],
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["match_id"] == 99
+    assert rows[0]["formation"] == "4-3-3"
+    assert len(rows[0]["starters"]) == 11
 
 
 def test_api_diagnostics_warns_when_remaining_quota_is_low() -> None:

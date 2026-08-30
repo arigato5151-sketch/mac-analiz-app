@@ -144,6 +144,17 @@ def load_match_availability(
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def load_confirmed_lineups(match_id: int) -> pd.DataFrame:
+    """Load official XIs when both teams have been published by the provider."""
+    rows = get_db().select_all(
+        "fixture_lineups",
+        columns="team_id,formation,coach_name,starters,substitutes,confirmed_at",
+        filters={"match_id": f"eq.{match_id}"},
+    )
+    return pd.DataFrame(rows)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def load_evaluated_predictions(limit: int = 250) -> pd.DataFrame:
     """Load evaluated predictions from the RLS-protected database view."""
     if limit < 1 or limit > 1_000:

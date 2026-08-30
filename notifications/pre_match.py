@@ -16,6 +16,7 @@ from config.leagues import LEAGUES_BY_ID
 from config.settings import PROJECT_ROOT, get_settings
 from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_injuries import sync_injuries
+from data_pipeline.fetch_lineups import sync_fixture_lineups
 from data_pipeline.fetch_team_stats import sync_team_form
 from data_pipeline.odds import MatchOdds, fetch_match_odds
 from data_pipeline.refresh_context import current_elo_ratings
@@ -29,6 +30,7 @@ from notifications.telegram import send_telegram_message
 NOTIFICATION_TYPE = "pre_match_60m"
 WINDOW_START_MINUTES = 45
 WINDOW_END_MINUTES = 75
+LINEUP_LOOKAHEAD_MINUTES = 90
 
 
 def persist_production_snapshot(
@@ -165,6 +167,35 @@ def _pending_matches(db: SupabaseRestClient, *, now: datetime) -> list[dict[str,
     return [match for match in candidates if int(match["id"]) not in sent_ids]
 
 
+def sync_soon_lineups(api: ApiFootballClient, db: SupabaseRestClient, *, now: datetime) -> int:
+    """Poll only the next 90 minutes until both official XIs are available."""
+    soon = db.select_all(
+        "matches",
+        columns="id",
+        filters={
+            "status": "eq.scheduled",
+            "and": f"(match_date.gte.{now.isoformat()},match_date.lte.{(now + timedelta(minutes=LINEUP_LOOKAHEAD_MINUTES)).isoformat()})",
+        },
+    )
+    if not soon:
+        return 0
+    match_ids = ",".join(str(int(row["id"])) for row in soon)
+    existing = db.select_all(
+        "fixture_lineups", columns="match_id", filters={"match_id": f"in.({match_ids})"}
+    )
+    confirmed_counts: dict[int, int] = {}
+    for row in existing:
+        match_id = int(row["match_id"])
+        confirmed_counts[match_id] = confirmed_counts.get(match_id, 0) + 1
+    written = 0
+    for match in soon:
+        match_id = int(match["id"])
+        if confirmed_counts.get(match_id, 0) >= 2:
+            continue
+        written += sync_fixture_lineups(api, db, match_id=match_id)
+    return written
+
+
 def _refresh_and_predict(
     api: ApiFootballClient,
     db: SupabaseRestClient,
@@ -222,14 +253,15 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     now = now or datetime.now(timezone.utc)
     matches = _pending_matches(db, now=now)
-    if not matches:
-        return {"due_matches": 0, "sent": 0}
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
     if not bot_token or not chat_id:
         return {"due_matches": len(matches), "sent": 0, "skipped": "telegram_not_configured"}
 
     api = ApiFootballClient(settings.api_football_key)
+    lineup_rows = sync_soon_lineups(api, db, now=now)
+    if not matches:
+        return {"due_matches": 0, "sent": 0, "lineup_rows": lineup_rows, "api": api.diagnostics()}
     predictions, model_version = _refresh_and_predict(api, db, matches)
     predictions_by_match = {int(row["match_id"]): row for row in predictions}
     team_ids = {int(team_id) for match in matches for team_id in (match["home_team_id"], match["away_team_id"])}
@@ -289,7 +321,7 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
             on_conflict="match_id,notification_type",
         )
         sent += 1
-    return {"due_matches": len(matches), "sent": sent, "api": api.diagnostics()}
+    return {"due_matches": len(matches), "sent": sent, "lineup_rows": lineup_rows, "api": api.diagnostics()}
 
 
 def main() -> None:

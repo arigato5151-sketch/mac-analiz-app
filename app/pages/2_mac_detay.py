@@ -12,7 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.availability import summarize_availability
-from app.components.data import load_match_availability, load_match_baseline, load_upcoming_dashboard
+from app.components.data import load_confirmed_lineups, load_match_availability, load_match_baseline, load_upcoming_dashboard
 from app.components.ui import (
     configure_page,
     disclaimer,
@@ -147,6 +147,31 @@ try:
     )
 except Exception as exc:
     st.warning(f"Kadro durumu şu anda yüklenemedi: {exc}")
+
+st.subheader("Onaylı ilk 11")
+try:
+    lineups = load_confirmed_lineups(int(selected_id))
+    if len(lineups) < 2:
+        st.info("Resmî ilk 11 henüz açıklanmadı. API-Football çoğu ligde kadroyu başlama saatinden 20–40 dakika önce yayınlar.")
+    else:
+        lineup_columns = st.columns(2)
+        for column, team_id, team_name in (
+            (lineup_columns[0], int(selected["home_team_id"]), selected["home_team"]),
+            (lineup_columns[1], int(selected["away_team_id"]), selected["away_team"]),
+        ):
+            lineup = lineups.loc[lineups["team_id"].astype(int) == team_id].iloc[0]
+            column.markdown(f"**{team_name}** · {lineup.get('formation') or 'Diziliş bilinmiyor'}")
+            if lineup.get("coach_name"):
+                column.caption(f"Teknik direktör: {lineup['coach_name']}")
+            starters = lineup.get("starters") or []
+            column.dataframe(
+                pd.DataFrame(starters)[["name", "pos"]].rename(columns={"name": "Oyuncu", "pos": "Pozisyon"}),
+                hide_index=True,
+                use_container_width=True,
+            )
+        st.caption("Bu alan yalnızca API’nin onaylı ilk 11 kaydı geldiğinde görünür. Mevcut model, tarihsel ilk-11 verisi henüz olmadığı için olasılıkları sonradan yapay olarak değiştirmez.")
+except Exception as exc:
+    st.warning(f"Onaylı ilk 11 şu anda yüklenemedi: {exc}")
 
 try:
     detail = load_match_baseline(int(selected_id))

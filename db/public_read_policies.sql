@@ -3,11 +3,11 @@
 BEGIN;
 
 REVOKE ALL ON TABLE leagues, teams, matches, match_stats, team_form,
-    player_availability, team_availability_status, predictions, prediction_snapshots, prediction_performance
+    player_availability, team_availability_status, fixture_lineups, predictions, prediction_snapshots, prediction_performance
 FROM anon, authenticated;
 
 GRANT SELECT ON TABLE leagues, teams, matches, team_form, player_availability,
-    team_availability_status, predictions, prediction_snapshots, prediction_performance TO anon;
+    team_availability_status, fixture_lineups, predictions, prediction_snapshots, prediction_performance TO anon;
 
 ALTER TABLE leagues ENABLE ROW LEVEL SECURITY;
 ALTER TABLE teams ENABLE ROW LEVEL SECURITY;
@@ -18,6 +18,7 @@ ALTER TABLE prediction_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE prediction_performance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE player_availability ENABLE ROW LEVEL SECURITY;
 ALTER TABLE team_availability_status ENABLE ROW LEVEL SECURITY;
+ALTER TABLE fixture_lineups ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "public_read_leagues" ON leagues;
 CREATE POLICY "public_read_leagues" ON leagues FOR SELECT TO anon USING (true);
@@ -37,5 +38,7 @@ DROP POLICY IF EXISTS "public_read_player_availability" ON player_availability;
 CREATE POLICY "public_read_player_availability" ON player_availability FOR SELECT TO anon USING (true);
 DROP POLICY IF EXISTS "public_read_team_availability_status" ON team_availability_status;
 CREATE POLICY "public_read_team_availability_status" ON team_availability_status FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS "public_read_fixture_lineups" ON fixture_lineups;
+CREATE POLICY "public_read_fixture_lineups" ON fixture_lineups FOR SELECT TO anon USING (true);
 
 COMMIT;
