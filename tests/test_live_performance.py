@@ -24,12 +24,23 @@ def test_live_summary_marks_small_samples_as_insufficient() -> None:
 
 def test_live_summary_flags_brier_degradation_after_sufficient_sample() -> None:
     summary = summarize_live_performance(
-        [True] * 40 + [False] * 10,
-        [0.70] * 50,
+        [True] * 80 + [False] * 20,
+        [0.70] * 100,
         reference_brier_score=0.50,
     )
 
     assert summary.status == "İzlenmeli"
+
+
+def test_live_summary_is_uncertain_without_statistical_improvement() -> None:
+    summary = summarize_live_performance(
+        [True] * 50 + [False] * 50,
+        [0.50] * 100,
+        reference_brier_score=0.50,
+        reference_accuracy=0.50,
+    )
+
+    assert summary.status == "Belirsiz"
 
 
 def test_live_summary_rejects_mismatched_series() -> None:

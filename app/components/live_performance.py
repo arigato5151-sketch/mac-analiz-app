@@ -20,6 +20,7 @@ class LivePerformanceSummary:
     accuracy_upper: float
     brier_score: float
     reference_brier_score: float | None
+    reference_accuracy: float | None
     status: str
 
 
@@ -46,9 +47,10 @@ def summarize_live_performance(
     correctness: Iterable[bool],
     brier_scores: Iterable[float],
     reference_brier_score: float | None = None,
+    reference_accuracy: float | None = None,
     *,
-    minimum_sample_size: int = 50,
-    degradation_threshold: float = 0.15,
+    minimum_sample_size: int = 100,
+    degradation_threshold: float = 0.05,
 ) -> LivePerformanceSummary:
     """Summarize outcomes and apply a transparent, non-statistical drift heuristic."""
     correct_values = [bool(value) for value in correctness]
@@ -75,8 +77,17 @@ def summarize_live_performance(
         and brier_score > reference_brier_score * (1 + degradation_threshold)
     ):
         status = "İzlenmeli"
+    elif reference_accuracy is not None and upper < reference_accuracy:
+        status = "İzlenmeli"
+    elif (
+        reference_brier_score is not None
+        and brier_score <= reference_brier_score
+        and reference_accuracy is not None
+        and lower > reference_accuracy
+    ):
+        status = "İyileşti"
     else:
-        status = "Normal"
+        status = "Belirsiz"
 
     return LivePerformanceSummary(
         sample_size=sample_size,
@@ -85,5 +96,6 @@ def summarize_live_performance(
         accuracy_upper=upper,
         brier_score=brier_score,
         reference_brier_score=reference_brier_score,
+        reference_accuracy=reference_accuracy,
         status=status,
     )

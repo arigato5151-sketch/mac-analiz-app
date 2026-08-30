@@ -88,10 +88,12 @@ else:
     performance["rolling_accuracy"] = performance["was_correct"].astype(float).rolling(30, min_periods=1).mean()
     performance["rolling_brier"] = performance["brier_score"].astype(float).rolling(30, min_periods=1).mean()
     reference_brier = metrics.get("brier_score") if metadata else None
+    reference_accuracy = metrics.get("accuracy") if metadata else None
     summary = summarize_live_performance(
         performance["was_correct"].tolist(),
         performance["brier_score"].tolist(),
         reference_brier_score=reference_brier,
+        reference_accuracy=reference_accuracy,
     )
 
     summary_columns = st.columns(4)
@@ -105,22 +107,25 @@ else:
 
     if summary.status == "Yetersiz örneklem":
         st.info(
-            f"Canlı örneklem henüz {summary.sample_size}/50 maç. Güven aralığı, "
+            f"Canlı örneklem henüz {summary.sample_size}/100 maç. Güven aralığı, "
             "mevcut isabet oranının belirsizliğini gösterir; sonuçları kesin performans "
             "olarak yorumlamayın."
         )
     elif summary.status == "İzlenmeli":
         st.warning(
-            "Canlı Brier skoru, kronolojik test referansının %15 üzerinde. "
-            "Veri kalitesi ve model sapması incelenmeli."
+            "Canlı performans, kronolojik test referansının güven aralığının dışında "
+            "zayıfladı veya Brier skoru %5'ten fazla kötüleşti."
         )
+    elif summary.status == "İyileşti":
+        st.success("Canlı performans, test referansını güven aralığıyla aşıyor.")
     else:
-        st.success("Canlı Brier skoru, belirlenen performans izleme eşiği içinde.")
+        st.info("Canlı sonuçlar referansla uyumlu görünüyor; üstünlük kanıtlanmış değil.")
 
     if summary.reference_brier_score is not None:
         st.caption(
             f"Referans: son kronolojik test Brier {summary.reference_brier_score:.3f}. "
-            "Sapma uyarısı, en az 50 maçta referansın %15 üzerindeki canlı Brier için verilir."
+            "Sapma uyarısı, en az 100 benzersiz maçta Brier'in %5 kötüleşmesi veya "
+            "referans isabetin güven aralığının üstünde kalmasıyla verilir."
         )
 
     chart_data = performance.melt(
