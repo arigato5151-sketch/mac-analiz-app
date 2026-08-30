@@ -91,7 +91,9 @@ olur; böylece sorun sessizce canlıya taşınmaz.
 
 Bildirimler isteğe bağlıdır. Yapılandırıldığında sabah iş akışı her yaklaşan
 maç için ayrı bir mesaj gönderir; mesaj 1-X-2, Üst/Alt 2.5 ve KG Var/Yok
-olasılıklarını içerir. Gece iş akışı son 30 değerlendirmedeki 1-X-2
+olasılıklarıyla birlikte API-Football üzerinden gelen güncel Bet365 oranlarını
+da içerir. Oran verisi o maçta mevcut değilse tahmin mesajı yine gönderilir.
+Gece iş akışı son 30 değerlendirmedeki 1-X-2
 performansını gönderir ve yeni sonuçlanan her maç için ayrı sonuç kartı yollar;
 kartta her piyasanın doğru/yanlış durumu `✓`/`✗` ile gösterilir. `Pre-match Telegram notifications` iş akışı her 15
 dakikada bir kontrol yapar; maçtan 45–75 dakika önce ilgili iki takımın form

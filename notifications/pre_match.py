@@ -17,6 +17,7 @@ from config.settings import PROJECT_ROOT, get_settings
 from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_injuries import sync_injuries
 from data_pipeline.fetch_team_stats import sync_team_form
+from data_pipeline.odds import MatchOdds, fetch_match_odds
 from data_pipeline.refresh_context import current_elo_ratings
 from db.db_client import SupabaseRestClient
 from models.predict import generate_prediction_rows, load_latest_team_forms, persist_predictions, resolve_model_path
@@ -48,25 +49,41 @@ def pre_match_message(
     home_team: str,
     away_team: str,
     league_name: str,
+    odds: MatchOdds | None = None,
 ) -> str:
     kickoff = datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
-    return "\n".join(
-        (
-            f"⚽ {home_team} — {away_team}",
-            f"{league_name} · {kickoff.astimezone(ZoneInfo('Europe/Istanbul')).strftime('%d.%m %H:%M')}",
-            "1-X-2: "
-            f"1 %{float(prediction['prob_home_win']) * 100:.0f} · "
-            f"X %{float(prediction['prob_draw']) * 100:.0f} · "
-            f"2 %{float(prediction['prob_away_win']) * 100:.0f}",
-            "Üst/Alt 2.5: "
-            f"Üst %{float(prediction['prob_over_2_5']) * 100:.0f} · "
-            f"Alt %{(1 - float(prediction['prob_over_2_5'])) * 100:.0f}",
-            "KG Var/Yok: "
-            f"Var %{float(prediction['prob_btts']) * 100:.0f} · "
-            f"Yok %{(1 - float(prediction['prob_btts'])) * 100:.0f}",
-            "İstatistiksel olasılıktır; kesin sonuç değildir.",
-        )
-    )
+    lines = [
+        f"⚽ {home_team} — {away_team}",
+        f"{league_name} · {kickoff.astimezone(ZoneInfo('Europe/Istanbul')).strftime('%d.%m %H:%M')}",
+        "1-X-2: "
+        f"1 %{float(prediction['prob_home_win']) * 100:.0f} · "
+        f"X %{float(prediction['prob_draw']) * 100:.0f} · "
+        f"2 %{float(prediction['prob_away_win']) * 100:.0f}",
+        "Üst/Alt 2.5: "
+        f"Üst %{float(prediction['prob_over_2_5']) * 100:.0f} · "
+        f"Alt %{(1 - float(prediction['prob_over_2_5'])) * 100:.0f}",
+        "KG Var/Yok: "
+        f"Var %{float(prediction['prob_btts']) * 100:.0f} · "
+        f"Yok %{(1 - float(prediction['prob_btts'])) * 100:.0f}",
+    ]
+    if odds is not None:
+        if all((odds.home_win, odds.draw, odds.away_win)):
+            lines.append(
+                f"{odds.bookmaker} 1-X-2: 1 @ {odds.home_win} · "
+                f"X @ {odds.draw} · 2 @ {odds.away_win}"
+            )
+        if all((odds.over_2_5, odds.under_2_5)):
+            lines.append(
+                f"{odds.bookmaker} Üst/Alt 2.5: Üst @ {odds.over_2_5} · "
+                f"Alt @ {odds.under_2_5}"
+            )
+        if all((odds.btts_yes, odds.btts_no)):
+            lines.append(
+                f"{odds.bookmaker} KG Var/Yok: Var @ {odds.btts_yes} · "
+                f"Yok @ {odds.btts_no}"
+            )
+    lines.append("İstatistiksel olasılıktır; kesin sonuç değildir.")
+    return "\n".join(lines)
 
 
 def _pending_matches(db: SupabaseRestClient, *, now: datetime) -> list[dict[str, Any]]:
@@ -167,6 +184,11 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
     for match in matches:
         match_id = int(match["id"])
         prediction = predictions_by_match[match_id]
+        try:
+            odds = fetch_match_odds(api, fixture_id=match_id)
+        except Exception as error:  # Odds are optional; never suppress a prediction alert.
+            print(f"Odds unavailable for fixture {match_id}: {type(error).__name__}")
+            odds = None
         send_telegram_message(
             pre_match_message(
                 match,
@@ -174,6 +196,7 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
                 home_team=teams.get(int(match["home_team_id"]), "Ev sahibi"),
                 away_team=teams.get(int(match["away_team_id"]), "Deplasman"),
                 league_name=leagues.get(int(match["league_id"]), "Lig"),
+                odds=odds,
             ),
             bot_token=bot_token,
             chat_id=chat_id,
