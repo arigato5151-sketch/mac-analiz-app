@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from config.settings import get_settings
@@ -12,6 +12,7 @@ from db.db_client import SupabaseRestClient
 
 RESULT_LABELS = ("home_win", "draw", "away_win")
 PROBABILITY_COLUMNS = ("prob_home_win", "prob_draw", "prob_away_win")
+RESULT_NOTIFICATION_MAX_AGE = timedelta(hours=24)
 
 
 def actual_result(home_score: int, away_score: int) -> str:
@@ -117,9 +118,27 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
         if (match := matches_by_id.get(int(prediction["match_id"]))) is not None
         and str(prediction["predicted_at"]) <= str(match["match_date"])
     ]
-    return db.upsert(
+    persisted = db.upsert(
         "prediction_performance", rows, on_conflict="prediction_id"
     )
+    queue_rows = [
+        {
+            "prediction_id": int(row["prediction_id"]),
+            "match_id": int(row["match_id"]),
+            "available_at": evaluated_at,
+            "next_attempt_at": evaluated_at,
+        }
+        for row in persisted
+        if (
+            match := matches_by_id.get(int(row["match_id"]))
+        ) is not None
+        and datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
+        >= datetime.now(timezone.utc) - RESULT_NOTIFICATION_MAX_AGE
+    ]
+    db.upsert(
+        "result_notification_queue", queue_rows, on_conflict="prediction_id"
+    )
+    return persisted
 
 
 def main() -> None:

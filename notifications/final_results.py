@@ -9,10 +9,10 @@ from typing import Any
 
 from config.settings import get_settings
 from db.db_client import SupabaseRestClient
-from notifications.telegram import send_telegram_message
+from notifications.telegram import TelegramError, send_telegram_message
 
 
-NOTIFICATION_TYPE = "final_result"
+MAX_DELIVERIES_PER_RUN = 20
 
 
 def _outcome_label(home_score: int, away_score: int) -> str:
@@ -85,33 +85,19 @@ def _pending_results(
     *,
     now: datetime | None = None,
 ) -> list[dict[str, Any]]:
-    """Return only evaluations made by the current nightly processing run.
-
-    Restricting the window prevents the first deployment from replaying an
-    archive of historical fixtures to Telegram.
-    """
+    """Return queued deliveries that have not yet succeeded."""
     current_time = now or datetime.now(timezone.utc)
-    recent_cutoff = (current_time - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
     evaluated = db.select(
-        "prediction_performance",
-        columns="match_id,prediction_id",
-        filters={"evaluated_at": f"gte.{recent_cutoff}"},
-        limit=100,
-        order="evaluated_at.desc",
-    )
-    if not evaluated:
-        return []
-    match_ids = ",".join(str(int(row["match_id"])) for row in evaluated)
-    sent = db.select_all(
-        "notification_log",
-        columns="match_id",
+        "result_notification_queue",
+        columns="match_id,prediction_id,attempts",
         filters={
-            "match_id": f"in.({match_ids})",
-            "notification_type": f"eq.{NOTIFICATION_TYPE}",
+            "sent_at": "is.null",
+            "next_attempt_at": f"lte.{current_time.isoformat()}",
         },
+        limit=MAX_DELIVERIES_PER_RUN,
+        order="available_at.asc",
     )
-    sent_ids = {int(row["match_id"]) for row in sent}
-    return [row for row in evaluated if int(row["match_id"]) not in sent_ids]
+    return evaluated
 
 
 def run_final_result_notifications() -> dict[str, int | str]:
@@ -150,29 +136,55 @@ def run_final_result_notifications() -> dict[str, int | str]:
     leagues = {int(row["id"]): str(row["name"]) for row in db.select_all("leagues", columns="id,name", filters={"id": f"in.({','.join(map(str, league_ids))})"})}
 
     sent = 0
+    failed = 0
+    delivered_at = datetime.now(timezone.utc)
     for evaluation in pending:
         match = matches.get(int(evaluation["match_id"]))
         prediction = predictions.get(int(evaluation["prediction_id"]))
         if match is None or prediction is None:
             continue
-        send_telegram_message(
-            final_result_message(
-                match,
-                prediction,
-                home_team=teams.get(int(match["home_team_id"]), "Ev sahibi"),
-                away_team=teams.get(int(match["away_team_id"]), "Deplasman"),
-                league_name=leagues.get(int(match["league_id"]), "Lig"),
-            ),
-            bot_token=bot_token,
-            chat_id=chat_id,
-        )
+        try:
+            send_telegram_message(
+                final_result_message(
+                    match,
+                    prediction,
+                    home_team=teams.get(int(match["home_team_id"]), "Ev sahibi"),
+                    away_team=teams.get(int(match["away_team_id"]), "Deplasman"),
+                    league_name=leagues.get(int(match["league_id"]), "Lig"),
+                ),
+                bot_token=bot_token,
+                chat_id=chat_id,
+            )
+        except TelegramError as error:
+            attempts = int(evaluation.get("attempts", 0)) + 1
+            retry_at = delivered_at + timedelta(minutes=min(60, 5 * (2 ** min(attempts, 4))))
+            db.upsert(
+                "result_notification_queue",
+                [{
+                    "prediction_id": int(evaluation["prediction_id"]),
+                    "match_id": int(evaluation["match_id"]),
+                    "attempts": attempts,
+                    "next_attempt_at": retry_at.isoformat(),
+                    "last_error": type(error).__name__,
+                }],
+                on_conflict="prediction_id",
+            )
+            failed += 1
+            continue
         db.upsert(
-            "notification_log",
-            [{"match_id": int(match["id"]), "notification_type": NOTIFICATION_TYPE, "model_version": prediction["model_version"]}],
-            on_conflict="match_id,notification_type",
+            "result_notification_queue",
+            [{
+                "prediction_id": int(evaluation["prediction_id"]),
+                "match_id": int(evaluation["match_id"]),
+                "sent_at": delivered_at.isoformat(),
+                "attempts": int(evaluation.get("attempts", 0)) + 1,
+                "next_attempt_at": delivered_at.isoformat(),
+                "last_error": None,
+            }],
+            on_conflict="prediction_id",
         )
         sent += 1
-    return {"pending": len(pending), "sent": sent}
+    return {"pending": len(pending), "sent": sent, "failed": failed}
 
 
 def main() -> None:

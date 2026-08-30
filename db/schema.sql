@@ -102,12 +102,24 @@ CREATE TABLE IF NOT EXISTS notification_log (
     UNIQUE (match_id, notification_type)
 );
 
+CREATE TABLE IF NOT EXISTS result_notification_queue (
+    prediction_id BIGINT PRIMARY KEY REFERENCES predictions(id) ON DELETE CASCADE,
+    match_id INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+    available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    sent_at TIMESTAMPTZ,
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_error TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(match_date);
 CREATE INDEX IF NOT EXISTS idx_matches_league_date ON matches(league_id, match_date);
 CREATE INDEX IF NOT EXISTS idx_predictions_match ON predictions(match_id);
 CREATE INDEX IF NOT EXISTS idx_team_form_latest ON team_form(team_id, calculated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_player_availability_team ON player_availability(team_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notification_log_sent_at ON notification_log(sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_result_notification_queue_pending ON result_notification_queue(next_attempt_at)
+WHERE sent_at IS NULL;
 
 -- Tables remain unavailable to anon/authenticated clients; scheduled backend
 -- jobs authenticate with the privileged service_role key.
@@ -121,7 +133,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
     team_availability_status,
     predictions,
     prediction_performance,
-    notification_log
+    notification_log,
+    result_notification_queue
 TO service_role;
 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO service_role;
