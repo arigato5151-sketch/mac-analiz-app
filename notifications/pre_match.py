@@ -1,4 +1,4 @@
-"""Refresh context and send one Telegram message around 60 minutes before kickoff."""
+"""Refresh context and send one Telegram message about 20 minutes before kickoff."""
 
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ from notifications.telegram import send_telegram_message
 
 
 NOTIFICATION_TYPE = "pre_match_60m"
-WINDOW_START_MINUTES = 10
-WINDOW_END_MINUTES = 90
+WINDOW_START_MINUTES = 15
+WINDOW_END_MINUTES = 25
 LINEUP_LOOKAHEAD_MINUTES = 90
 
 
@@ -85,7 +85,7 @@ def persist_production_snapshot(
 
 
 def due_matches(matches: list[dict[str, Any]], *, now: datetime) -> list[dict[str, Any]]:
-    """Return fixtures near the 60-minute target, with a late-alert fallback."""
+    """Return fixtures inside the five-minute tolerance around the 20-minute target."""
     start = now + timedelta(minutes=WINDOW_START_MINUTES)
     end = now + timedelta(minutes=WINDOW_END_MINUTES)
     eligible: list[dict[str, Any]] = []

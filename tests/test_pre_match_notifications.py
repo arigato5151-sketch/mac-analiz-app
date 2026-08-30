@@ -5,12 +5,12 @@ from datetime import datetime, timezone
 from notifications.pre_match import due_matches, persist_production_snapshot, pre_match_message
 
 
-def test_due_matches_tolerates_scheduler_delay_around_the_60_minute_target() -> None:
+def test_due_matches_uses_the_twenty_minute_window() -> None:
     now = datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc)
     matches = [
-        {"id": 1, "match_date": "2026-08-29T12:09:00+00:00"},
-        {"id": 2, "match_date": "2026-08-29T13:00:00+00:00"},
-        {"id": 3, "match_date": "2026-08-29T13:31:00+00:00"},
+        {"id": 1, "match_date": "2026-08-29T12:14:00+00:00"},
+        {"id": 2, "match_date": "2026-08-29T12:20:00+00:00"},
+        {"id": 3, "match_date": "2026-08-29T12:26:00+00:00"},
     ]
 
     assert [row["id"] for row in due_matches(matches, now=now)] == [2]
