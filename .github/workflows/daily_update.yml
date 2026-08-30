@@ -53,6 +53,12 @@ jobs:
         run: python -m models.predict --model models/saved_models/latest.joblib --days 3
       - name: Validate data quality
         run: python -m data_pipeline.data_quality --days 3 | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Alert failed morning pipeline
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m notifications.operational_alerts --notify --reason "Sabah veri hattı başarısız oldu"
 
   night:
     if: >-
@@ -74,14 +80,28 @@ jobs:
       - name: Evaluate completed predictions
         run: python -m evaluation.track_performance
       - name: Send evaluated-match Telegram messages
+        id: final_results
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m notifications.final_results
       - name: Send Telegram performance summary
+        id: night_summary
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m notifications.daily_summary --mode night
+      - name: Validate operational health
+        id: health
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m notifications.operational_alerts --notify --fail-on-critical | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Alert failed night notification step
+        if: steps.final_results.outcome == 'failure' || steps.night_summary.outcome == 'failure'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m notifications.operational_alerts --notify --reason "Gece Telegram bildirim adımı başarısız oldu"
