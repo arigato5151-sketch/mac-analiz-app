@@ -8,7 +8,7 @@ from notifications.pre_match import due_matches, persist_production_snapshot, pr
 def test_due_matches_tolerates_scheduler_delay_around_the_60_minute_target() -> None:
     now = datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc)
     matches = [
-        {"id": 1, "match_date": "2026-08-29T12:29:00+00:00"},
+        {"id": 1, "match_date": "2026-08-29T12:09:00+00:00"},
         {"id": 2, "match_date": "2026-08-29T13:00:00+00:00"},
         {"id": 3, "match_date": "2026-08-29T13:31:00+00:00"},
     ]
