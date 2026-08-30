@@ -155,6 +155,19 @@ def load_confirmed_lineups(match_id: int) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def load_odds_history(match_id: int) -> pd.DataFrame:
+    rows = get_db().select_all(
+        "odds_quote_history",
+        columns="bookmaker,odds,captured_at,is_notification_reference",
+        filters={"match_id": f"eq.{match_id}"}, order="captured_at.asc",
+    )
+    frame = pd.DataFrame(rows)
+    if not frame.empty:
+        frame["captured_at"] = pd.to_datetime(frame["captured_at"], utc=True).dt.tz_convert("Europe/Istanbul")
+    return frame
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def load_evaluated_predictions(limit: int = 250) -> pd.DataFrame:
     """Load evaluated predictions from the RLS-protected database view."""
     if limit < 1 or limit > 1_000:

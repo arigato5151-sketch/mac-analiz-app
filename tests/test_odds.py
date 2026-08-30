@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from data_pipeline.odds import parse_match_odds
+import pytest
+
+from data_pipeline.odds import closing_line_value, parse_match_odds
 from notifications.pre_match import pre_match_message
 
 
@@ -43,3 +45,8 @@ def test_pre_match_message_includes_available_bookmaker_odds() -> None:
     )
 
     assert "Bet365 1-X-2: 1 @ 1.80 · X @ 3.40 · 2 @ 4.20" in message
+
+
+def test_closing_line_value_requires_valid_decimal_odds() -> None:
+    assert closing_line_value("2.00", "1.80") == pytest.approx(1 / 9)
+    assert closing_line_value("1.00", "1.80") is None

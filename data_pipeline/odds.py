@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from data_pipeline.api_client import ApiFootballClient
+from db.db_client import SupabaseRestClient
 
 
 DEFAULT_BOOKMAKER_ID = 8
@@ -94,3 +95,40 @@ def fetch_match_odds(api: ApiFootballClient, *, fixture_id: int) -> MatchOdds | 
     """Fetch the preferred bookmaker's current pre-match odds for one fixture."""
     payload = api.get("odds", {"fixture": fixture_id, "bookmaker": DEFAULT_BOOKMAKER_ID})
     return parse_match_odds(payload)
+
+
+def record_odds_quote(
+    db: SupabaseRestClient, *, match_id: int, odds: MatchOdds, captured_at: str,
+    notification_reference: bool = False,
+) -> bool:
+    """Append only meaningful line changes; preserve the exact alert-time quote."""
+    quote = {
+        "match_id": match_id,
+        "bookmaker": odds.bookmaker,
+        "odds": odds.as_snapshot(),
+        "source_updated_at": odds.source_updated_at,
+        "captured_at": captured_at,
+        "is_notification_reference": notification_reference,
+    }
+    if not notification_reference:
+        previous = db.select(
+            "odds_quote_history", columns="odds,source_updated_at",
+            filters={"match_id": f"eq.{match_id}", "bookmaker": f"eq.{odds.bookmaker}"},
+            limit=1, order="captured_at.desc",
+        )
+        if previous and previous[0].get("odds") == quote["odds"] and previous[0].get("source_updated_at") == quote["source_updated_at"]:
+            return False
+    db.insert("odds_quote_history", [quote])
+    return True
+
+
+def closing_line_value(entry_odd: object, closing_odd: object) -> float | None:
+    """Positive CLV means the quoted price shortened after the reference point."""
+    try:
+        entry = float(entry_odd)
+        closing = float(closing_odd)
+    except (TypeError, ValueError):
+        return None
+    if entry <= 1 or closing <= 1:
+        return None
+    return entry / closing - 1

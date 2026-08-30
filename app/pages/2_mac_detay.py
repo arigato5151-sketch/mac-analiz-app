@@ -12,7 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.availability import summarize_availability
-from app.components.data import load_confirmed_lineups, load_match_availability, load_match_baseline, load_upcoming_dashboard
+from app.components.data import load_confirmed_lineups, load_match_availability, load_match_baseline, load_odds_history, load_upcoming_dashboard
 from app.components.ui import (
     configure_page,
     disclaimer,
@@ -172,6 +172,23 @@ try:
         st.caption("Bu alan yalnızca API’nin onaylı ilk 11 kaydı geldiğinde görünür. Mevcut model, tarihsel ilk-11 verisi henüz olmadığı için olasılıkları sonradan yapay olarak değiştirmez.")
 except Exception as exc:
     st.warning(f"Onaylı ilk 11 şu anda yüklenemedi: {exc}")
+
+st.subheader("Oran hareketi")
+try:
+    odds_history = load_odds_history(int(selected_id))
+    if odds_history.empty:
+        st.info("Bu maç için henüz kaydedilmiş oran hareketi yok.")
+    else:
+        odds_rows = odds_history.copy()
+        odds_rows["Zaman"] = odds_rows["captured_at"].dt.strftime("%d.%m %H:%M")
+        odds_rows["Referans"] = odds_rows["is_notification_reference"].map({True: "Bildirim anı", False: "Piyasa güncellemesi"})
+        odds_rows["1"] = odds_rows["odds"].map(lambda item: (item or {}).get("home_win", "—"))
+        odds_rows["X"] = odds_rows["odds"].map(lambda item: (item or {}).get("draw", "—"))
+        odds_rows["2"] = odds_rows["odds"].map(lambda item: (item or {}).get("away_win", "—"))
+        st.dataframe(odds_rows[["Zaman", "bookmaker", "1", "X", "2", "Referans"]].rename(columns={"bookmaker": "Sağlayıcı"}), hide_index=True, use_container_width=True)
+        st.caption("Kapanış oranı, maç başlangıcından önce yakalanabilen son sağlayıcı kotasyonudur. Veri yoksa CLV hesaplanmaz.")
+except Exception as exc:
+    st.warning(f"Oran geçmişi şu anda yüklenemedi: {exc}")
 
 try:
     detail = load_match_baseline(int(selected_id))
