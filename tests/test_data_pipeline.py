@@ -13,6 +13,7 @@ from data_pipeline.fetch_fixtures import (
 from data_pipeline.fetch_injuries import transform_injuries
 from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_team_stats import build_team_form
+from data_pipeline.fetch_results import sync_recent_results
 from data_pipeline.backfill import backfill_history
 
 
@@ -91,6 +92,19 @@ def test_sync_fixtures_filters_untracked_and_preserves_fk_order() -> None:
     assert [call[0] for call in db.upserts] == ["leagues", "teams", "matches"]
     assert api.calls == [
         ("fixtures", {"date": "2026-08-25", "timezone": "Europe/Istanbul"})
+    ]
+
+
+def test_sync_recent_results_reconciles_the_configured_lookback() -> None:
+    api = FakeApi([])
+    db = FakeDb()
+
+    sync_recent_results(api, db, today=date(2026, 8, 30), lookback_days=2)
+
+    assert api.calls == [
+        ("fixtures", {"date": "2026-08-28", "timezone": "Europe/Istanbul"}),
+        ("fixtures", {"date": "2026-08-29", "timezone": "Europe/Istanbul"}),
+        ("fixtures", {"date": "2026-08-30", "timezone": "Europe/Istanbul"}),
     ]
 
 

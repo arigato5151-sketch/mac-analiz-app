@@ -12,6 +12,7 @@ from db.db_client import SupabaseRestClient
 
 
 FRESHNESS_LIMIT = timedelta(hours=36)
+STALE_ACTIVE_GRACE = timedelta(hours=4)
 
 
 def assess_morning_quality(
@@ -19,6 +20,7 @@ def assess_morning_quality(
     predictions: list[dict[str, Any]],
     team_forms: list[dict[str, Any]],
     availability_snapshots: list[dict[str, Any]],
+    active_matches: list[dict[str, Any]] | None = None,
     *,
     now: datetime,
 ) -> dict[str, Any]:
@@ -48,6 +50,12 @@ def assess_morning_quality(
     fresh_availability = fresh_team_ids(availability_snapshots, "refreshed_at")
     missing_forms = sorted(target_team_ids - fresh_forms)
     missing_availability = sorted(target_team_ids - fresh_availability)
+    stale_active_matches = [
+        int(match["id"])
+        for match in (active_matches or [])
+        if datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
+        < now - STALE_ACTIVE_GRACE
+    ]
     return {
         "scheduled_matches": len(scheduled_matches),
         "target_teams": len(target_team_ids),
@@ -55,7 +63,13 @@ def assess_morning_quality(
         "missing_prediction_ids": missing_predictions,
         "stale_form_team_ids": missing_forms,
         "stale_availability_team_ids": missing_availability,
-        "healthy": not (missing_predictions or missing_forms or missing_availability),
+        "stale_active_match_ids": stale_active_matches,
+        "healthy": not (
+            missing_predictions
+            or missing_forms
+            or missing_availability
+            or stale_active_matches
+        ),
     }
 
 
@@ -83,7 +97,22 @@ def main() -> None:
     availability = db.select_all(
         "team_availability_status", columns="team_id,refreshed_at"
     )
-    report = assess_morning_quality(scheduled, predictions, forms, availability, now=now)
+    active_matches = db.select_all(
+        "matches",
+        columns="id,match_date",
+        filters={
+            "status": "in.(scheduled,live)",
+            "match_date": f"lt.{(now - STALE_ACTIVE_GRACE).isoformat()}",
+        },
+    )
+    report = assess_morning_quality(
+        scheduled,
+        predictions,
+        forms,
+        availability,
+        active_matches=active_matches,
+        now=now,
+    )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if not report["healthy"]:
         raise RuntimeError("Morning data-quality validation failed")

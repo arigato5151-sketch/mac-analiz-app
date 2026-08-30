@@ -70,7 +70,7 @@ jobs:
           cache: pip
       - run: python -m pip install --disable-pip-version-check -r requirements.txt
       - name: Sync today's final scores
-        run: python -m data_pipeline.fetch_results
+        run: python -m data_pipeline.fetch_results --lookback-days 7
       - name: Evaluate completed predictions
         run: python -m evaluation.track_performance
       - name: Send evaluated-match Telegram messages

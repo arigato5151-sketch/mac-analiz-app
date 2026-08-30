@@ -38,3 +38,15 @@ def test_quality_report_is_healthy_when_every_target_is_fresh() -> None:
     )
 
     assert report["healthy"] is True
+
+
+def test_quality_report_rejects_stale_active_matches() -> None:
+    now = datetime(2026, 8, 30, 12, tzinfo=timezone.utc)
+    report = assess_morning_quality(
+        [], [], [], [],
+        active_matches=[{"id": 9, "match_date": "2026-08-30T06:00:00+00:00"}],
+        now=now,
+    )
+
+    assert report["stale_active_match_ids"] == [9]
+    assert report["healthy"] is False
