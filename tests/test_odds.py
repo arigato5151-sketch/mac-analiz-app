@@ -26,6 +26,7 @@ def test_parse_match_odds_extracts_model_markets() -> None:
     assert odds.home_win == "1.80"
     assert odds.over_2_5 == "1.95"
     assert odds.btts_no == "2.10"
+    assert odds.as_snapshot()["home_win"] == "1.80"
 
 
 def test_pre_match_message_includes_available_bookmaker_odds() -> None:

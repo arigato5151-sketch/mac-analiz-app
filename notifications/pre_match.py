@@ -189,6 +189,19 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
         except Exception as error:  # Odds are optional; never suppress a prediction alert.
             print(f"Odds unavailable for fixture {match_id}: {type(error).__name__}")
             odds = None
+        if odds is not None:
+            db.upsert(
+                "bookmaker_odds_snapshots",
+                [{
+                    "prediction_id": int(prediction["id"]),
+                    "match_id": match_id,
+                    "bookmaker": odds.bookmaker,
+                    "source_updated_at": odds.source_updated_at,
+                    "odds": odds.as_snapshot(),
+                    "captured_at": now.isoformat(),
+                }],
+                on_conflict="prediction_id",
+            )
         send_telegram_message(
             pre_match_message(
                 match,

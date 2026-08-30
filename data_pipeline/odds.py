@@ -17,6 +17,7 @@ class MatchOdds:
     """Pre-match lines for the three markets used by the prediction model."""
 
     bookmaker: str
+    source_updated_at: str | None = None
     home_win: str | None = None
     draw: str | None = None
     away_win: str | None = None
@@ -38,6 +39,17 @@ class MatchOdds:
                 self.btts_no,
             )
         )
+
+    def as_snapshot(self) -> dict[str, str | None]:
+        return {
+            "home_win": self.home_win,
+            "draw": self.draw,
+            "away_win": self.away_win,
+            "over_2_5": self.over_2_5,
+            "under_2_5": self.under_2_5,
+            "btts_yes": self.btts_yes,
+            "btts_no": self.btts_no,
+        }
 
 
 def _market_values(bets: list[dict[str, Any]], market_name: str) -> dict[str, str]:
@@ -66,6 +78,7 @@ def parse_match_odds(payload: list[dict[str, Any]]) -> MatchOdds | None:
     btts = _market_values(bets, "Both Teams Score")
     odds = MatchOdds(
         bookmaker=str(bookmaker.get("name") or DEFAULT_BOOKMAKER_NAME),
+        source_updated_at=str(payload[0].get("update") or "") or None,
         home_win=winner.get("Home"),
         draw=winner.get("Draw"),
         away_win=winner.get("Away"),

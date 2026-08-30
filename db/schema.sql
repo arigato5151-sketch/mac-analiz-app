@@ -112,6 +112,15 @@ CREATE TABLE IF NOT EXISTS result_notification_queue (
     last_error TEXT
 );
 
+CREATE TABLE IF NOT EXISTS bookmaker_odds_snapshots (
+    prediction_id BIGINT PRIMARY KEY REFERENCES predictions(id) ON DELETE CASCADE,
+    match_id INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+    bookmaker TEXT NOT NULL,
+    source_updated_at TIMESTAMPTZ,
+    odds JSONB NOT NULL,
+    captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(match_date);
 CREATE INDEX IF NOT EXISTS idx_matches_league_date ON matches(league_id, match_date);
 CREATE INDEX IF NOT EXISTS idx_predictions_match ON predictions(match_id);
@@ -120,6 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_player_availability_team ON player_availability(t
 CREATE INDEX IF NOT EXISTS idx_notification_log_sent_at ON notification_log(sent_at DESC);
 CREATE INDEX IF NOT EXISTS idx_result_notification_queue_pending ON result_notification_queue(next_attempt_at)
 WHERE sent_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_bookmaker_odds_snapshots_match ON bookmaker_odds_snapshots(match_id);
 
 -- Tables remain unavailable to anon/authenticated clients; scheduled backend
 -- jobs authenticate with the privileged service_role key.
@@ -134,7 +144,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
     predictions,
     prediction_performance,
     notification_log,
-    result_notification_queue
+    result_notification_queue,
+    bookmaker_odds_snapshots
 TO service_role;
 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO service_role;
