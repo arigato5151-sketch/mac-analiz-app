@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from evaluation.track_performance import actual_result, build_performance_row
+from evaluation.track_performance import (
+    actual_result,
+    build_performance_row,
+    select_official_predictions,
+)
 
 
 @pytest.mark.parametrize(
@@ -45,3 +49,15 @@ def test_build_performance_row_rejects_invalid_probability_sum() -> None:
             {"id": 100, "home_score": 0, "away_score": 0},
             evaluated_at="2026-08-26T12:00:00+00:00",
         )
+
+
+def test_select_official_predictions_keeps_latest_snapshot_per_match() -> None:
+    selected = select_official_predictions(
+        [
+            {"id": 1, "match_id": 10, "predicted_at": "2026-08-30T09:00:00+00:00"},
+            {"id": 2, "match_id": 10, "predicted_at": "2026-08-30T10:00:00+00:00"},
+            {"id": 3, "match_id": 11, "predicted_at": "2026-08-30T09:00:00+00:00"},
+        ]
+    )
+
+    assert {int(row["id"]) for row in selected} == {2, 3}

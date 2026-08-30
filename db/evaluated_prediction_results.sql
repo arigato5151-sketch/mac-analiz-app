@@ -26,13 +26,13 @@ SELECT
     home.name AS home_team,
     away.name AS away_team,
     league.name AS league_name
-FROM public.prediction_performance AS performance
+FROM public.live_prediction_performance AS performance
 JOIN public.matches AS fixture ON fixture.id = performance.match_id
 JOIN public.predictions AS prediction ON prediction.id = performance.prediction_id
 LEFT JOIN public.teams AS home ON home.id = fixture.home_team_id
 LEFT JOIN public.teams AS away ON away.id = fixture.away_team_id
 LEFT JOIN public.leagues AS league ON league.id = fixture.league_id;
 
-GRANT SELECT ON public.evaluated_prediction_results TO anon;
+GRANT SELECT ON public.evaluated_prediction_results TO anon, service_role;
 
 COMMIT;

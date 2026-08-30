@@ -82,6 +82,31 @@ def build_night_message(performance: list[dict[str, Any]]) -> str:
     )
 
 
+def _official_performance_rows(
+    performance: list[dict[str, Any]], predictions: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Choose one latest model snapshot per match for the nightly summary."""
+    predicted_at_by_id = {
+        int(row["id"]): str(row["predicted_at"]) for row in predictions
+    }
+    selected: dict[int, dict[str, Any]] = {}
+    for row in performance:
+        match_id = int(row["match_id"])
+        current = selected.get(match_id)
+        key = (predicted_at_by_id.get(int(row["prediction_id"]), ""), int(row["prediction_id"]))
+        current_key = (
+            (
+                predicted_at_by_id.get(int(current["prediction_id"]), ""),
+                int(current["prediction_id"]),
+            )
+            if current is not None
+            else None
+        )
+        if current_key is None or key > current_key:
+            selected[match_id] = row
+    return sorted(selected.values(), key=lambda row: str(row["evaluated_at"]), reverse=True)
+
+
 def _morning_data(db: SupabaseRestClient) -> tuple[list[dict[str, Any]], ...]:
     now = datetime.now(timezone.utc)
     end = now + timedelta(days=3)
@@ -126,8 +151,15 @@ def main() -> None:
             print("Telegram morning notification skipped: no predictions available")
         return
     else:
+        performance_rows = db.select_all(
+            "prediction_performance",
+            columns="prediction_id,match_id,was_correct,brier_score,evaluated_at",
+        )
         message = build_night_message(
-            db.select("prediction_performance", columns="was_correct,brier_score", limit=30, order="evaluated_at.desc")
+            _official_performance_rows(
+                performance_rows,
+                db.select_all("predictions", columns="id,predicted_at"),
+            )[:30]
         )
 
     if send_from_environment(message):

@@ -55,6 +55,30 @@ def build_performance_row(
     }
 
 
+def select_official_predictions(
+    predictions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep only the latest valid pre-kickoff prediction for each fixture.
+
+    Retraining may leave several model versions for one fixture. Production
+    performance must score the one that was actually available latest before
+    kickoff, not every historical model snapshot.
+    """
+    latest: dict[int, dict[str, Any]] = {}
+    for prediction in predictions:
+        match_id = int(prediction["match_id"])
+        current = latest.get(match_id)
+        candidate_key = (str(prediction["predicted_at"]), int(prediction["id"]))
+        current_key = (
+            (str(current["predicted_at"]), int(current["id"]))
+            if current is not None
+            else None
+        )
+        if current_key is None or candidate_key > current_key:
+            latest[match_id] = prediction
+    return list(latest.values())
+
+
 def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]:
     """Evaluate predictions once, using idempotent upserts for safe retries."""
     predictions = db.select_all(
@@ -63,11 +87,15 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
             "id,match_id,prob_home_win,prob_draw,prob_away_win,predicted_at"
         ),
     )
-    evaluated_ids = {
-        int(row["prediction_id"])
-        for row in db.select_all("prediction_performance", columns="prediction_id")
+    evaluated_match_ids = {
+        int(row["match_id"])
+        for row in db.select_all("prediction_performance", columns="match_id")
     }
-    pending = [row for row in predictions if int(row["id"]) not in evaluated_ids]
+    pending = [
+        row
+        for row in predictions
+        if int(row["match_id"]) not in evaluated_match_ids
+    ]
     if not pending:
         return []
 
@@ -82,10 +110,12 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
     )
     matches_by_id = {int(row["id"]): row for row in finished_matches}
     evaluated_at = datetime.now(timezone.utc).isoformat()
+    official_predictions = select_official_predictions(pending)
     rows = [
         build_performance_row(prediction, match, evaluated_at=evaluated_at)
-        for prediction in pending
+        for prediction in official_predictions
         if (match := matches_by_id.get(int(prediction["match_id"]))) is not None
+        and str(prediction["predicted_at"]) <= str(match["match_date"])
     ]
     return db.upsert(
         "prediction_performance", rows, on_conflict="prediction_id"

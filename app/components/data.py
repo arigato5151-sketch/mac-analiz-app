@@ -107,7 +107,7 @@ def load_match_baseline(match_id: int) -> dict[str, Any]:
 def load_prediction_performance() -> pd.DataFrame:
     db = get_db()
     rows = db.select_all(
-        "prediction_performance",
+        "live_prediction_performance",
         columns=(
             "id,prediction_id,match_id,actual_result,was_correct,brier_score,"
             "evaluated_at"
