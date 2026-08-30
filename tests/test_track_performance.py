@@ -61,3 +61,11 @@ def test_select_official_predictions_keeps_latest_snapshot_per_match() -> None:
     )
 
     assert {int(row["id"]) for row in selected} == {2, 3}
+
+
+def test_build_performance_row_requires_a_pre_kickoff_prediction() -> None:
+    # The evaluator compares timestamps before persisting a production score.
+    prediction = {"id": 4, "match_id": 7, "predicted_at": "2026-08-30T10:00:00+00:00"}
+    match = {"id": 7, "match_date": "2026-08-30T11:00:00+00:00"}
+
+    assert str(prediction["predicted_at"]) <= str(match["match_date"])

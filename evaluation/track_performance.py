@@ -101,7 +101,7 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
 
     finished_matches = db.select_all(
         "matches",
-        columns="id,status,home_score,away_score",
+        columns="id,status,match_date,home_score,away_score",
         filters={
             "status": "eq.finished",
             "home_score": "not.is.null",
