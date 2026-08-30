@@ -19,5 +19,6 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+      - run: python -m db.migrations --validate
       - run: python -m compileall -q app config data_pipeline db evaluation models notifications
       - run: python -m pytest -q

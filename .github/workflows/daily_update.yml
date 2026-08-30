@@ -45,6 +45,8 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Verify production migration ledger
+        run: python -m db.migrations --verify-production | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Sync next three days
         run: python -m data_pipeline.fetch_fixtures --days 3
       - name: Refresh team form, Elo, and availability
@@ -75,6 +77,8 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Verify production migration ledger
+        run: python -m db.migrations --verify-production | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Sync today's final scores
         run: python -m data_pipeline.fetch_results --lookback-days 7
       - name: Evaluate completed predictions
