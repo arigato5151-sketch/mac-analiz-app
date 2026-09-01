@@ -31,7 +31,7 @@ def test_parse_match_odds_extracts_model_markets() -> None:
     assert odds.as_snapshot()["home_win"] == "1.80"
 
 
-def test_pre_match_message_includes_available_bookmaker_odds() -> None:
+def test_pre_match_message_stays_compact_when_bookmaker_odds_exist() -> None:
     odds = parse_match_odds(
         [{"bookmakers": [{"name": "Bet365", "bets": [{"name": "Match Winner", "values": [{"value": "Home", "odd": "1.80"}, {"value": "Draw", "odd": "3.40"}, {"value": "Away", "odd": "4.20"}]}]}]}]
     )
@@ -44,8 +44,8 @@ def test_pre_match_message_includes_available_bookmaker_odds() -> None:
         odds=odds,
     )
 
-    assert "📊 Bet365 oranları" in message
-    assert "1X2  1 @1.80 · X @ 3.40 · 2 @ 4.20" in message
+    assert "Bet365" not in message
+    assert "Tahmin: Ev kazanır %60" in message
 
 
 def test_closing_line_value_requires_valid_decimal_odds() -> None:

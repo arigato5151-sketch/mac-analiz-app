@@ -25,10 +25,8 @@ def test_pre_match_message_shows_every_market() -> None:
         league_name="Lig",
     )
 
-    assert "🤖 Model olasılıkları" in message
-    assert "1X2  1 %60 · X %20 · 2 %20" in message
-    assert "2.5  Üst %55 · Alt %45" in message
-    assert "KG   Var %45 · Yok %55" in message
+    assert "Tahmin: Ev kazanır %60" in message
+    assert "Üst 2.5: %55 · KG Var: %45" in message
 
 
 class _SnapshotDb:
