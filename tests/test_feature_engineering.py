@@ -98,3 +98,23 @@ def test_upcoming_features_use_latest_live_team_form() -> None:
     assert features.loc[2, "home_venue_win_rate_5"] == 0.75
     assert features.loc[2, "away_venue_win_rate_5"] == 0.25
     assert features.loc[2, "elo_diff"] == 135
+
+
+def test_market_odds_are_vig_free_and_fall_back_to_poisson() -> None:
+    matches = [
+        {
+            **completed_match(1, "2026-01-01T12:00:00+00:00", 1, 0),
+            "market_odds": {
+                "home_win": "2.0", "draw": "4.0", "away_win": "4.0",
+                "over_2_5": "1.8", "under_2_5": "2.2", "btts_yes": "1.9", "btts_no": "2.0",
+            },
+        },
+        completed_match(2, "2026-01-08T12:00:00+00:00", 0, 1),
+    ]
+    features, _ = build_training_dataset(matches)
+
+    assert features.loc[0, "market_odds_available"] == 1
+    assert features.loc[0, "market_implied_home_win"] == pytest.approx(0.5)
+    assert features.loc[0, "market_implied_draw"] == pytest.approx(0.25)
+    assert features.loc[1, "market_odds_available"] == 0
+    assert features.loc[1, "market_implied_home_win"] == features.loc[1, "poisson_home_win"]

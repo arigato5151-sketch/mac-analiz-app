@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from models.poisson_model import predict_score_probabilities
+from data_pipeline.odds import vig_free_market_probabilities
 
 
 FEATURE_COLUMNS: tuple[str, ...] = (
@@ -38,6 +39,12 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     "poisson_away_win",
     "poisson_over_2_5",
     "poisson_btts",
+    "market_implied_home_win",
+    "market_implied_draw",
+    "market_implied_away_win",
+    "market_implied_over_2_5",
+    "market_implied_btts",
+    "market_odds_available",
 )
 
 
@@ -157,6 +164,14 @@ class CausalFeatureState:
         home_for = _goal_average(home, 5, scored=True, venue_home=True)
         away_for = _goal_average(away, 5, scored=True, venue_home=False)
         poisson = self.poisson_baseline(row)
+        market = vig_free_market_probabilities(row.get("market_odds") or {})
+        market_features = market or {
+            "market_implied_home_win": poisson.prob_home_win,
+            "market_implied_draw": poisson.prob_draw,
+            "market_implied_away_win": poisson.prob_away_win,
+            "market_implied_over_2_5": poisson.prob_over_2_5,
+            "market_implied_btts": poisson.prob_btts,
+        }
 
         return {
             "league_id": float(row["league_id"]),
@@ -186,6 +201,8 @@ class CausalFeatureState:
             "poisson_away_win": poisson.prob_away_win,
             "poisson_over_2_5": poisson.prob_over_2_5,
             "poisson_btts": poisson.prob_btts,
+            **market_features,
+            "market_odds_available": float(market is not None),
         }
 
     def update(self, row: dict[str, Any]) -> None:

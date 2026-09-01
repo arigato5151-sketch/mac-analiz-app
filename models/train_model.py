@@ -18,6 +18,7 @@ from xgboost import XGBClassifier
 
 from config.settings import PROJECT_ROOT, get_settings
 from db.db_client import SupabaseRestClient
+from data_pipeline.odds import attach_pre_match_odds
 from models.calibration import (
     apply_binary_temperature,
     apply_multiclass_temperature,
@@ -308,7 +309,7 @@ def save_model_bundle(
 
 
 def load_completed_matches(db: SupabaseRestClient) -> list[dict[str, Any]]:
-    return db.select_all(
+    matches = db.select_all(
         "matches",
         columns=(
             "id,league_id,home_team_id,away_team_id,match_date,status,"
@@ -321,6 +322,8 @@ def load_completed_matches(db: SupabaseRestClient) -> list[dict[str, Any]]:
         },
         order="match_date.asc,id.asc",
     )
+    quotes = db.select_all("odds_quote_history", columns="match_id,odds,captured_at", order="captured_at.asc")
+    return attach_pre_match_odds(matches, quotes)
 
 
 def main() -> None:
