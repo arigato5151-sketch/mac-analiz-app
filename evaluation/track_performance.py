@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from math import log
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -14,6 +15,7 @@ from models.shadow import evaluate_shadow_predictions
 RESULT_LABELS = ("home_win", "draw", "away_win")
 PROBABILITY_COLUMNS = ("prob_home_win", "prob_draw", "prob_away_win")
 RESULT_NOTIFICATION_MAX_AGE = timedelta(hours=24)
+LOG_LOSS_EPSILON = 1e-15
 
 
 def actual_result(home_score: int, away_score: int) -> str:
@@ -37,6 +39,13 @@ def binary_market_performance(
     return (probability >= 0.5) == actual_positive, float((probability - target) ** 2)
 
 
+def multiclass_log_loss(probabilities: tuple[float, float, float], outcome_index: int) -> float:
+    """Return stable per-fixture negative log likelihood for the realised 1-X-2 class."""
+    if not 0 <= outcome_index < len(probabilities):
+        raise ValueError("outcome_index must reference a 1-X-2 probability")
+    return float(-log(max(probabilities[outcome_index], LOG_LOSS_EPSILON)))
+
+
 def build_performance_row(
     prediction: dict[str, Any], match: dict[str, Any], *, evaluated_at: str
 ) -> dict[str, Any]:
@@ -58,6 +67,7 @@ def build_performance_row(
         (probability - target) ** 2
         for probability, target in zip(probabilities, one_hot, strict=True)
     )
+    log_loss = multiclass_log_loss(probabilities, outcome_index)
     home_score = int(match["home_score"])
     away_score = int(match["away_score"])
     over_actual = home_score + away_score >= 3
@@ -81,6 +91,7 @@ def build_performance_row(
         "actual_result": outcome,
         "was_correct": predicted_index == outcome_index,
         "brier_score": float(brier_score),
+        "log_loss": log_loss,
         "over_2_5_actual": over_actual,
         "over_2_5_was_correct": over_correct,
         "over_2_5_brier_score": over_brier,

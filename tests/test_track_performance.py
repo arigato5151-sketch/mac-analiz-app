@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from math import log
+
 import pytest
 
 from evaluation.track_performance import (
     actual_result,
     binary_market_performance,
     build_performance_row,
+    multiclass_log_loss,
     select_official_predictions,
 )
 
@@ -36,12 +39,17 @@ def test_build_performance_row_calculates_multiclass_brier_score() -> None:
     assert row["actual_result"] == "home_win"
     assert row["was_correct"] is True
     assert row["brier_score"] == pytest.approx(0.245)
+    assert row["log_loss"] == pytest.approx(-log(0.60))
     assert row["over_2_5_actual"] is True
     assert row["over_2_5_was_correct"] is True
     assert row["over_2_5_brier_score"] == pytest.approx(0.2025)
     assert row["btts_actual"] is True
     assert row["btts_was_correct"] is False
     assert row["btts_brier_score"] == pytest.approx(0.7225)
+
+
+def test_multiclass_log_loss_uses_a_finite_floor_for_zero_probability() -> None:
+    assert multiclass_log_loss((0.0, 0.5, 0.5), 0) > 30
 
 
 def test_binary_market_performance_uses_real_outcome_and_probability() -> None:

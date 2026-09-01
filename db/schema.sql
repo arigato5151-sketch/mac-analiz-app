@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS prediction_performance (
     actual_result TEXT NOT NULL CHECK (actual_result IN ('home_win', 'draw', 'away_win')),
     was_correct BOOLEAN NOT NULL,
     brier_score NUMERIC NOT NULL CHECK (brier_score BETWEEN 0 AND 2),
+    log_loss NUMERIC CHECK (log_loss IS NULL OR log_loss >= 0),
     over_2_5_actual BOOLEAN,
     over_2_5_was_correct BOOLEAN,
     over_2_5_brier_score NUMERIC CHECK (over_2_5_brier_score IS NULL OR over_2_5_brier_score BETWEEN 0 AND 1),
