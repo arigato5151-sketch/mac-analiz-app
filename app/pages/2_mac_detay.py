@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -13,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.components.availability import summarize_availability
 from app.components.data import load_confirmed_lineups, load_match_availability, load_match_baseline, load_odds_history, load_upcoming_dashboard
+from app.components.match_visuals import build_form_comparison, build_radar_comparison
 from app.components.ui import (
     configure_page,
     disclaimer,
@@ -207,6 +209,48 @@ try:
     st.plotly_chart(heatmap, use_container_width=True)
     home_state = detail["home_state"]
     away_state = detail["away_state"]
+
+    st.subheader("Takım karşılaştırması")
+    radar = build_radar_comparison(
+        home_state,
+        away_state,
+        match_at=selected["match_date"].to_pydatetime(),
+    )
+    form = build_form_comparison(home_state, away_state)
+    radar_figure = go.Figure()
+    for column, team_name in (("Ev", selected["home_team"]), ("Deplasman", selected["away_team"])):
+        values = radar[column].tolist()
+        radar_figure.add_trace(
+            go.Scatterpolar(
+                r=[*values, values[0]],
+                theta=[*radar["Metrik"].tolist(), radar["Metrik"].iloc[0]],
+                fill="toself",
+                name=team_name,
+            )
+        )
+    radar_figure.update_layout(
+        polar={"radialaxis": {"visible": True, "range": [0, 100]}},
+        margin={"l": 30, "r": 30, "t": 30, "b": 30},
+        legend={"orientation": "h", "y": -0.15},
+    )
+    form_figure = px.line(
+        form,
+        x="Maç",
+        y="Puan",
+        color="Takım",
+        markers=True,
+        category_orders={"Maç": ["M-5", "M-4", "M-3", "M-2", "M-1"]},
+    ).update_layout(
+        yaxis={"range": [0, 3], "dtick": 1, "title": "Maç puanı"},
+        xaxis_title="Son beş maç · eski → yeni",
+        margin={"l": 30, "r": 20, "t": 30, "b": 30},
+        legend={"orientation": "h", "y": -0.2},
+    )
+    comparison_columns = st.columns(2)
+    comparison_columns[0].plotly_chart(radar_figure, use_container_width=True)
+    comparison_columns[1].plotly_chart(form_figure, use_container_width=True)
+    st.caption("Radar 0–100 ölçeğinde normalize edilmiştir; form grafiği son beş maçın gerçek 0/1/3 puanlarını gösterir.")
+
     elo_cols = st.columns(3)
     elo_cols[0].metric(f"{selected['home_team']} Elo", f"{home_state.elo:.0f}")
     elo_cols[1].metric("Elo farkı", f"{home_state.elo - away_state.elo:+.0f}")
