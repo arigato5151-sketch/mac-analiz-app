@@ -14,6 +14,24 @@ from data_pipeline.fetch_fixtures import SyncSummary, sync_fixtures
 from db.db_client import SupabaseRestClient
 
 
+EXPECTED_GOALS_STAT_TYPES = frozenset({"expected_goals", "xg"})
+EXPECTED_ASSISTS_STAT_TYPES = frozenset({"expected_assists", "expected_assist", "xa", "x_a"})
+
+
+def _statistic_key(value: object) -> str:
+    """Normalize provider labels without relying on an exact spelling."""
+    return "_".join(str(value).strip().lower().replace("-", " ").split())
+
+
+def _non_negative_float(value: object) -> float | None:
+    """Return a valid provider metric or ignore unavailable/non-numeric values."""
+    try:
+        parsed = float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
 def sync_results(
     api: ApiFootballClient, db: SupabaseRestClient, *, match_date: date
 ) -> SyncSummary:
@@ -39,7 +57,7 @@ def sync_recent_results(
         start_date=today - timedelta(days=lookback_days),
         end_date=today,
     )
-    sync_recent_xg(api, db, today=today, lookback_days=lookback_days)
+    sync_recent_expected_metrics(api, db, today=today, lookback_days=lookback_days)
     return summary
 
 
@@ -47,49 +65,99 @@ def extract_expected_goals(
     payload: list[dict[str, Any]], *, home_team_id: int, away_team_id: int,
 ) -> tuple[float, float] | None:
     """Read API-Football xG when the plan/provider exposes the statistic."""
-    values: dict[int, float] = {}
+    metrics = extract_expected_metrics(
+        payload, home_team_id=home_team_id, away_team_id=away_team_id
+    )
+    home_xg = metrics["home_xg"]
+    away_xg = metrics["away_xg"]
+    if home_xg is None or away_xg is None:
+        return None
+    return home_xg, away_xg
+
+
+def extract_expected_metrics(
+    payload: list[dict[str, Any]], *, home_team_id: int, away_team_id: int,
+) -> dict[str, float | None]:
+    """Read provider xG/xA statistics for both teams without inventing missing xA.
+
+    API-Football availability differs by competition and plan. Missing expected-assist
+    statistics are intentionally preserved as ``None`` rather than inferred from
+    actual assists, which would leak post-match outcomes into a predictive feature.
+    """
+    values: dict[int, dict[str, float]] = {}
     for team_stats in payload:
         team_id = (team_stats.get("team") or {}).get("id")
         if team_id not in {home_team_id, away_team_id}:
             continue
         for stat in team_stats.get("statistics", []):
-            kind = str(stat.get("type", "")).lower().replace(" ", "_")
-            if kind not in {"expected_goals", "xg"}:
+            kind = _statistic_key(stat.get("type", ""))
+            metric = (
+                "xg" if kind in EXPECTED_GOALS_STAT_TYPES
+                else "xa" if kind in EXPECTED_ASSISTS_STAT_TYPES
+                else None
+            )
+            if metric is None:
                 continue
-            try:
-                value = float(str(stat.get("value")).replace(",", "."))
-            except (TypeError, ValueError):
-                continue
-            if value >= 0:
-                values[int(team_id)] = value
-    if home_team_id not in values or away_team_id not in values:
-        return None
-    return values[home_team_id], values[away_team_id]
+            value = _non_negative_float(stat.get("value"))
+            if value is not None:
+                values.setdefault(int(team_id), {})[metric] = value
+
+    return {
+        "home_xg": values.get(home_team_id, {}).get("xg"),
+        "away_xg": values.get(away_team_id, {}).get("xg"),
+        "home_xa": values.get(home_team_id, {}).get("xa"),
+        "away_xa": values.get(away_team_id, {}).get("xa"),
+    }
+
+
+def sync_recent_expected_metrics(
+    api: ApiFootballClient, db: SupabaseRestClient, *, today: date, lookback_days: int,
+) -> int:
+    """Persist available xG/xA for recent finished fixtures; missing data is harmless."""
+    start = datetime.combine(today - timedelta(days=lookback_days), datetime.min.time()).isoformat()
+    end = datetime.combine(today + timedelta(days=1), datetime.min.time()).isoformat()
+    matches = db.select_all(
+        "matches",
+        columns=(
+            "id,home_team_id,away_team_id,home_xg,away_xg,home_xa,away_xa,"
+            "expected_metrics_checked_at"
+        ),
+        filters={"status": "eq.finished", "and": f"(match_date.gte.{start},match_date.lt.{end})"},
+    )
+    updates: list[dict[str, Any]] = []
+    for match in matches:
+        checked_at = match.get("expected_metrics_checked_at")
+        already_complete = all(
+            match.get(column) is not None
+            for column in ("home_xg", "away_xg", "home_xa", "away_xa")
+        )
+        # Avoid paying an API request every run when a competition does not expose xA.
+        recently_checked = (
+            checked_at is not None
+            and datetime.fromisoformat(str(checked_at).replace("Z", "+00:00"))
+            >= datetime.now(ZoneInfo("UTC")) - timedelta(hours=12)
+        )
+        if already_complete or recently_checked:
+            continue
+        metrics = extract_expected_metrics(
+            api.get("fixtures/statistics", {"fixture": int(match["id"])}),
+            home_team_id=int(match["home_team_id"]), away_team_id=int(match["away_team_id"]),
+        )
+        updates.append({
+            "id": int(match["id"]),
+            **{column: value for column, value in metrics.items() if value is not None},
+            "expected_metrics_checked_at": datetime.now(ZoneInfo("UTC")).isoformat(),
+        })
+    if updates:
+        db.upsert("matches", updates, on_conflict="id")
+    return len(updates)
 
 
 def sync_recent_xg(
     api: ApiFootballClient, db: SupabaseRestClient, *, today: date, lookback_days: int,
 ) -> int:
-    """Persist available xG for recently finished fixtures; missing API data is harmless."""
-    start = datetime.combine(today - timedelta(days=lookback_days), datetime.min.time()).isoformat()
-    end = datetime.combine(today + timedelta(days=1), datetime.min.time()).isoformat()
-    matches = db.select_all(
-        "matches", columns="id,home_team_id,away_team_id,home_xg,away_xg",
-        filters={"status": "eq.finished", "and": f"(match_date.gte.{start},match_date.lt.{end})"},
-    )
-    updates: list[dict[str, Any]] = []
-    for match in matches:
-        if match.get("home_xg") is not None and match.get("away_xg") is not None:
-            continue
-        xg = extract_expected_goals(
-            api.get("fixtures/statistics", {"fixture": int(match["id"])}),
-            home_team_id=int(match["home_team_id"]), away_team_id=int(match["away_team_id"]),
-        )
-        if xg is not None:
-            updates.append({"id": int(match["id"]), "home_xg": xg[0], "away_xg": xg[1]})
-    if updates:
-        db.upsert("matches", updates, on_conflict="id")
-    return len(updates)
+    """Backward-compatible name for callers that only knew about xG."""
+    return sync_recent_expected_metrics(api, db, today=today, lookback_days=lookback_days)
 
 
 def main() -> None:

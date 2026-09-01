@@ -14,7 +14,11 @@ from data_pipeline.fetch_injuries import transform_injuries
 from data_pipeline.fetch_lineups import transform_lineups
 from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_team_stats import build_team_form
-from data_pipeline.fetch_results import extract_expected_goals, sync_recent_results
+from data_pipeline.fetch_results import (
+    extract_expected_goals,
+    extract_expected_metrics,
+    sync_recent_results,
+)
 from data_pipeline.backfill import backfill_history
 
 
@@ -118,6 +122,25 @@ def test_extract_expected_goals_accepts_provider_statistic() -> None:
         {"team": {"id": 2}, "statistics": [{"type": "Expected Goals", "value": "0.80"}]},
     ]
     assert extract_expected_goals(payload, home_team_id=1, away_team_id=2) == (1.45, 0.8)
+
+
+def test_extract_expected_metrics_reads_xg_and_xa_without_fabricating_missing_values() -> None:
+    payload = [
+        {"team": {"id": 1}, "statistics": [
+            {"type": "Expected Goals", "value": "1.45"},
+            {"type": "Expected Assists", "value": "0.90"},
+        ]},
+        {"team": {"id": 2}, "statistics": [
+            {"type": "xG", "value": "0.80"},
+        ]},
+    ]
+
+    assert extract_expected_metrics(payload, home_team_id=1, away_team_id=2) == {
+        "home_xg": 1.45,
+        "away_xg": 0.8,
+        "home_xa": 0.9,
+        "away_xa": None,
+    }
 
 
 def test_build_team_form_uses_team_perspective() -> None:

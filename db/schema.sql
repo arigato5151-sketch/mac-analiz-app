@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS matches (
     away_score INTEGER CHECK (away_score IS NULL OR away_score >= 0),
     home_xg NUMERIC CHECK (home_xg IS NULL OR home_xg >= 0),
     away_xg NUMERIC CHECK (away_xg IS NULL OR away_xg >= 0),
+    home_xa NUMERIC CHECK (home_xa IS NULL OR home_xa >= 0),
+    away_xa NUMERIC CHECK (away_xa IS NULL OR away_xa >= 0),
+    expected_metrics_checked_at TIMESTAMPTZ,
     CONSTRAINT different_teams CHECK (home_team_id IS NULL OR away_team_id IS NULL OR home_team_id <> away_team_id)
 );
 
