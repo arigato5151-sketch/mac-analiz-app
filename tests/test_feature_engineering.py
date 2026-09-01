@@ -118,3 +118,14 @@ def test_market_odds_are_vig_free_and_fall_back_to_poisson() -> None:
     assert features.loc[0, "market_implied_draw"] == pytest.approx(0.25)
     assert features.loc[1, "market_odds_available"] == 0
     assert features.loc[1, "market_implied_home_win"] == features.loc[1, "poisson_home_win"]
+
+
+def test_availability_and_lineup_features_have_safe_defaults() -> None:
+    match = completed_match(1, "2026-01-01T12:00:00+00:00", 1, 0)
+    match.update({"home_available_count": 19, "away_available_count": 21, "home_lineup_confirmed": True})
+    features, _ = build_training_dataset([match])
+
+    assert features.loc[0, "home_available_count"] == 19
+    assert features.loc[0, "away_available_count"] == 21
+    assert features.loc[0, "home_lineup_confirmed"] == 1
+    assert features.loc[0, "away_lineup_confirmed"] == 0

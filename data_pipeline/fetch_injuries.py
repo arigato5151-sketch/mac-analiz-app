@@ -91,6 +91,14 @@ def sync_injuries(
         ],
         on_conflict="team_id",
     )
+    # Append-only history keeps future training snapshots causal and auditable.
+    db.insert(
+        "team_availability_history",
+        [
+            {"team_id": team_id, "refreshed_at": refreshed_at, "available_count": count}
+            for team_id, count in counts_by_team.items()
+        ],
+    )
     return len(rows)
 
 

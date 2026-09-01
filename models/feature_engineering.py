@@ -45,6 +45,10 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     "market_implied_over_2_5",
     "market_implied_btts",
     "market_odds_available",
+    "home_available_count",
+    "away_available_count",
+    "home_lineup_confirmed",
+    "away_lineup_confirmed",
 )
 
 
@@ -203,6 +207,10 @@ class CausalFeatureState:
             "poisson_btts": poisson.prob_btts,
             **market_features,
             "market_odds_available": float(market is not None),
+            "home_available_count": float(row.get("home_available_count", 22)),
+            "away_available_count": float(row.get("away_available_count", 22)),
+            "home_lineup_confirmed": float(bool(row.get("home_lineup_confirmed", False))),
+            "away_lineup_confirmed": float(bool(row.get("away_lineup_confirmed", False))),
         }
 
     def update(self, row: dict[str, Any]) -> None:

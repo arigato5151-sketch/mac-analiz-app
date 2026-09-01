@@ -35,6 +35,10 @@ class DeleteTrackingDb:
         assert table == "player_availability"
         self.deleted_team_ids.append(filters["team_id"])
 
+    def insert(self, table: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        self.upserts.append((table, rows))
+        return []
+
 
 def test_upcoming_team_targets_groups_and_filters_leagues() -> None:
     db = SelectDb(
@@ -82,3 +86,5 @@ def test_injury_sync_clears_teams_with_no_current_injuries() -> None:
     snapshots = next(rows for table, rows in db.upserts if table == "team_availability_status")
     assert {row["team_id"] for row in snapshots} == {10, 20}
     assert {row["available_count"] for row in snapshots} == {0}
+    history = next(rows for table, rows in db.upserts if table == "team_availability_history")
+    assert {row["team_id"] for row in history} == {10, 20}

@@ -57,7 +57,18 @@ def load_upcoming_matches(
         order="match_date.asc,id.asc",
     )
     quotes = db.select_all("odds_quote_history", columns="match_id,odds,captured_at", order="captured_at.asc")
-    return attach_pre_match_odds(matches, quotes, observed_at=now)
+    availability = db.select_all("team_availability_status", columns="team_id,available_count")
+    counts = {int(row["team_id"]): int(row["available_count"]) for row in availability}
+    lineups = db.select_all("fixture_lineups", columns="match_id,team_id")
+    confirmed = {(int(row["match_id"]), int(row["team_id"])) for row in lineups}
+    enriched = attach_pre_match_odds(matches, quotes, observed_at=now)
+    for match in enriched:
+        home_id, away_id = int(match["home_team_id"]), int(match["away_team_id"])
+        match["home_available_count"] = counts.get(home_id, 22)
+        match["away_available_count"] = counts.get(away_id, 22)
+        match["home_lineup_confirmed"] = (int(match["id"]), home_id) in confirmed
+        match["away_lineup_confirmed"] = (int(match["id"]), away_id) in confirmed
+    return enriched
 
 
 def generate_prediction_rows(
