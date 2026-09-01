@@ -2,9 +2,25 @@ import numpy as np
 import pytest
 
 from models.poisson_model import (
+    dixon_coles_tau,
     estimate_expected_goals,
     predict_score_probabilities,
 )
+
+
+def test_dixon_coles_adjusts_only_low_score_cells_and_rho_zero_is_compatible() -> None:
+    independent = predict_score_probabilities(1.2, 0.9)
+    corrected = predict_score_probabilities(1.2, 0.9, dixon_coles_rho=-0.10)
+
+    assert dixon_coles_tau(2, 2, 1.2, 0.9, -0.10) == 1.0
+    assert corrected.score_probability(0, 0) > independent.score_probability(0, 0)
+    assert corrected.score_probability(1, 1) > independent.score_probability(1, 1)
+    assert corrected.score_matrix.sum() == pytest.approx(1.0, abs=1e-12)
+
+
+def test_dixon_coles_rejects_rho_that_makes_a_low_score_probability_invalid() -> None:
+    with pytest.raises(ValueError, match="non-positive"):
+        predict_score_probabilities(1.0, 1.0, dixon_coles_rho=-1.0)
 
 
 def test_probability_matrix_and_1x2_are_normalized() -> None:

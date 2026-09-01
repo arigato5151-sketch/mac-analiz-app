@@ -20,6 +20,7 @@ class PoissonPrediction:
     prob_away_win: float
     prob_over_2_5: float
     prob_btts: float
+    dixon_coles_rho: float
 
     @property
     def most_likely_score(self) -> tuple[int, int]:
@@ -50,19 +51,57 @@ def _validate_expected_goals(home: float, away: float, max_goals: int) -> None:
         raise ValueError("max_goals must be between 5 and 20")
 
 
+def dixon_coles_tau(
+    home_goals: int,
+    away_goals: int,
+    home_expected_goals: float,
+    away_expected_goals: float,
+    rho: float,
+) -> float:
+    """Return the Dixon-Coles low-score dependence correction factor.
+
+    Only the 0-0, 0-1, 1-0 and 1-1 scorelines are adjusted. This keeps the
+    independent Poisson tail intact while correcting its known low-score bias.
+    """
+    if not isfinite(rho):
+        raise ValueError("Dixon-Coles rho must be finite")
+    if home_goals == 0 and away_goals == 0:
+        tau = 1 - (home_expected_goals * away_expected_goals * rho)
+    elif home_goals == 0 and away_goals == 1:
+        tau = 1 + (home_expected_goals * rho)
+    elif home_goals == 1 and away_goals == 0:
+        tau = 1 + (away_expected_goals * rho)
+    elif home_goals == 1 and away_goals == 1:
+        tau = 1 - rho
+    else:
+        return 1.0
+    if tau <= 0:
+        raise ValueError("Dixon-Coles rho produces a non-positive score probability")
+    return float(tau)
+
+
 def predict_score_probabilities(
     home_expected_goals: float,
     away_expected_goals: float,
     *,
     max_goals: int = 10,
+    dixon_coles_rho: float = 0.0,
 ) -> PoissonPrediction:
-    """Build a normalized score matrix and derived market probabilities."""
+    """Build a normalized Poisson/Dixon-Coles score matrix and market probabilities."""
     _validate_expected_goals(home_expected_goals, away_expected_goals, max_goals)
 
     goals = np.arange(max_goals + 1)
     home_pmf = poisson.pmf(goals, home_expected_goals)
     away_pmf = poisson.pmf(goals, away_expected_goals)
     matrix = np.outer(home_pmf, away_pmf).astype(np.float64)
+    for home_goals, away_goals in ((0, 0), (0, 1), (1, 0), (1, 1)):
+        matrix[home_goals, away_goals] *= dixon_coles_tau(
+            home_goals,
+            away_goals,
+            home_expected_goals,
+            away_expected_goals,
+            dixon_coles_rho,
+        )
 
     # Normalize the tiny truncated tail so all downstream probabilities are
     # internally consistent and sum exactly to one.
@@ -87,6 +126,7 @@ def predict_score_probabilities(
         prob_away_win=away_win,
         prob_over_2_5=over_2_5,
         prob_btts=btts,
+        dixon_coles_rho=float(dixon_coles_rho),
     )
 
 
@@ -126,6 +166,10 @@ def estimate_expected_goals(
     )
 
 
-def predict_from_averages(**averages: float) -> PoissonPrediction:
+def predict_from_averages(
+    *, dixon_coles_rho: float = 0.0, **averages: float
+) -> PoissonPrediction:
     home_lambda, away_lambda = estimate_expected_goals(**averages)
-    return predict_score_probabilities(home_lambda, away_lambda)
+    return predict_score_probabilities(
+        home_lambda, away_lambda, dixon_coles_rho=dixon_coles_rho
+    )
