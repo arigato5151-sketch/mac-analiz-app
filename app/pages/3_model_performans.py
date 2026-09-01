@@ -11,8 +11,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.components.data import load_latest_model_metadata, load_prediction_performance
+from app.components.data import load_latest_model_metadata, load_prediction_performance, load_upcoming_dashboard
 from app.components.live_performance import summarize_live_performance
+from app.components.monte_carlo import simulate_top_pick_accuracy
 from app.components.ui import configure_page, disclaimer
 from config.leagues import LEAGUES_BY_ID
 
@@ -75,6 +76,38 @@ if metadata:
         )
 else:
     st.warning("Kaydedilmiş model değerlendirme metadatası bulunamadı.")
+
+st.subheader("Monte Carlo tahmin belirsizliği")
+try:
+    upcoming = load_upcoming_dashboard(3)
+    probability_columns = ["prob_home_win", "prob_draw", "prob_away_win"]
+    simulation_input = upcoming.dropna(subset=probability_columns)
+    if simulation_input.empty:
+        st.info("Yaklaşan maç tahminleri hazır olduğunda Monte Carlo dağılımı gösterilecek.")
+    else:
+        simulation = simulate_top_pick_accuracy(simulation_input)
+        lower, upper = simulation["Tahmini isabet"].quantile([0.1, 0.9])
+        mean_accuracy = simulation["Tahmini isabet"].mean()
+        histogram = px.histogram(
+            simulation,
+            x="Tahmini isabet",
+            histnorm="probability",
+            nbins=30,
+            labels={"Tahmini isabet": "En güçlü 1-X-2 seçiminin isabet oranı", "probability": "Senaryo payı"},
+        )
+        histogram.add_vline(
+            x=mean_accuracy,
+            line_dash="dash",
+            annotation_text=f"Ortalama %{mean_accuracy * 100:.1f}",
+        )
+        st.plotly_chart(histogram, use_container_width=True)
+        st.caption(
+            f"Önümüzdeki üç gündeki {len(simulation_input)} maç için 10.000 senaryo. "
+            f"Merkez %80 aralığı: %{lower * 100:.1f} – %{upper * 100:.1f}. "
+            "Bu dağılım gerçekleşmiş performans değil, model olasılıklarındaki belirsizliktir."
+        )
+except Exception as exc:
+    st.warning(f"Monte Carlo dağılımı şu anda hazırlanamadı: {exc}")
 
 st.subheader("Canlı tahmin takibi")
 performance = load_prediction_performance()
