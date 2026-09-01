@@ -14,7 +14,7 @@ from data_pipeline.fetch_injuries import transform_injuries
 from data_pipeline.fetch_lineups import transform_lineups
 from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_team_stats import build_team_form
-from data_pipeline.fetch_results import sync_recent_results
+from data_pipeline.fetch_results import extract_expected_goals, sync_recent_results
 from data_pipeline.backfill import backfill_history
 
 
@@ -63,6 +63,9 @@ class FakeDb:
         self.upserts.append((table, rows, on_conflict))
         return rows
 
+    def select_all(self, *_: Any, **__: Any) -> list[dict[str, Any]]:
+        return []
+
 
 @pytest.mark.parametrize(
     ("short", "expected"),
@@ -107,6 +110,14 @@ def test_sync_recent_results_reconciles_the_configured_lookback() -> None:
         ("fixtures", {"date": "2026-08-29", "timezone": "Europe/Istanbul"}),
         ("fixtures", {"date": "2026-08-30", "timezone": "Europe/Istanbul"}),
     ]
+
+
+def test_extract_expected_goals_accepts_provider_statistic() -> None:
+    payload = [
+        {"team": {"id": 1}, "statistics": [{"type": "expected_goals", "value": "1.45"}]},
+        {"team": {"id": 2}, "statistics": [{"type": "Expected Goals", "value": "0.80"}]},
+    ]
+    assert extract_expected_goals(payload, home_team_id=1, away_team_id=2) == (1.45, 0.8)
 
 
 def test_build_team_form_uses_team_perspective() -> None:
