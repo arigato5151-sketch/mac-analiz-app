@@ -1,5 +1,4 @@
--- Read model evaluations in one query for the public Streamlit results page.
--- The view exposes only the selected audit columns; private snapshot rows stay hidden.
+-- The public audit view must not inherit private snapshot-table permissions.
 BEGIN;
 
 CREATE OR REPLACE VIEW public.evaluated_prediction_results
