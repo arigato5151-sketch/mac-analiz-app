@@ -142,6 +142,50 @@ def _segment_metrics(
     return rows
 
 
+def walk_forward_report(
+    features: pd.DataFrame, labels: pd.DataFrame, *, folds: int = 3,
+) -> list[dict[str, Any]]:
+    """Evaluate expanding chronological training windows without changing promotion guards."""
+    if folds < 2:
+        raise ValueError("folds must be at least 2")
+    if len(features) <= 3_000:
+        return []
+    if tuple(features.columns) != FEATURE_COLUMNS or len(features) != len(labels):
+        raise ValueError("Features and labels must match the model contract")
+
+    # Keep the first half as a stable initial fit, then test equal future blocks.
+    first_test_start = len(features) // 2
+    block_size = (len(features) - first_test_start) // folds
+    y_result = labels["result"].to_numpy(dtype=int)
+    report: list[dict[str, Any]] = []
+    for fold in range(folds):
+        test_start = first_test_start + fold * block_size
+        test_end = len(features) if fold == folds - 1 else test_start + block_size
+        validation_start = max(1_000, int(test_start * 0.85))
+        model = _result_model()
+        model.fit(
+            features.iloc[:validation_start], y_result[:validation_start],
+            sample_weight=recency_sample_weights(labels.iloc[:validation_start]["match_date"]),
+            eval_set=[(features.iloc[validation_start:test_start], y_result[validation_start:test_start])],
+            verbose=False,
+        )
+        probabilities = model.predict_proba(features.iloc[test_start:test_end])
+        actual = y_result[test_start:test_end]
+        report.append(
+            {
+                "fold": fold + 1,
+                "train_rows": test_start,
+                "test_rows": test_end - test_start,
+                "test_start": labels.iloc[test_start]["match_date"].isoformat(),
+                "test_end": labels.iloc[test_end - 1]["match_date"].isoformat(),
+                "log_loss": float(log_loss(actual, probabilities, labels=[0, 1, 2])),
+                "brier_score": multiclass_brier_score(actual, probabilities),
+                "expected_calibration_error": expected_calibration_error(actual, probabilities),
+            }
+        )
+    return report
+
+
 def train_models(
     features: pd.DataFrame, labels: pd.DataFrame
 ) -> tuple[dict[str, Any], EvaluationMetrics]:
@@ -334,12 +378,14 @@ def main() -> None:
         default=PROJECT_ROOT / "models" / "saved_models",
     )
     parser.add_argument("--publish-latest", action="store_true")
+    parser.add_argument("--report-walk-forward", action="store_true")
     args = parser.parse_args()
     settings = get_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     matches = load_completed_matches(db)
     features, labels = build_training_dataset(matches)
     bundle, metrics = train_models(features, labels)
+    walk_forward = walk_forward_report(features, labels) if args.report_walk_forward else []
     model_path, metadata_path = save_model_bundle(
         bundle, args.output_dir, publish_latest=args.publish_latest
     )
@@ -350,6 +396,7 @@ def main() -> None:
                 "metrics": asdict(metrics),
                 "model_path": str(model_path),
                 "metadata_path": str(metadata_path),
+                "walk_forward": walk_forward,
             },
             ensure_ascii=False,
             indent=2,
