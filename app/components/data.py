@@ -16,13 +16,37 @@ from models.feature_engineering import CausalFeatureState
 from models.train_model import load_completed_matches
 
 
-@st.cache_resource
+LIVE_DATA_TTL_SECONDS = 300
+MATCH_DETAIL_TTL_SECONDS = 900
+HISTORY_TTL_SECONDS = 900
+REFERENCE_DATA_TTL_SECONDS = 21_600
+MODEL_METADATA_TTL_SECONDS = 3_600
+
+
+@st.cache_resource(show_spinner=False)
 def get_db() -> PublicSupabaseRestClient:
+    """Keep one read-only HTTP client per Streamlit process."""
     settings = get_public_supabase_settings()
     return PublicSupabaseRestClient(settings.supabase_url, settings.supabase_anon_key)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=REFERENCE_DATA_TTL_SECONDS, show_spinner=False)
+def load_reference_catalog() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Cache slowly changing team and league labels separately from live fixtures."""
+    db = get_db()
+    return (
+        pd.DataFrame(db.select_all("teams", columns="id,name,logo_url")),
+        pd.DataFrame(db.select_all("leagues", columns="id,name,country")),
+    )
+
+
+@st.cache_data(ttl=HISTORY_TTL_SECONDS, show_spinner=False)
+def load_completed_match_history() -> list[dict[str, Any]]:
+    """Share the expensive chronological history used by all match detail pages."""
+    return load_completed_matches(get_db())
+
+
+@st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
 def load_upcoming_dashboard(horizon_days: int = 3) -> pd.DataFrame:
     db = get_db()
     now = datetime.now(timezone.utc)
@@ -39,8 +63,7 @@ def load_upcoming_dashboard(horizon_days: int = 3) -> pd.DataFrame:
     if not matches:
         return pd.DataFrame()
 
-    teams = pd.DataFrame(db.select_all("teams", columns="id,name,logo_url"))
-    leagues = pd.DataFrame(db.select_all("leagues", columns="id,name,country"))
+    match_ids = ",".join(str(int(match["id"])) for match in matches)
     predictions = pd.DataFrame(
         db.select_all(
             "predictions",
@@ -48,9 +71,11 @@ def load_upcoming_dashboard(horizon_days: int = 3) -> pd.DataFrame:
                 "match_id,model_version,prob_home_win,prob_draw,prob_away_win,"
                 "prob_over_2_5,prob_btts,predicted_at"
             ),
+            filters={"match_id": f"in.({match_ids})"},
             order="predicted_at.desc",
         )
     )
+    teams, leagues = load_reference_catalog()
     frame = pd.DataFrame(matches)
     if not predictions.empty:
         predictions = predictions.drop_duplicates("match_id", keep="first")
@@ -74,7 +99,7 @@ def load_upcoming_dashboard(horizon_days: int = 3) -> pd.DataFrame:
     return frame.sort_values("match_date").reset_index(drop=True)
 
 
-@st.cache_data(ttl=900, show_spinner="Poisson baseline hazırlanıyor...")
+@st.cache_data(ttl=MATCH_DETAIL_TTL_SECONDS, show_spinner="Poisson baseline hazırlanıyor...")
 def load_match_baseline(match_id: int) -> dict[str, Any]:
     db = get_db()
     upcoming = db.select(
@@ -88,7 +113,7 @@ def load_match_baseline(match_id: int) -> dict[str, Any]:
     )
     if not upcoming:
         raise ValueError("Maç bulunamadı")
-    history = load_completed_matches(db)
+    history = load_completed_match_history()
     state = CausalFeatureState()
     for row in history:
         state.update(row)
@@ -103,7 +128,7 @@ def load_match_baseline(match_id: int) -> dict[str, Any]:
     }
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
 def load_prediction_performance() -> pd.DataFrame:
     db = get_db()
     rows = db.select_all(
@@ -118,7 +143,7 @@ def load_prediction_performance() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
 def load_match_availability(
     home_team_id: int, away_team_id: int
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -143,7 +168,7 @@ def load_match_availability(
     return players, snapshots
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
 def load_confirmed_lineups(match_id: int) -> pd.DataFrame:
     """Load official XIs when both teams have been published by the provider."""
     rows = get_db().select_all(
@@ -154,7 +179,7 @@ def load_confirmed_lineups(match_id: int) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
 def load_odds_history(match_id: int) -> pd.DataFrame:
     rows = get_db().select_all(
         "odds_quote_history",
@@ -167,7 +192,7 @@ def load_odds_history(match_id: int) -> pd.DataFrame:
     return frame
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
 def load_evaluated_predictions(limit: int = 250) -> pd.DataFrame:
     """Load evaluated predictions from the RLS-protected database view."""
     if limit < 1 or limit > 1_000:
@@ -199,7 +224,7 @@ def load_evaluated_predictions(limit: int = 250) -> pd.DataFrame:
     return frame.sort_values("evaluated_at", ascending=False).reset_index(drop=True)
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=MODEL_METADATA_TTL_SECONDS, show_spinner=False)
 def load_latest_model_metadata() -> dict[str, Any] | None:
     model_dir = PROJECT_ROOT / "models" / "saved_models"
     files = sorted(model_dir.glob("model_v*.json"))
@@ -209,4 +234,6 @@ def load_latest_model_metadata() -> dict[str, Any] | None:
 
 
 def clear_app_cache() -> None:
+    """Clear cached values and the read-only client after a configuration refresh."""
     st.cache_data.clear()
+    st.cache_resource.clear()
