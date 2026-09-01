@@ -4,6 +4,8 @@ from models.feature_engineering import (
     FEATURE_COLUMNS,
     build_training_dataset,
     build_upcoming_features,
+    margin_of_victory_multiplier,
+    regress_elo_to_league_mean,
 )
 
 
@@ -129,3 +131,9 @@ def test_availability_and_lineup_features_have_safe_defaults() -> None:
     assert features.loc[0, "away_available_count"] == 21
     assert features.loc[0, "home_lineup_confirmed"] == 1
     assert features.loc[0, "away_lineup_confirmed"] == 0
+
+
+def test_elo_margin_and_season_regression_are_conservative() -> None:
+    assert margin_of_victory_multiplier(4, 0) > margin_of_victory_multiplier(1, 0)
+    assert regress_elo_to_league_mean(1600, 1500) == pytest.approx(1570)
+    assert regress_elo_to_league_mean(None, 1510) == 1510

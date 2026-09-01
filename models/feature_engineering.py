@@ -13,6 +13,7 @@ import pandas as pd
 
 from models.poisson_model import predict_score_probabilities
 from data_pipeline.odds import vig_free_market_probabilities
+from config.leagues import home_advantage_for_league
 
 
 FEATURE_COLUMNS: tuple[str, ...] = (
@@ -117,9 +118,27 @@ def _expected_score(actual_home: float, actual_away: float) -> float:
     return 1.0 / (1.0 + 10.0 ** ((actual_away - actual_home) / 400.0))
 
 
-def _update_elo(home: TeamState, away: TeamState, home_score: float, k: float = 24.0) -> None:
-    expected_home = _expected_score(home.elo + 65.0, away.elo)
-    delta = k * (home_score - expected_home)
+def margin_of_victory_multiplier(goal_diff: int, elo_diff_winner: float) -> float:
+    """FiveThirtyEight-style Elo scaling: a 4-0 win moves more than a 1-0 win."""
+    if goal_diff <= 0:
+        return 1.0
+    return float(np.log(goal_diff + 1) * (2.2 / ((abs(elo_diff_winner) * 0.001) + 2.2)))
+
+
+def regress_elo_to_league_mean(last_known_elo: float | None, league_average: float = 1500.0) -> float:
+    """Use a conservative 30% off-season regression for a returning team."""
+    if last_known_elo is None:
+        return league_average
+    return float(league_average + 0.7 * (last_known_elo - league_average))
+
+
+def _update_elo(
+    home: TeamState, away: TeamState, home_score: float, *, goal_diff: int,
+    home_advantage: float, k: float = 24.0,
+) -> None:
+    expected_home = _expected_score(home.elo + home_advantage, away.elo)
+    winner_gap = home.elo - away.elo if home_score >= 0.5 else away.elo - home.elo
+    delta = k * margin_of_victory_multiplier(goal_diff, winner_gap) * (home_score - expected_home)
     home.elo += delta
     away.elo -= delta
 
@@ -227,7 +246,10 @@ class CausalFeatureState:
         home.results.append(MatchResult(home_score, away_score, home_points, True))
         away.results.append(MatchResult(away_score, home_score, away_points, False))
         score = 1.0 if home_score > away_score else 0.5 if home_score == away_score else 0.0
-        _update_elo(home, away, score)
+        _update_elo(
+            home, away, score, goal_diff=abs(home_score - away_score),
+            home_advantage=home_advantage_for_league(int(row["league_id"])),
+        )
         home.last_match_at = match_at
         away.last_match_at = match_at
         winner = home_id if home_score > away_score else away_id if away_score > home_score else 0

@@ -46,6 +46,17 @@ TRACKED_LEAGUES: tuple[LeagueConfig, ...] = (
 LEAGUES_BY_ID: dict[int, LeagueConfig] = {
     league.id: league for league in TRACKED_LEAGUES
 }
+
+# Empirical priors; unlisted competitions retain the conservative global prior.
+HOME_ADVANTAGE_BY_LEAGUE: dict[int, float] = {
+    39: 62.0, 140: 58.0, 135: 60.0, 78: 55.0, 61: 57.0,
+    203: 63.0, 94: 59.0, 88: 56.0, 40: 61.0, 71: 64.0,
+}
+DEFAULT_HOME_ADVANTAGE = 65.0
+
+
+def home_advantage_for_league(league_id: int) -> float:
+    return HOME_ADVANTAGE_BY_LEAGUE.get(league_id, DEFAULT_HOME_ADVANTAGE)
 TRACKED_LEAGUE_IDS: tuple[int, ...] = tuple(LEAGUES_BY_ID)
 
 
