@@ -2,11 +2,23 @@ import pytest
 
 from models.feature_engineering import (
     FEATURE_COLUMNS,
+    availability_impact_score,
     build_training_dataset,
     build_upcoming_features,
     margin_of_victory_multiplier,
     regress_elo_to_league_mean,
 )
+
+
+def test_availability_impact_score_weights_injury_statuses_without_player_value_guessing() -> None:
+    score = availability_impact_score([
+        {"status": "injured"},
+        {"status": "suspended"},
+        {"status": "doubtful"},
+    ])
+
+    assert score == pytest.approx(2.5 / 11)
+    assert availability_impact_score(None, fallback_unavailable_count=2) == pytest.approx(2 / 11)
 
 
 def completed_match(
@@ -124,13 +136,22 @@ def test_market_odds_are_vig_free_and_fall_back_to_poisson() -> None:
 
 def test_availability_and_lineup_features_have_safe_defaults() -> None:
     match = completed_match(1, "2026-01-01T12:00:00+00:00", 1, 0)
-    match.update({"home_available_count": 19, "away_available_count": 21, "home_lineup_confirmed": True})
+    match.update({
+        "home_available_count": 19,
+        "away_available_count": 21,
+        "home_unavailable_players": [{"status": "injured"}, {"status": "suspended"}],
+        "away_unavailable_count": 1,
+        "home_lineup_confirmed": True,
+    })
     features, _ = build_training_dataset([match])
 
     assert features.loc[0, "home_available_count"] == 19
     assert features.loc[0, "away_available_count"] == 21
     assert features.loc[0, "home_lineup_confirmed"] == 1
     assert features.loc[0, "away_lineup_confirmed"] == 0
+    assert features.loc[0, "home_impact_score"] == pytest.approx(2.15 / 11)
+    assert features.loc[0, "away_impact_score"] == pytest.approx(1 / 11)
+    assert features.loc[0, "impact_score_diff"] == pytest.approx(1.15 / 11)
 
 
 def test_elo_margin_and_season_regression_are_conservative() -> None:

@@ -48,9 +48,45 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     "market_odds_available",
     "home_available_count",
     "away_available_count",
+    "home_impact_score",
+    "away_impact_score",
+    "impact_score_diff",
     "home_lineup_confirmed",
     "away_lineup_confirmed",
 )
+
+
+AVAILABILITY_IMPACT_WEIGHTS: dict[str, float] = {
+    "injured": 1.00,
+    "suspended": 1.15,
+    "doubtful": 0.35,
+}
+STARTING_XI_SIZE = 11
+
+
+def availability_impact_score(
+    unavailable_players: list[dict[str, Any]] | None,
+    *,
+    fallback_unavailable_count: int | None = None,
+) -> float:
+    """Convert known availability problems into a bounded team Impact Score.
+
+    The source has no reliable player-value or expected-minutes field, so the score
+    measures availability pressure rather than pretending to know a player's talent:
+    injured=1.00, suspended=1.15, doubtful=0.35 first-XI equivalents. If only a
+    historical aggregate count exists, it is conservatively treated as injuries.
+    """
+    if unavailable_players:
+        weighted_absences = sum(
+            AVAILABILITY_IMPACT_WEIGHTS.get(
+                str(player.get("status", "injured")).lower(),
+                AVAILABILITY_IMPACT_WEIGHTS["injured"],
+            )
+            for player in unavailable_players
+        )
+    else:
+        weighted_absences = max(0, int(fallback_unavailable_count or 0))
+    return float(np.clip(weighted_absences / STARTING_XI_SIZE, 0.0, 1.0))
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +231,14 @@ class CausalFeatureState:
             "market_implied_over_2_5": poisson.prob_over_2_5,
             "market_implied_btts": poisson.prob_btts,
         }
+        home_impact_score = availability_impact_score(
+            row.get("home_unavailable_players"),
+            fallback_unavailable_count=row.get("home_unavailable_count"),
+        )
+        away_impact_score = availability_impact_score(
+            row.get("away_unavailable_players"),
+            fallback_unavailable_count=row.get("away_unavailable_count"),
+        )
 
         return {
             "league_id": float(row["league_id"]),
@@ -228,6 +272,9 @@ class CausalFeatureState:
             "market_odds_available": float(market is not None),
             "home_available_count": float(row.get("home_available_count", 22)),
             "away_available_count": float(row.get("away_available_count", 22)),
+            "home_impact_score": home_impact_score,
+            "away_impact_score": away_impact_score,
+            "impact_score_diff": home_impact_score - away_impact_score,
             "home_lineup_confirmed": float(bool(row.get("home_lineup_confirmed", False))),
             "away_lineup_confirmed": float(bool(row.get("away_lineup_confirmed", False))),
         }
