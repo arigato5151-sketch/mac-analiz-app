@@ -19,6 +19,7 @@ def test_final_result_message_marks_each_market_correct_or_incorrect() -> None:
     )
 
     assert "Ev 2 — 1 Deplasman" in message
-    assert "1-X-2: Ev kazanır (%60) ✓" in message
-    assert "Üst/Alt 2.5: Üst (%55) ✓" in message
-    assert "KG Var/Yok: KG Yok (%55) ✗" in message
+    assert "Tahmin sonuçları" in message
+    assert "1-X-2: Ev kazanır %60 ✓" in message
+    assert "Üst 2.5: Üst (%55) ✓" in message
+    assert "KG Var: KG Yok (%55) ✗" in message

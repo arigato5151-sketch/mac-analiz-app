@@ -45,7 +45,7 @@ def final_result_message(
     away_team: str,
     league_name: str,
 ) -> str:
-    """Build a compact 1-X-2, totals, and BTTS result audit message."""
+    """Build one concise audited result card with all model markets."""
     home_score = int(match["home_score"])
     away_score = int(match["away_score"])
     outcome_probabilities = {
@@ -60,16 +60,16 @@ def final_result_message(
     return "\n".join(
         (
             f"🏁 {home_team} {home_score} — {away_score} {away_team}",
-            league_name,
-            f"1-X-2: {predicted_outcome} (%{outcome_probability * 100:.0f}) {'✓' if outcome_correct else '✗'}",
-            "Üst/Alt 2.5: "
+            "Tahmin sonuçları",
+            f"1-X-2: {predicted_outcome} %{outcome_probability * 100:.0f} {'✓' if outcome_correct else '✗'}",
+            "Üst 2.5: "
             + _result_line(
                 float(prediction["prob_over_2_5"]),
                 actual_positive=home_score + away_score >= 3,
                 positive_label="Üst",
                 negative_label="Alt",
             ),
-            "KG Var/Yok: "
+            "KG Var: "
             + _result_line(
                 float(prediction["prob_btts"]),
                 actual_positive=home_score > 0 and away_score > 0,

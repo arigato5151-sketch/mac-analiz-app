@@ -83,13 +83,6 @@ jobs:
         run: python -m data_pipeline.fetch_results --lookback-days 7
       - name: Evaluate completed predictions
         run: python -m evaluation.track_performance
-      - name: Send evaluated-match Telegram messages
-        id: final_results
-        continue-on-error: true
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m notifications.final_results
       - name: Send Telegram performance summary
         id: night_summary
         continue-on-error: true
@@ -104,7 +97,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m notifications.operational_alerts --notify --fail-on-critical | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Alert failed night notification step
-        if: steps.final_results.outcome == 'failure' || steps.night_summary.outcome == 'failure'
+        if: steps.night_summary.outcome == 'failure'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
