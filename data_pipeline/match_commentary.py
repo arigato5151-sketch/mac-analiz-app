@@ -16,10 +16,15 @@ MAX_CONTEXT_ITEMS = 12
 # Gemini 3.x may spend part of the generation budget on internal reasoning.
 # A 700-token cap cut user-visible Turkish text mid-sentence in production.
 COMMENTARY_OUTPUT_BUDGETS = (3_072, 4_096)
+DEFAULT_REQUEST_TIMEOUT_MS = 25_000
 
 
 class MatchCommentaryError(RuntimeError):
     """Raised when commentary cannot be generated safely."""
+
+    def __init__(self, message: str, *, reason: str = "provider") -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 def get_gemini_api_key(
@@ -137,6 +142,33 @@ def _ended_at_token_limit(response: object) -> bool:
     return str(finish_reason).endswith("MAX_TOKENS")
 
 
+def _request_timeout_ms() -> int:
+    """Return a bounded provider timeout so a page interaction cannot hang indefinitely."""
+    configured = os.getenv("GEMINI_TIMEOUT_MS", str(DEFAULT_REQUEST_TIMEOUT_MS))
+    try:
+        timeout = int(configured)
+    except ValueError:
+        return DEFAULT_REQUEST_TIMEOUT_MS
+    return min(max(timeout, 5_000), 60_000)
+
+
+def _provider_failure_reason(error: Exception) -> str:
+    """Classify provider failures without retaining provider response text or credentials."""
+    status = getattr(error, "status_code", None)
+    if status is None:
+        response = getattr(error, "response", None)
+        status = getattr(response, "status_code", None)
+    if status in {401, 403}:
+        return "authentication"
+    if status == 429:
+        return "quota"
+    if status in {408, 504}:
+        return "timeout"
+
+    error_name = type(error).__name__.lower()
+    return "timeout" if "timeout" in error_name else "provider"
+
+
 def generate_match_commentary(
     *,
     home_team: str,
@@ -182,7 +214,12 @@ def generate_match_commentary(
             raise MatchCommentaryError(
                 "google-genai is not installed; install requirements.txt"
             ) from error
-        client_factory = lambda key: genai.Client(api_key=key)
+        client_factory = lambda key: genai.Client(
+            api_key=key,
+            # The SDK timeout is expressed in milliseconds. It prevents an unavailable
+            # provider from leaving a Streamlit interaction in a pending state.
+            http_options={"timeout": _request_timeout_ms()},
+        )
 
     try:
         client = client_factory(configured_key)
@@ -200,5 +237,6 @@ def generate_match_commentary(
         raise
     except Exception as error:
         raise MatchCommentaryError(
-            f"Gemini match commentary request failed: {type(error).__name__}"
+            f"Gemini match commentary request failed: {type(error).__name__}",
+            reason=_provider_failure_reason(error),
         ) from error

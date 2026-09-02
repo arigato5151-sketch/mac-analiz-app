@@ -1,5 +1,6 @@
 """Selected match analysis and Poisson score heatmap."""
 
+import logging
 import sys
 from pathlib import Path
 
@@ -23,6 +24,9 @@ from app.components.ui import (
     probability_percent,
 )
 from data_pipeline.match_commentary import MatchCommentaryError, generate_match_commentary
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 configure_page("Maç Detay")
@@ -247,8 +251,15 @@ try:
                     draw_probability=float(probabilities[1]),
                     away_win_probability=float(probabilities[2]),
                 )
-        except MatchCommentaryError:
-            st.error("Yorum şu anda üretilemedi. Gemini yapılandırmasını ve kota durumunu kontrol edin.")
+        except MatchCommentaryError as error:
+            # Keep provider details and credentials out of both the UI and application logs.
+            LOGGER.warning("Gemini commentary unavailable: reason=%s", error.reason)
+            user_messages = {
+                "authentication": "Yapay zekâ yorum servisi doğrulanamadı. Uygulama yöneticisi anahtar ayarını kontrol etmelidir.",
+                "quota": "Yapay zekâ yorum kotası geçici olarak dolu. Birkaç dakika sonra tekrar deneyin.",
+                "timeout": "Yapay zekâ yorum servisi zaman aşımına uğradı. Lütfen tekrar deneyin.",
+            }
+            st.error(user_messages.get(error.reason, "Yorum şu anda üretilemedi. Lütfen tekrar deneyin."))
         except Exception:
             st.error("Yorum hazırlanırken beklenmeyen bir hata oluştu.")
 

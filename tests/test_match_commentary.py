@@ -7,6 +7,8 @@ import pytest
 from data_pipeline.match_commentary import (
     MatchCommentaryError,
     _ensure_readable_paragraphs,
+    _provider_failure_reason,
+    _request_timeout_ms,
     build_match_commentary_prompt,
     generate_match_commentary,
     get_gemini_api_key,
@@ -140,3 +142,21 @@ def test_generation_wraps_provider_error_without_secret() -> None:
         )
 
     assert "private-key" not in str(error.value)
+
+
+def test_provider_error_is_classified_without_keeping_response_text() -> None:
+    class QuotaError(Exception):
+        status_code = 429
+
+    class TimeoutError(Exception):
+        pass
+
+    assert _provider_failure_reason(QuotaError("private-provider-detail")) == "quota"
+    assert _provider_failure_reason(TimeoutError("private-provider-detail")) == "timeout"
+
+
+def test_timeout_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GEMINI_TIMEOUT_MS", "999999")
+    assert _request_timeout_ms() == 60_000
+    monkeypatch.setenv("GEMINI_TIMEOUT_MS", "invalid")
+    assert _request_timeout_ms() == 25_000
