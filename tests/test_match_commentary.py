@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -58,32 +57,39 @@ def test_prompt_contains_metrics_but_rejects_invalid_probability_sum() -> None:
 
 
 def test_generation_uses_requested_model_and_keeps_key_out_of_errors() -> None:
-    class FakeModel:
-        def __init__(self, model_name: str) -> None:
-            self.model_name = model_name
+    class FakeModels:
+        def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
 
-        def generate_content(self, prompt: str, generation_config: dict[str, object]) -> object:
-            self.calls.append({"prompt": prompt, "generation_config": generation_config})
+        def generate_content(
+            self, *, model: str, contents: str, config: dict[str, object]
+        ) -> object:
+            self.calls.append({"model": model, "contents": contents, "config": config})
             return type("Response", (), {"text": "İlk paragraf.\n\nİkinci paragraf."})()
 
-    created: list[FakeModel] = []
+    class FakeClient:
+        def __init__(self, key: str) -> None:
+            self.key = key
+            self.models = FakeModels()
 
-    def factory(model_name: str) -> FakeModel:
-        model = FakeModel(model_name)
-        created.append(model)
-        return model
+    created: list[FakeClient] = []
+
+    def factory(key: str) -> FakeClient:
+        client = FakeClient(key)
+        created.append(client)
+        return client
 
     commentary = generate_match_commentary(
         **_arguments(),  # type: ignore[arg-type]
         api_key="private-key",
-        model_name="gemini-1.5-flash",
+        model_name="gemini-3.6-flash",
         client_factory=factory,
     )
 
     assert commentary.startswith("İlk paragraf")
-    assert created[0].model_name == "gemini-1.5-flash"
-    assert created[0].calls[0]["generation_config"] == {"temperature": 0.45, "max_output_tokens": 700}
+    assert created[0].key == "private-key"
+    assert created[0].models.calls[0]["model"] == "gemini-3.6-flash"
+    assert created[0].models.calls[0]["config"] == {"temperature": 0.45, "max_output_tokens": 700}
 
 
 def test_generation_wraps_provider_error_without_secret() -> None:

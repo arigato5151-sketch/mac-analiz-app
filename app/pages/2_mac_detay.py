@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.availability import summarize_availability
+from app.components.commentary import summarize_absences, summarize_form
 from app.components.data import load_confirmed_lineups, load_match_availability, load_match_baseline, load_odds_history, load_upcoming_dashboard
 from app.components.match_visuals import build_form_comparison, build_radar_comparison
 from app.components.ui import (
@@ -21,6 +22,7 @@ from app.components.ui import (
     prediction_signal,
     probability_percent,
 )
+from data_pipeline.match_commentary import MatchCommentaryError, generate_match_commentary
 
 
 configure_page("Maç Detay")
@@ -51,6 +53,7 @@ selected_id = st.selectbox(
     format_func=lambda match_id: matches.loc[matches["id"] == match_id, "label"].iloc[0],
 )
 selected = matches.loc[matches["id"] == selected_id].iloc[0]
+availability_data: list[dict[str, object]] = []
 
 st.subheader(f"{selected['home_team']} — {selected['away_team']}")
 st.caption(f"{selected['league_name']} · {selected['match_date'].strftime('%d.%m.%Y %H:%M')}")
@@ -209,6 +212,49 @@ try:
     st.plotly_chart(heatmap, use_container_width=True)
     home_state = detail["home_state"]
     away_state = detail["away_state"]
+
+    st.subheader("Yapay Zeka Maç Yorumu")
+    st.caption(
+        "Yorum; mevcut model olasılıkları, Poisson beklenen golü, son form ve doğrulanmış "
+        "kadro verisinden üretilir. Kesin sonuç veya bahis tavsiyesi değildir."
+    )
+    commentary_key = f"gemini_commentary:{int(selected_id)}:{selected.get('model_version', 'pending')}"
+    probabilities = [
+        selected.get("prob_home_win"),
+        selected.get("prob_draw"),
+        selected.get("prob_away_win"),
+    ]
+    has_probabilities = all(pd.notna(probability) for probability in probabilities)
+    if not has_probabilities:
+        st.info("Yapay zeka yorumu için önce bu maçın 1X2 model olasılıkları hazırlanmalıdır.")
+    elif st.button("Yorumu oluştur", key=f"generate_commentary:{int(selected_id)}"):
+        try:
+            with st.spinner("Maç yorumu hazırlanıyor..."):
+                st.session_state[commentary_key] = generate_match_commentary(
+                    home_team=str(selected["home_team"]),
+                    away_team=str(selected["away_team"]),
+                    home_xg=float(baseline.home_expected_goals),
+                    away_xg=float(baseline.away_expected_goals),
+                    home_absences=summarize_absences(
+                        availability_data, team_id=int(selected["home_team_id"])
+                    ),
+                    away_absences=summarize_absences(
+                        availability_data, team_id=int(selected["away_team_id"])
+                    ),
+                    home_form=summarize_form(home_state),
+                    away_form=summarize_form(away_state),
+                    home_win_probability=float(probabilities[0]),
+                    draw_probability=float(probabilities[1]),
+                    away_win_probability=float(probabilities[2]),
+                )
+        except MatchCommentaryError:
+            st.error("Yorum şu anda üretilemedi. Gemini yapılandırmasını ve kota durumunu kontrol edin.")
+        except Exception:
+            st.error("Yorum hazırlanırken beklenmeyen bir hata oluştu.")
+
+    commentary = st.session_state.get(commentary_key)
+    if commentary:
+        st.info(commentary)
 
     st.subheader("Takım karşılaştırması")
     radar = build_radar_comparison(

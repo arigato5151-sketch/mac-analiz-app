@@ -10,7 +10,7 @@ from typing import Any
 from config.settings import PROJECT_ROOT, _load_env_file
 
 
-DEFAULT_MODEL = "gemini-1.5-flash"
+DEFAULT_MODEL = "gemini-3.6-flash"
 MAX_CONTEXT_ITEMS = 12
 
 
@@ -152,19 +152,19 @@ def generate_match_commentary(
 
     if client_factory is None:
         try:
-            import google.generativeai as genai
+            from google import genai
         except ImportError as error:
             raise MatchCommentaryError(
-                "google-generativeai is not installed; install requirements.txt"
+                "google-genai is not installed; install requirements.txt"
             ) from error
-        genai.configure(api_key=configured_key)
-        client_factory = genai.GenerativeModel
+        client_factory = lambda key: genai.Client(api_key=key)
 
     try:
-        client = client_factory(configured_model)
-        response = client.generate_content(
-            prompt,
-            generation_config={"temperature": 0.45, "max_output_tokens": 700},
+        client = client_factory(configured_key)
+        response = client.models.generate_content(
+            model=configured_model,
+            contents=prompt,
+            config={"temperature": 0.45, "max_output_tokens": 700},
         )
         return _extract_text(response)
     except MatchCommentaryError:
