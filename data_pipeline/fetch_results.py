@@ -139,8 +139,14 @@ def sync_recent_expected_metrics(
         )
         if already_complete or recently_checked:
             continue
+        try:
+            statistics = api.get("fixtures/statistics", {"fixture": int(match["id"])})
+        except Exception as error:
+            # Final scores remain critical; optional xG/xA must not stop evaluation.
+            print(f"Expected-metric fetch skipped for fixture {int(match['id'])}: {type(error).__name__}")
+            continue
         metrics = extract_expected_metrics(
-            api.get("fixtures/statistics", {"fixture": int(match["id"])}),
+            statistics,
             home_team_id=int(match["home_team_id"]), away_team_id=int(match["away_team_id"]),
         )
         updates.append({

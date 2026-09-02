@@ -57,6 +57,13 @@ class FakeApi:
         return self.response
 
 
+class FailingStatisticsApi(FakeApi):
+    def get(self, endpoint: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        if endpoint == "fixtures/statistics":
+            raise RuntimeError("quota")
+        return super().get(endpoint, params)
+
+
 class FakeDb:
     def __init__(self) -> None:
         self.upserts: list[tuple[str, list[dict[str, Any]], str | None]] = []
@@ -141,6 +148,26 @@ def test_extract_expected_metrics_reads_xg_and_xa_without_fabricating_missing_va
         "home_xa": 0.9,
         "away_xa": None,
     }
+
+
+def test_optional_expected_metrics_do_not_block_result_reconciliation() -> None:
+    from data_pipeline.fetch_results import sync_recent_expected_metrics
+
+    db = FakeDb()
+    db.select_all = lambda *_args, **_kwargs: [{
+        "id": 1,
+        "home_team_id": 10,
+        "away_team_id": 20,
+        "home_xg": None,
+        "away_xg": None,
+        "home_xa": None,
+        "away_xa": None,
+        "expected_metrics_checked_at": None,
+    }]
+
+    assert sync_recent_expected_metrics(
+        FailingStatisticsApi([]), db, today=date(2026, 9, 2), lookback_days=0
+    ) == 0
 
 
 def test_build_team_form_uses_team_perspective() -> None:
