@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from notifications.pre_match import due_matches, persist_production_snapshot, pre_match_message
+from notifications.pre_match import (
+    _absence_summary,
+    _telegram_commentary,
+    due_matches,
+    persist_production_snapshot,
+    pre_match_message,
+)
 
 
 def test_due_matches_uses_the_twenty_minute_window() -> None:
@@ -27,6 +33,31 @@ def test_pre_match_message_shows_every_market() -> None:
 
     assert "Tahmin: Ev kazanır %60" in message
     assert "Üst 2.5: %55 · KG Var: %45" in message
+
+
+def test_pre_match_message_adds_a_bounded_ai_commentary_section() -> None:
+    message = pre_match_message(
+        {"match_date": "2026-08-29T16:00:00+00:00"},
+        {"prob_home_win": 0.6, "prob_draw": 0.2, "prob_away_win": 0.2, "prob_over_2_5": 0.55, "prob_btts": 0.45},
+        home_team="Ev",
+        away_team="Deplasman",
+        league_name="Lig",
+        commentary="İlk paragraf.\n\nİkinci paragraf.",
+    )
+
+    assert "🧠 Maç yorumu" in message
+    assert message.endswith("İkinci paragraf.")
+    assert len(_telegram_commentary("kelime " * 500) or "") <= 1_401
+
+
+def test_absence_summary_keeps_only_relevant_confirmed_absences() -> None:
+    rows = [
+        {"team_id": 1, "player_name": "A", "status": "injured"},
+        {"team_id": 1, "player_name": "B", "status": "available"},
+        {"team_id": 2, "player_name": "C", "status": "suspended"},
+    ]
+
+    assert _absence_summary(rows, team_id=1) == ["A (sakat)"]
 
 
 class _SnapshotDb:

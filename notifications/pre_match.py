@@ -18,9 +18,11 @@ from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_injuries import sync_injuries
 from data_pipeline.fetch_lineups import sync_fixture_lineups
 from data_pipeline.fetch_team_stats import sync_team_form
+from data_pipeline.match_commentary import MatchCommentaryError, generate_match_commentary
 from data_pipeline.odds import MatchOdds, fetch_match_odds, record_odds_quote
 from data_pipeline.refresh_context import current_elo_ratings
 from db.db_client import DatabaseError, SupabaseRestClient
+from models.feature_engineering import CausalFeatureState
 from models.predict import generate_prediction_rows, load_latest_team_forms, persist_predictions, resolve_model_path
 from models.shadow import run_shadow_predictions
 from models.train_model import load_completed_matches
@@ -31,6 +33,71 @@ NOTIFICATION_TYPE = "pre_match_60m"
 WINDOW_START_MINUTES = 15
 WINDOW_END_MINUTES = 25
 LINEUP_LOOKAHEAD_MINUTES = 90
+MAX_TELEGRAM_COMMENTARY_CHARS = 1_400
+
+
+def _form_summary(form: dict[str, Any] | None) -> str:
+    """Format refreshed team-form data without claiming unavailable match history."""
+    if not form:
+        return "Güncel form verisi yok"
+    return (
+        f"Son 5 galibiyet oranı %{float(form.get('win_rate_last5') or 0) * 100:.0f}; "
+        f"atılan gol {float(form.get('avg_goals_scored_last5') or 0):.2f}; "
+        f"yenilen gol {float(form.get('avg_goals_conceded_last5') or 0):.2f}"
+    )
+
+
+def _absence_summary(rows: list[dict[str, Any]], *, team_id: int) -> list[str]:
+    labels = {"injured": "sakat", "suspended": "cezalı", "doubtful": "şüpheli"}
+    return [
+        f"{str(row['player_name'])[:100]} ({labels[str(row['status'])]})"
+        for row in rows
+        if int(row.get("team_id", -1)) == team_id
+        and str(row.get("status")) in labels
+        and row.get("player_name")
+    ][:12]
+
+
+def _telegram_commentary(text: str | None) -> str | None:
+    """Keep the optional AI section safely below Telegram's message size limit."""
+    if not text or not text.strip():
+        return None
+    normalized = text.strip()
+    if len(normalized) > MAX_TELEGRAM_COMMENTARY_CHARS:
+        normalized = normalized[:MAX_TELEGRAM_COMMENTARY_CHARS].rsplit(" ", 1)[0] + "…"
+    return normalized
+
+
+def generate_notification_commentary(
+    *,
+    match: dict[str, Any],
+    prediction: dict[str, Any],
+    historical: list[dict[str, Any]],
+    team_forms: dict[int, dict[str, Any]],
+    availability_rows: list[dict[str, Any]],
+    home_team: str,
+    away_team: str,
+) -> str:
+    """Generate one pre-kickoff commentary using the same refreshed model context."""
+    state = CausalFeatureState()
+    for completed_match in historical:
+        state.update(completed_match)
+    baseline = state.poisson_baseline(match)
+    home_id = int(match["home_team_id"])
+    away_id = int(match["away_team_id"])
+    return generate_match_commentary(
+        home_team=home_team,
+        away_team=away_team,
+        home_xg=baseline.home_expected_goals,
+        away_xg=baseline.away_expected_goals,
+        home_absences=_absence_summary(availability_rows, team_id=home_id),
+        away_absences=_absence_summary(availability_rows, team_id=away_id),
+        home_form=_form_summary(team_forms.get(home_id)),
+        away_form=_form_summary(team_forms.get(away_id)),
+        home_win_probability=float(prediction["prob_home_win"]),
+        draw_probability=float(prediction["prob_draw"]),
+        away_win_probability=float(prediction["prob_away_win"]),
+    )
 
 
 def persist_production_snapshot(
@@ -104,6 +171,7 @@ def pre_match_message(
     away_team: str,
     league_name: str,
     odds: MatchOdds | None = None,
+    commentary: str | None = None,
 ) -> str:
     kickoff = datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
     outcomes = {
@@ -112,16 +180,18 @@ def pre_match_message(
         "Deplasman kazanır": float(prediction["prob_away_win"]),
     }
     outcome, probability = max(outcomes.items(), key=lambda item: item[1])
-    return "\n".join(
-        (
-            f"⚽ {home_team} — {away_team}",
-            f"⏰ {kickoff.astimezone(ZoneInfo('Europe/Istanbul')).strftime('%d.%m · %H:%M')}",
-            "",
-            f"Tahmin: {outcome} %{probability * 100:.0f}",
-            f"Üst 2.5: %{float(prediction['prob_over_2_5']) * 100:.0f} · "
-            f"KG Var: %{float(prediction['prob_btts']) * 100:.0f}",
-        )
-    )
+    lines = [
+        f"⚽ {home_team} — {away_team}",
+        f"⏰ {kickoff.astimezone(ZoneInfo('Europe/Istanbul')).strftime('%d.%m · %H:%M')}",
+        "",
+        f"Tahmin: {outcome} %{probability * 100:.0f}",
+        f"Üst 2.5: %{float(prediction['prob_over_2_5']) * 100:.0f} · "
+        f"KG Var: %{float(prediction['prob_btts']) * 100:.0f}",
+    ]
+    safe_commentary = _telegram_commentary(commentary)
+    if safe_commentary:
+        lines.extend(("", "🧠 Maç yorumu", safe_commentary))
+    return "\n".join(lines)
 
 
 def _pending_matches(db: SupabaseRestClient, *, now: datetime) -> list[dict[str, Any]]:
@@ -202,7 +272,9 @@ def _refresh_and_predict(
     api: ApiFootballClient,
     db: SupabaseRestClient,
     matches: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], str]:
+) -> tuple[
+    list[dict[str, Any]], str, list[dict[str, Any]], dict[int, dict[str, Any]]
+]:
     """Refresh only the affected teams, then regenerate their probabilities."""
     historical = load_completed_matches(db)
     team_ids = {
@@ -228,12 +300,13 @@ def _refresh_and_predict(
     model_path = resolve_model_path(PROJECT_ROOT / "models" / "saved_models" / "latest.joblib")
     bundle = joblib.load(model_path)
     model_version = str(bundle.get("model_version", model_path.stem))
+    team_forms = load_latest_team_forms(db, team_ids)
     rows = generate_prediction_rows(
         bundle,
         historical,
         matches,
         model_version=model_version,
-        team_form_by_id=load_latest_team_forms(db, team_ids),
+        team_form_by_id=team_forms,
     )
     persisted = persist_predictions(db, rows)
     try:
@@ -241,12 +314,12 @@ def _refresh_and_predict(
             db,
             matches=matches,
             historical_matches=historical,
-            team_form_by_id=load_latest_team_forms(db, team_ids),
+            team_form_by_id=team_forms,
         )
     except Exception as error:
         # Shadow evaluation must never delay or suppress a production alert.
         print(f"Shadow forecast skipped: {type(error).__name__}")
-    return persisted, model_version
+    return persisted, model_version, historical, team_forms
 
 
 def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
@@ -265,7 +338,7 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
     odds_history_rows = sync_soon_odds(api, db, now=now)
     if not matches:
         return {"due_matches": 0, "sent": 0, "lineup_rows": lineup_rows, "odds_history_rows": odds_history_rows, "api": api.diagnostics()}
-    predictions, model_version = _refresh_and_predict(api, db, matches)
+    predictions, model_version, historical, team_forms = _refresh_and_predict(api, db, matches)
     predictions_by_match = {int(row["match_id"]): row for row in predictions}
     team_ids = {int(team_id) for match in matches for team_id in (match["home_team_id"], match["away_team_id"])}
     league_ids = {int(match["league_id"]) for match in matches}
@@ -277,6 +350,11 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
         int(row["id"]): str(row["name"])
         for row in db.select_all("leagues", columns="id,name", filters={"id": f"in.({','.join(map(str, league_ids))})"})
     }
+    availability_rows = db.select_all(
+        "player_availability",
+        columns="team_id,player_name,status",
+        filters={"team_id": f"in.({','.join(map(str, team_ids))})"},
+    )
     sent = 0
     for match in matches:
         match_id = int(match["id"])
@@ -310,6 +388,20 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
                 }],
                 on_conflict="prediction_id",
             )
+        try:
+            commentary = generate_notification_commentary(
+                match=match,
+                prediction=prediction,
+                historical=historical,
+                team_forms=team_forms,
+                availability_rows=availability_rows,
+                home_team=teams.get(int(match["home_team_id"]), "Ev sahibi"),
+                away_team=teams.get(int(match["away_team_id"]), "Deplasman"),
+            )
+        except MatchCommentaryError as error:
+            # An optional LLM must never suppress the time-sensitive model alert.
+            print(f"Gemini commentary skipped for fixture {match_id}: {type(error).__name__}")
+            commentary = None
         send_telegram_message(
             pre_match_message(
                 match,
@@ -318,6 +410,7 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
                 away_team=teams.get(int(match["away_team_id"]), "Deplasman"),
                 league_name=leagues.get(int(match["league_id"]), "Lig"),
                 odds=odds,
+                commentary=commentary,
             ),
             bot_token=bot_token,
             chat_id=chat_id,
