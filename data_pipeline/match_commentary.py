@@ -12,6 +12,7 @@ from config.settings import PROJECT_ROOT, _load_env_file
 
 DEFAULT_MODEL = "gemini-3.6-flash"
 MAX_CONTEXT_ITEMS = 12
+COMMENTARY_OUTPUT_BUDGETS = (2_048, 3_072)
 
 
 class MatchCommentaryError(RuntimeError):
@@ -112,6 +113,13 @@ def _extract_text(response: object) -> str:
     return text.strip()
 
 
+def _ended_at_token_limit(response: object) -> bool:
+    """Identify incomplete provider output without relying on SDK enum imports."""
+    candidates = getattr(response, "candidates", None) or []
+    finish_reason = getattr(candidates[0], "finish_reason", None) if candidates else None
+    return str(finish_reason).endswith("MAX_TOKENS")
+
+
 def generate_match_commentary(
     *,
     home_team: str,
@@ -161,12 +169,16 @@ def generate_match_commentary(
 
     try:
         client = client_factory(configured_key)
-        response = client.models.generate_content(
-            model=configured_model,
-            contents=prompt,
-            config={"temperature": 0.45, "max_output_tokens": 700},
-        )
-        return _extract_text(response)
+        for max_output_tokens in COMMENTARY_OUTPUT_BUDGETS:
+            response = client.models.generate_content(
+                model=configured_model,
+                contents=prompt,
+                config={"max_output_tokens": max_output_tokens},
+            )
+            commentary = _extract_text(response)
+            if not _ended_at_token_limit(response):
+                return commentary
+        raise MatchCommentaryError("Gemini commentary reached the output limit twice")
     except MatchCommentaryError:
         raise
     except Exception as error:

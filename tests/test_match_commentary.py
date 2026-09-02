@@ -89,7 +89,36 @@ def test_generation_uses_requested_model_and_keeps_key_out_of_errors() -> None:
     assert commentary.startswith("İlk paragraf")
     assert created[0].key == "private-key"
     assert created[0].models.calls[0]["model"] == "gemini-3.6-flash"
-    assert created[0].models.calls[0]["config"] == {"temperature": 0.45, "max_output_tokens": 700}
+    assert created[0].models.calls[0]["config"] == {"max_output_tokens": 2_048}
+
+
+def test_generation_retries_once_when_the_first_response_hits_token_limit() -> None:
+    class FakeModels:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def generate_content(
+            self, *, model: str, contents: str, config: dict[str, object]
+        ) -> object:
+            self.calls.append({"model": model, "contents": contents, "config": config})
+            finish_reason = "MAX_TOKENS" if len(self.calls) == 1 else "STOP"
+            candidate = type("Candidate", (), {"finish_reason": finish_reason})()
+            return type("Response", (), {"text": "Tam yorum.", "candidates": [candidate]})()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.models = FakeModels()
+
+    client = FakeClient()
+    assert generate_match_commentary(
+        **_arguments(),  # type: ignore[arg-type]
+        api_key="private-key",
+        client_factory=lambda _: client,
+    ) == "Tam yorum."
+    assert [call["config"] for call in client.models.calls] == [
+        {"max_output_tokens": 2_048},
+        {"max_output_tokens": 3_072},
+    ]
 
 
 def test_generation_wraps_provider_error_without_secret() -> None:
