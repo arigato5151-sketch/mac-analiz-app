@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,9 @@ from config.settings import PROJECT_ROOT, _load_env_file
 
 DEFAULT_MODEL = "gemini-3.6-flash"
 MAX_CONTEXT_ITEMS = 12
-COMMENTARY_OUTPUT_BUDGETS = (2_048, 3_072)
+# Gemini 3.x may spend part of the generation budget on internal reasoning.
+# A 700-token cap cut user-visible Turkish text mid-sentence in production.
+COMMENTARY_OUTPUT_BUDGETS = (3_072, 4_096)
 
 
 class MatchCommentaryError(RuntimeError):
@@ -103,7 +106,8 @@ Maç verisi:
 Bu maç için başlıksız, 2 veya 3 kısa paragraftan oluşan akıcı bir yorum üret.
 İlk paragrafta güç dengesi ve formu, ikinci paragrafta taktik eşleşmeyi ve eksiklerin etkisini değerlendir.
 Gerekirse üçüncü paragrafta model olasılıklarını temkinli biçimde yorumla. Kesin sonuç vaat etme,
-bahis tavsiyesi verme ve veride olmayan kadro/taktik bilgisi uydurma."""
+bahis tavsiyesi verme ve veride olmayan kadro/taktik bilgisi uydurma. Her paragrafı tam bir cümleyle
+bitir ve paragraflar arasına boş bir satır koy."""
 
 
 def _extract_text(response: object) -> str:
@@ -111,6 +115,19 @@ def _extract_text(response: object) -> str:
     if not isinstance(text, str) or not text.strip():
         raise MatchCommentaryError("Gemini returned an empty commentary response")
     return text.strip()
+
+
+def _ensure_readable_paragraphs(text: str) -> str:
+    """Preserve model paragraphs, or split one long completed block at a sentence edge."""
+    paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n", text) if paragraph.strip()]
+    if len(paragraphs) >= 2:
+        return "\n\n".join(paragraphs)
+
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    if len(sentences) < 4:
+        return text.strip()
+    midpoint = len(sentences) // 2
+    return " ".join(sentences[:midpoint]) + "\n\n" + " ".join(sentences[midpoint:])
 
 
 def _ended_at_token_limit(response: object) -> bool:
@@ -177,7 +194,7 @@ def generate_match_commentary(
             )
             commentary = _extract_text(response)
             if not _ended_at_token_limit(response):
-                return commentary
+                return _ensure_readable_paragraphs(commentary)
         raise MatchCommentaryError("Gemini commentary reached the output limit twice")
     except MatchCommentaryError:
         raise

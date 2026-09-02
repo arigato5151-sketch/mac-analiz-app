@@ -6,6 +6,7 @@ import pytest
 
 from data_pipeline.match_commentary import (
     MatchCommentaryError,
+    _ensure_readable_paragraphs,
     build_match_commentary_prompt,
     generate_match_commentary,
     get_gemini_api_key,
@@ -56,6 +57,12 @@ def test_prompt_contains_metrics_but_rejects_invalid_probability_sum() -> None:
         build_match_commentary_prompt(**invalid)  # type: ignore[arg-type]
 
 
+def test_single_block_commentary_is_split_only_at_sentence_boundaries() -> None:
+    assert _ensure_readable_paragraphs("Birinci cümle. İkinci cümle. Üçüncü cümle. Dördüncü cümle.") == (
+        "Birinci cümle. İkinci cümle.\n\nÜçüncü cümle. Dördüncü cümle."
+    )
+
+
 def test_generation_uses_requested_model_and_keeps_key_out_of_errors() -> None:
     class FakeModels:
         def __init__(self) -> None:
@@ -89,7 +96,7 @@ def test_generation_uses_requested_model_and_keeps_key_out_of_errors() -> None:
     assert commentary.startswith("İlk paragraf")
     assert created[0].key == "private-key"
     assert created[0].models.calls[0]["model"] == "gemini-3.6-flash"
-    assert created[0].models.calls[0]["config"] == {"max_output_tokens": 2_048}
+    assert created[0].models.calls[0]["config"] == {"max_output_tokens": 3_072}
 
 
 def test_generation_retries_once_when_the_first_response_hits_token_limit() -> None:
@@ -116,8 +123,8 @@ def test_generation_retries_once_when_the_first_response_hits_token_limit() -> N
         client_factory=lambda _: client,
     ) == "Tam yorum."
     assert [call["config"] for call in client.models.calls] == [
-        {"max_output_tokens": 2_048},
         {"max_output_tokens": 3_072},
+        {"max_output_tokens": 4_096},
     ]
 
 
