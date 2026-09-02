@@ -14,6 +14,7 @@ from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_injuries import sync_injuries
 from data_pipeline.fetch_team_stats import sync_team_form
 from db.db_client import SupabaseRestClient
+from monitoring.operational_events import record_api_diagnostics, record_event, record_exception
 from models.feature_engineering import CausalFeatureState
 from models.train_model import load_completed_matches
 
@@ -131,13 +132,26 @@ def main() -> None:
     args = parser.parse_args()
     settings = get_settings()
     api = ApiFootballClient(settings.api_football_key)
-    summary = refresh_upcoming_context(
-        api,
-        SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key),
-        now=datetime.now(timezone.utc),
-        horizon_days=args.days,
-    )
-    print(json.dumps({**summary, "api": api.diagnostics()}, ensure_ascii=False, indent=2))
+    db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
+    try:
+        summary = refresh_upcoming_context(
+            api, db, now=datetime.now(timezone.utc), horizon_days=args.days
+        )
+    except Exception as error:
+        record_exception(db, component="refresh_context", operation="context refresh", error=error)
+        raise
+    if summary["failures"]:
+        record_event(
+            db,
+            severity="warning",
+            component="refresh_context",
+            event_type="partial_failure",
+            message="Upcoming context refresh completed with partial failures",
+            context={"failure_count": len(summary["failures"]), "team_count": summary["teams"]},
+        )
+    diagnostics = api.diagnostics()
+    record_api_diagnostics(db, component="refresh_context", diagnostics=diagnostics)
+    print(json.dumps({**summary, "api": diagnostics}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

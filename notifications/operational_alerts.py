@@ -10,6 +10,7 @@ from typing import Any
 
 from config.settings import get_settings
 from db.db_client import SupabaseRestClient
+from monitoring.operational_events import record_event
 from notifications.telegram import TelegramError, send_telegram_message
 
 
@@ -134,9 +135,21 @@ def main() -> None:
     args = parser.parse_args()
 
     settings = get_settings()
-    report = collect_health_report(
-        SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key),
-        now=datetime.now(timezone.utc),
+    db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
+    report = collect_health_report(db, now=datetime.now(timezone.utc))
+    record_event(
+        db,
+        severity="info" if report["healthy"] else "warning",
+        component="operational_alerts",
+        event_type="health_check",
+        message="Operational health check completed",
+        context={
+            "healthy": report["healthy"],
+            "overdue_evaluation_count": report["overdue_evaluation_count"],
+            "stuck_result_notification_count": report["stuck_result_notification_count"],
+            "stale_active_match_count": report["stale_active_match_count"],
+            "workflow_failure_reason_provided": bool(args.reason),
+        },
     )
     print(json.dumps(report, ensure_ascii=False))
     should_notify = args.notify and (not report["healthy"] or args.reason)

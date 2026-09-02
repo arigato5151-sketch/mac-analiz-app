@@ -11,6 +11,7 @@ from config.leagues import LEAGUES_BY_ID, TRACKED_LEAGUE_IDS
 from config.settings import get_settings
 from data_pipeline.api_client import ApiFootballClient
 from db.db_client import SupabaseRestClient
+from monitoring.operational_events import record_api_diagnostics, record_exception
 
 
 FINISHED_STATUSES = {"FT", "AET", "PEN"}
@@ -140,10 +141,16 @@ def main() -> None:
         settings.supabase_url, settings.supabase_service_role_key
     )
     today = date.today()
-    summary = sync_fixtures(
-        api, db, start_date=today, end_date=today + timedelta(days=args.days - 1)
-    )
-    print({"sync": asdict(summary), "api": api.diagnostics()})
+    try:
+        summary = sync_fixtures(
+            api, db, start_date=today, end_date=today + timedelta(days=args.days - 1)
+        )
+    except Exception as error:
+        record_exception(db, component="fetch_fixtures", operation="fixture sync", error=error)
+        raise
+    diagnostics = api.diagnostics()
+    record_api_diagnostics(db, component="fetch_fixtures", diagnostics=diagnostics)
+    print({"sync": asdict(summary), "api": diagnostics})
 
 
 if __name__ == "__main__":
