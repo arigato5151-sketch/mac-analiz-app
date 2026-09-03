@@ -1,0 +1,262 @@
+{
+  "feature_columns": [
+    "league_id",
+    "home_win_rate_5",
+    "away_win_rate_5",
+    "home_win_rate_10",
+    "away_win_rate_10",
+    "home_goal_diff_5",
+    "away_goal_diff_5",
+    "home_venue_win_rate_5",
+    "away_venue_win_rate_5",
+    "home_venue_goals_for_5",
+    "away_venue_goals_for_5",
+    "home_elo",
+    "away_elo",
+    "elo_diff",
+    "home_rest_days",
+    "away_rest_days",
+    "h2h_home_win_rate_5",
+    "h2h_draw_rate_5",
+    "poisson_home_win",
+    "poisson_draw",
+    "poisson_away_win",
+    "poisson_over_2_5",
+    "poisson_btts",
+    "market_implied_home_win",
+    "market_implied_draw",
+    "market_implied_away_win",
+    "market_implied_over_2_5",
+    "market_implied_btts",
+    "market_odds_available",
+    "home_available_count",
+    "away_available_count",
+    "home_lineup_confirmed",
+    "away_lineup_confirmed"
+  ],
+  "class_labels": [
+    "home_win",
+    "draw",
+    "away_win"
+  ],
+  "trained_rows": 25228,
+  "training_end": "2026-08-31T23:00:00+00:00",
+  "metrics": {
+    "log_loss": 1.0109204613566445,
+    "raw_log_loss": 1.0106396675109863,
+    "brier_score": 0.6048840163810738,
+    "raw_brier_score": 0.6046421125356175,
+    "expected_calibration_error": 0.014205589792184233,
+    "raw_expected_calibration_error": 0.006053804494868741,
+    "accuracy": 0.4994054696789536,
+    "baseline_log_loss": 1.0712391889856985,
+    "over_2_5_log_loss": 0.6838068916204718,
+    "btts_log_loss": 0.6879290875730085,
+    "test_size": 5046,
+    "calibration_size": 1261,
+    "test_start": "2025-11-08T16:00:00+00:00",
+    "test_end": "2026-08-31T23:00:00+00:00"
+  },
+  "calibration": {
+    "method": "chronological_temperature_scaling",
+    "result_temperature": 0.9052868487160495,
+    "over_2_5_temperature": 0.8317065486250282,
+    "btts_temperature": 1.3768082573455966,
+    "training_half_life_days": 365.0
+  },
+  "league_metrics": [
+    {
+      "league_id": 2,
+      "matches": 124,
+      "log_loss": 0.9819476934533219,
+      "brier_score": 0.5838843364814955,
+      "accuracy": 0.5483870967741935,
+      "ece": 0.04748896758933451
+    },
+    {
+      "league_id": 3,
+      "matches": 129,
+      "log_loss": 0.9434335919520823,
+      "brier_score": 0.5573721786439909,
+      "accuracy": 0.5968992248062015,
+      "ece": 0.09152876600913916
+    },
+    {
+      "league_id": 39,
+      "matches": 291,
+      "log_loss": 1.0686821424650077,
+      "brier_score": 0.6465905367504858,
+      "accuracy": 0.44329896907216493,
+      "ece": 0.07759801195294355
+    },
+    {
+      "league_id": 40,
+      "matches": 391,
+      "log_loss": 1.0513771757307961,
+      "brier_score": 0.6332786128816338,
+      "accuracy": 0.46035805626598464,
+      "ece": 0.01546448756695313
+    },
+    {
+      "league_id": 61,
+      "matches": 218,
+      "log_loss": 1.011883364011286,
+      "brier_score": 0.6074810812012481,
+      "accuracy": 0.481651376146789,
+      "ece": 0.05751402890620886
+    },
+    {
+      "league_id": 62,
+      "matches": 195,
+      "log_loss": 1.077548569541433,
+      "brier_score": 0.6529945553826887,
+      "accuracy": 0.4,
+      "ece": 0.0708884508030198
+    },
+    {
+      "league_id": 71,
+      "matches": 82,
+      "log_loss": 1.030046337186919,
+      "brier_score": 0.6158446283265246,
+      "accuracy": 0.4878048780487805,
+      "ece": 0.13108398596080562
+    },
+    {
+      "league_id": 78,
+      "matches": 231,
+      "log_loss": 0.9771314953480589,
+      "brier_score": 0.5793063647908332,
+      "accuracy": 0.5411255411255411,
+      "ece": 0.038056298168247675
+    },
+    {
+      "league_id": 88,
+      "matches": 220,
+      "log_loss": 1.0005470212109044,
+      "brier_score": 0.5974840436957816,
+      "accuracy": 0.4954545454545455,
+      "ece": 0.04549267719645589
+    },
+    {
+      "league_id": 94,
+      "matches": 229,
+      "log_loss": 0.9222627213187017,
+      "brier_score": 0.5454292523585073,
+      "accuracy": 0.5545851528384279,
+      "ece": 0.04164145592106821
+    },
+    {
+      "league_id": 135,
+      "matches": 293,
+      "log_loss": 0.9950572515652677,
+      "brier_score": 0.5914003539053729,
+      "accuracy": 0.5358361774744027,
+      "ece": 0.029814529359905435
+    },
+    {
+      "league_id": 136,
+      "matches": 289,
+      "log_loss": 1.033082434742309,
+      "brier_score": 0.620542052774304,
+      "accuracy": 0.47750865051903113,
+      "ece": 0.028749777278449545
+    },
+    {
+      "league_id": 140,
+      "matches": 286,
+      "log_loss": 0.9891876085948302,
+      "brier_score": 0.5874907965986496,
+      "accuracy": 0.5384615384615384,
+      "ece": 0.038903108183153484
+    },
+    {
+      "league_id": 141,
+      "matches": 349,
+      "log_loss": 1.0392228220561137,
+      "brier_score": 0.6248407733729243,
+      "accuracy": 0.47564469914040114,
+      "ece": 0.02901894162345987
+    },
+    {
+      "league_id": 144,
+      "matches": 226,
+      "log_loss": 1.0532389604281545,
+      "brier_score": 0.6371263396036614,
+      "accuracy": 0.45132743362831856,
+      "ece": 0.06528014029008737
+    },
+    {
+      "league_id": 179,
+      "matches": 176,
+      "log_loss": 0.9535539141178372,
+      "brier_score": 0.5622745630642509,
+      "accuracy": 0.5681818181818182,
+      "ece": 0.06185337264006328
+    },
+    {
+      "league_id": 197,
+      "matches": 183,
+      "log_loss": 0.9856982156917916,
+      "brier_score": 0.5872962373932543,
+      "accuracy": 0.48633879781420764,
+      "ece": 0.10202260175926045
+    },
+    {
+      "league_id": 203,
+      "matches": 218,
+      "log_loss": 1.0086228988088166,
+      "brier_score": 0.6050330551101072,
+      "accuracy": 0.5091743119266054,
+      "ece": 0.052635525771360395
+    },
+    {
+      "league_id": 207,
+      "matches": 166,
+      "log_loss": 1.060568248538228,
+      "brier_score": 0.6387674854310341,
+      "accuracy": 0.4397590361445783,
+      "ece": 0.07836737728466975
+    },
+    {
+      "league_id": 218,
+      "matches": 128,
+      "log_loss": 1.0644381731951138,
+      "brier_score": 0.6425672347298226,
+      "accuracy": 0.4453125,
+      "ece": 0.04442633141029709
+    },
+    {
+      "league_id": 253,
+      "matches": 41,
+      "log_loss": 1.0525432569539575,
+      "brier_score": 0.6314376889571813,
+      "accuracy": 0.4634146341463415,
+      "ece": 0.1422204339750173
+    },
+    {
+      "league_id": 262,
+      "matches": 204,
+      "log_loss": 1.0512134707603618,
+      "brier_score": 0.6302970849843899,
+      "accuracy": 0.5147058823529411,
+      "ece": 0.10245943373838605
+    },
+    {
+      "league_id": 307,
+      "matches": 252,
+      "log_loss": 0.9001504621121416,
+      "brier_score": 0.5285311383288775,
+      "accuracy": 0.5793650793650794,
+      "ece": 0.04308494539622401
+    },
+    {
+      "league_id": 848,
+      "matches": 123,
+      "log_loss": 0.9983452010062444,
+      "brier_score": 0.5980435543531276,
+      "accuracy": 0.5203252032520326,
+      "ece": 0.030474500449083165
+    }
+  ],
+  "model_version": "model_v20260901T204304Z"
+}
