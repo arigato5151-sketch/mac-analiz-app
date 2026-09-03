@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS player_availability (
 CREATE TABLE IF NOT EXISTS team_availability_status (
     team_id INTEGER PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
     refreshed_at TIMESTAMPTZ NOT NULL,
-    available_count INTEGER NOT NULL DEFAULT 0 CHECK (available_count >= 0)
+    available_count INTEGER NOT NULL DEFAULT 22 CHECK (available_count >= 0),
+    unavailable_count INTEGER NOT NULL DEFAULT 0 CHECK (unavailable_count >= 0)
 );
 
 CREATE TABLE IF NOT EXISTS fixture_lineups (

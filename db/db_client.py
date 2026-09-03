@@ -175,6 +175,9 @@ class SupabaseRestClient:
 class PublicSupabaseRestClient(SupabaseRestClient):
     """Query-only client for the deployed Streamlit UI."""
 
+    def insert(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        raise PermissionError("Public Supabase client is read-only")
+
     def upsert(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
         raise PermissionError("Public Supabase client is read-only")
 

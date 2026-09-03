@@ -79,13 +79,18 @@ def sync_injuries(
     counts_by_team = {team_id: 0 for team_id in refreshed_team_ids}
     for row in rows:
         counts_by_team[int(row["team_id"])] += 1
+    available_by_team = {
+        team_id: max(0, 22 - unavailable_count)
+        for team_id, unavailable_count in counts_by_team.items()
+    }
     db.upsert(
         "team_availability_status",
         [
             {
                 "team_id": team_id,
                 "refreshed_at": refreshed_at,
-                "available_count": count,
+                "available_count": available_by_team[team_id],
+                "unavailable_count": count,
             }
             for team_id, count in counts_by_team.items()
         ],
@@ -95,7 +100,12 @@ def sync_injuries(
     db.insert(
         "team_availability_history",
         [
-            {"team_id": team_id, "refreshed_at": refreshed_at, "available_count": count}
+            {
+                "team_id": team_id,
+                "refreshed_at": refreshed_at,
+                "available_count": available_by_team[team_id],
+                "unavailable_count": count,
+            }
             for team_id, count in counts_by_team.items()
         ],
     )

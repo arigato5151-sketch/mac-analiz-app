@@ -25,6 +25,7 @@ disclaimer()
 metadata = load_latest_model_metadata()
 if metadata:
     metrics = metadata["metrics"]
+    st.caption(f"Aktif model: {metadata['active_model_version']}")
     cols = st.columns(4)
     cols[0].metric(
         "Kalibre Log Loss",

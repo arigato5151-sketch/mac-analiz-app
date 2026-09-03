@@ -57,8 +57,16 @@ def load_upcoming_matches(
         order="match_date.asc,id.asc",
     )
     quotes = db.select_all("odds_quote_history", columns="match_id,odds,captured_at", order="captured_at.asc")
-    availability = db.select_all("team_availability_status", columns="team_id,available_count")
-    counts = {int(row["team_id"]): int(row["available_count"]) for row in availability}
+    availability = db.select_all(
+        "team_availability_status",
+        columns="team_id,available_count,unavailable_count",
+    )
+    available_counts = {
+        int(row["team_id"]): int(row["available_count"]) for row in availability
+    }
+    unavailable_counts = {
+        int(row["team_id"]): int(row["unavailable_count"]) for row in availability
+    }
     unavailable_players = db.select_all("player_availability", columns="team_id,status")
     unavailable_by_team: dict[int, list[dict[str, Any]]] = {}
     for player in unavailable_players:
@@ -68,11 +76,10 @@ def load_upcoming_matches(
     enriched = attach_pre_match_odds(matches, quotes, observed_at=now)
     for match in enriched:
         home_id, away_id = int(match["home_team_id"]), int(match["away_team_id"])
-        match["home_available_count"] = counts.get(home_id, 22)
-        match["away_available_count"] = counts.get(away_id, 22)
-        # ``available_count`` is the legacy stored count of unavailable players.
-        match["home_unavailable_count"] = counts.get(home_id, 0)
-        match["away_unavailable_count"] = counts.get(away_id, 0)
+        match["home_available_count"] = available_counts.get(home_id, 22)
+        match["away_available_count"] = available_counts.get(away_id, 22)
+        match["home_unavailable_count"] = unavailable_counts.get(home_id, 0)
+        match["away_unavailable_count"] = unavailable_counts.get(away_id, 0)
         match["home_unavailable_players"] = unavailable_by_team.get(home_id, [])
         match["away_unavailable_players"] = unavailable_by_team.get(away_id, [])
         match["home_lineup_confirmed"] = (int(match["id"]), home_id) in confirmed
@@ -151,6 +158,7 @@ def load_latest_team_forms(
             "team_id,calculated_at,elo_rating,avg_goals_scored_last5,"
             "avg_goals_conceded_last5,win_rate_last5,home_away_split"
         ),
+        filters={"team_id": f"in.({','.join(str(team_id) for team_id in sorted(team_ids))})"},
         order="calculated_at.desc",
     )
     latest: dict[int, dict[str, Any]] = {}

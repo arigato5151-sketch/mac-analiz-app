@@ -17,7 +17,8 @@ from models.predict import generate_prediction_rows, load_latest_team_forms, loa
 from models.train_model import load_completed_matches
 
 
-MINIMUM_PROMOTION_SAMPLE = 50
+MINIMUM_PROMOTION_SAMPLE = 100
+MINIMUM_BRIER_IMPROVEMENT = 0.005
 
 
 def candidate_path(model_version: str) -> Path:
@@ -154,8 +155,10 @@ def promotion_decision(
     """Use a conservative two-metric gate; no sample means no promotion."""
     if sample_size < MINIMUM_PROMOTION_SAMPLE:
         return False, f"Gölge örneklemi yetersiz: {sample_size}/{MINIMUM_PROMOTION_SAMPLE}"
-    if candidate_brier >= production_brier:
-        return False, "Aday modelin Brier skoru canlı modelden iyi değil"
+    if candidate_brier > production_brier - MINIMUM_BRIER_IMPROVEMENT:
+        return False, (
+            "Aday modelin Brier iyileşmesi promotion eşiğini karşılamıyor"
+        )
     if candidate_accuracy < production_accuracy:
         return False, "Aday modelin 1-X-2 isabeti canlı modelden düşük"
     return True, "Aday model gölge karşılaştırmasını geçti"

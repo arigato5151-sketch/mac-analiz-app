@@ -1,8 +1,9 @@
 """Upcoming fixtures with league and day filters."""
 
-from datetime import date
+from datetime import datetime
 import sys
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 
@@ -33,11 +34,12 @@ league = left.multiselect(
     "Ligler", sorted(matches["league_name"].dropna().unique()), placeholder="Tümü"
 )
 available_days = sorted(matches["match_date"].dt.date.unique())
+istanbul_today = datetime.now(ZoneInfo("Europe/Istanbul")).date()
 days = right.multiselect(
     "Günler",
     available_days,
     default=available_days,
-    format_func=lambda value: "Bugün" if value == date.today() else value.strftime("%d.%m.%Y"),
+    format_func=lambda value: "Bugün" if value == istanbul_today else value.strftime("%d.%m.%Y"),
 )
 filtered = matches[matches["match_date"].dt.date.isin(days)]
 if league:

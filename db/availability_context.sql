@@ -4,7 +4,8 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS public.team_availability_status (
     team_id INTEGER PRIMARY KEY REFERENCES public.teams(id) ON DELETE CASCADE,
     refreshed_at TIMESTAMPTZ NOT NULL,
-    available_count INTEGER NOT NULL DEFAULT 0 CHECK (available_count >= 0)
+    available_count INTEGER NOT NULL DEFAULT 22 CHECK (available_count >= 0),
+    unavailable_count INTEGER NOT NULL DEFAULT 0 CHECK (unavailable_count >= 0)
 );
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.team_availability_status TO service_role;

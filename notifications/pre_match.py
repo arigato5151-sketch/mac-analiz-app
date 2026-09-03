@@ -29,7 +29,8 @@ from models.train_model import load_completed_matches
 from notifications.telegram import send_telegram_message
 
 
-NOTIFICATION_TYPE = "pre_match_60m"
+NOTIFICATION_TYPE = "pre_match_20m"
+SNAPSHOT_TYPE = "pre_match_60m"
 WINDOW_START_MINUTES = 15
 WINDOW_END_MINUTES = 25
 LINEUP_LOOKAHEAD_MINUTES = 90
@@ -112,7 +113,7 @@ def persist_production_snapshot(
     existing = db.select(
         "prediction_snapshots",
         columns="id,source_prediction_id,match_id,snapshot_type,model_version,prob_home_win,prob_draw,prob_away_win,prob_over_2_5,prob_btts,source_predicted_at,context,captured_at",
-        filters={"match_id": f"eq.{match_id}", "snapshot_type": f"eq.{NOTIFICATION_TYPE}"},
+        filters={"match_id": f"eq.{match_id}", "snapshot_type": f"eq.{SNAPSHOT_TYPE}"},
         limit=1,
     )
     if existing:
@@ -121,7 +122,7 @@ def persist_production_snapshot(
     snapshot = {
         "source_prediction_id": int(prediction["id"]),
         "match_id": match_id,
-        "snapshot_type": NOTIFICATION_TYPE,
+        "snapshot_type": SNAPSHOT_TYPE,
         "model_version": model_version,
         "prob_home_win": float(prediction["prob_home_win"]),
         "prob_draw": float(prediction["prob_draw"]),
@@ -143,7 +144,7 @@ def persist_production_snapshot(
         existing = db.select(
             "prediction_snapshots",
             columns="id,source_prediction_id,match_id,snapshot_type,model_version,prob_home_win,prob_draw,prob_away_win,prob_over_2_5,prob_btts,source_predicted_at,context,captured_at",
-            filters={"match_id": f"eq.{match_id}", "snapshot_type": f"eq.{NOTIFICATION_TYPE}"},
+            filters={"match_id": f"eq.{match_id}", "snapshot_type": f"eq.{SNAPSHOT_TYPE}"},
             limit=1,
         )
         if existing:
@@ -214,7 +215,7 @@ def _pending_matches(db: SupabaseRestClient, *, now: datetime) -> list[dict[str,
         columns="match_id",
         filters={
             "match_id": f"in.({match_ids})",
-            "notification_type": f"eq.{NOTIFICATION_TYPE}",
+            "or": "(notification_type.eq.pre_match_20m,notification_type.eq.pre_match_60m)",
         },
     )
     sent_ids = {int(row["match_id"]) for row in sent}

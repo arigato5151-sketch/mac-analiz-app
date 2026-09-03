@@ -145,6 +145,19 @@ def _ended_at_token_limit(response: object) -> bool:
     return str(finish_reason).endswith("MAX_TOKENS")
 
 
+def _looks_unfinished(text: str) -> bool:
+    """Treat output that does not end on a sentence terminator as truncated.
+
+    The model is instructed to finish every paragraph with a complete sentence, so
+    a response that trails off mid-phrase (e.g. ending with a comma) is incomplete
+    even when the provider reports a normal STOP finish reason.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return True
+    return stripped[-1] not in ".!?…"
+
+
 def _request_timeout_ms() -> int:
     """Return a bounded provider timeout so a page interaction cannot hang indefinitely."""
     configured = os.getenv("GEMINI_TIMEOUT_MS", str(DEFAULT_REQUEST_TIMEOUT_MS))
@@ -233,9 +246,9 @@ def generate_match_commentary(
                 config={"max_output_tokens": max_output_tokens},
             )
             commentary = _extract_text(response)
-            if not _ended_at_token_limit(response):
+            if not _ended_at_token_limit(response) and not _looks_unfinished(commentary):
                 return _ensure_readable_paragraphs(commentary)
-        raise MatchCommentaryError("Gemini commentary reached the output limit twice")
+        raise MatchCommentaryError("Gemini commentary stopped or returned an incomplete response twice")
     except MatchCommentaryError:
         raise
     except Exception as error:

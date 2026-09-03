@@ -130,6 +130,35 @@ def test_generation_retries_once_when_the_first_response_hits_token_limit() -> N
     ]
 
 
+def test_generation_retries_complete_response_when_first_ends_unfinished() -> None:
+    class FakeModels:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def generate_content(
+            self, *, model: str, contents: str, config: dict[str, object]
+        ) -> object:
+            self.calls.append({"model": model, "contents": contents, "config": config})
+            text = "Tam yorum." if len(self.calls) > 1 else "Abha ve Al-Ettifaq, son 5 maçlık performanslarında 1 galibiyet,"
+            candidate = type("Candidate", (), {"finish_reason": "STOP"})()
+            return type("Response", (), {"text": text, "candidates": [candidate]})()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.models = FakeModels()
+
+    client = FakeClient()
+    assert generate_match_commentary(
+        **_arguments(),  # type: ignore[arg-type]
+        api_key="private-key",
+        client_factory=lambda _: client,
+    ) == "Tam yorum."
+    assert [call["config"] for call in client.models.calls] == [
+        {"max_output_tokens": 3_072},
+        {"max_output_tokens": 4_096},
+    ]
+
+
 def test_generation_wraps_provider_error_without_secret() -> None:
     def failing_factory(_: str) -> object:
         raise RuntimeError("private-key")

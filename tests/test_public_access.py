@@ -18,6 +18,8 @@ def test_public_client_cannot_mutate() -> None:
     client = PublicSupabaseRestClient("https://example.supabase.co", "anon-key")
 
     with pytest.raises(PermissionError, match="read-only"):
+        client.insert("matches", [{"id": 1}])
+    with pytest.raises(PermissionError, match="read-only"):
         client.upsert("matches", [{"id": 1}])
     with pytest.raises(PermissionError, match="read-only"):
         client.delete("matches", filters={"id": "eq.1"})

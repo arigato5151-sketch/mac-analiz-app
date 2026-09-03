@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import joblib
 import streamlit as st
 
 from config.settings import PROJECT_ROOT, get_public_supabase_settings
@@ -161,7 +162,7 @@ def load_match_availability(
     snapshots = pd.DataFrame(
         db.select_all(
             "team_availability_status",
-            columns="team_id,refreshed_at,available_count",
+            columns="team_id,refreshed_at,available_count,unavailable_count",
             filters={"or": team_filter},
         )
     )
@@ -227,10 +228,19 @@ def load_evaluated_predictions(limit: int = 250) -> pd.DataFrame:
 @st.cache_data(ttl=MODEL_METADATA_TTL_SECONDS, show_spinner=False)
 def load_latest_model_metadata() -> dict[str, Any] | None:
     model_dir = PROJECT_ROOT / "models" / "saved_models"
-    files = sorted(model_dir.glob("model_v*.json"))
-    if not files:
+    latest_path = model_dir / "latest.joblib"
+    if not latest_path.is_file():
         return None
-    return json.loads(files[-1].read_text(encoding="utf-8"))
+    bundle = joblib.load(latest_path)
+    model_version = str(bundle.get("model_version", "")).strip()
+    if not model_version:
+        return None
+    metadata_path = model_dir / f"{model_version}.json"
+    if not metadata_path.is_file():
+        return None
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["active_model_version"] = model_version
+    return metadata
 
 
 def clear_app_cache() -> None:

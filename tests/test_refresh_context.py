@@ -85,6 +85,7 @@ def test_injury_sync_clears_teams_with_no_current_injuries() -> None:
     assert set(db.deleted_team_ids) == {"eq.10", "eq.20"}
     snapshots = next(rows for table, rows in db.upserts if table == "team_availability_status")
     assert {row["team_id"] for row in snapshots} == {10, 20}
-    assert {row["available_count"] for row in snapshots} == {0}
+    assert {row["available_count"] for row in snapshots} == {22}
+    assert {row["unavailable_count"] for row in snapshots} == {0}
     history = next(rows for table, rows in db.upserts if table == "team_availability_history")
     assert {row["team_id"] for row in history} == {10, 20}

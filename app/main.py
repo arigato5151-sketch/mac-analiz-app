@@ -32,6 +32,8 @@ col1, col2, col3 = st.columns(3)
 col1.metric("Önümüzdeki 3 gün", len(matches))
 col2.metric("Tahmin hazır", int(matches.get("model_version", []).notna().sum()) if not matches.empty and "model_version" in matches else 0)
 col3.metric("Model test Log Loss", f"{metadata['metrics']['log_loss']:.3f}" if metadata else "—")
+if metadata:
+    st.caption(f"Aktif model: {metadata['active_model_version']}")
 
 st.subheader("Yaklaşan maçlar")
 if matches.empty:
