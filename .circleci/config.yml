@@ -1,0 +1,183 @@
+# CircleCI configuration for the Maç Analiz pipeline.
+#
+# This mirrors the jobs that previously ran in GitHub Actions scheduled
+# workflows. CircleCI's cron schedules are defined below with the legacy
+# `workflows.triggers.schedule` syntax (the expressions are identical to the
+# GitHub Actions crons) so the whole pipeline is self-contained in this file.
+#
+# IMPORTANT — frequency vs. free credits
+# CircleCI's Free Plan is credit-based. Every scheduled run burns credits per
+# minute per job. Very frequent schedules (pre-match every 5 min, result every
+# 15 min) will exhaust free credits just as quickly as GitHub Actions minutes
+# did. The frequencies below are deliberately consolidated/sealed so the
+# pipeline stays inside the Free Plan footprint. If you need the original
+# sub-hourly cadence, you must either raise them or wait/pre-size credits.
+#
+# Required circleci env vars (Project Settings > Environment Variables):
+#   API_FOOTBALL_KEY
+#   SUPABASE_URL
+#   SUPABASE_SERVICE_ROLE_KEY
+#   TELEGRAM_BOT_TOKEN        (optional; empty is fine)
+#   TELEGRAM_CHAT_ID          (optional; empty is fine)
+#   GEMINI_API_KEY            (optional; needed for AI commentary)
+#   GH_PAT                    (only for weekly-retrain: a PAT with repo scope
+#                              used to push model artifacts back to GitHub)
+
+version: 2.1
+
+executors:
+  python:
+    docker:
+      - image: cimg/python:3.12
+    resource_class: small
+
+commands:
+  install-runtime:
+    steps:
+      - checkout
+      - run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+  verify-migrations:
+    steps:
+      - run: python -m db.migrations --verify-production
+
+jobs:
+  test:
+    executor: python
+    steps:
+      - checkout
+      - run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+      - run: python -m db.migrations --validate
+      - run: python -m compileall -q app config data_pipeline db evaluation models notifications
+      - run: python -m pytest -q
+
+  daily-morning:
+    executor: python
+    steps:
+      - install-runtime
+      - verify-migrations
+      - run: python -m data_pipeline.fetch_fixtures --days 3
+      - run: python -m data_pipeline.refresh_context --days 3
+      - run: python -m models.predict --model models/saved_models/latest.joblib --days 3
+      - run: python -m data_pipeline.data_quality --days 3
+
+  daily-night:
+    executor: python
+    steps:
+      - install-runtime
+      - verify-migrations
+      - run: python -m data_pipeline.fetch_results --lookback-days 7
+      - run: python -m evaluation.track_performance
+      # daily_summary and operational alerts are failure-safe (they print
+      # "not configured" / return without error when secrets are absent).
+      - run: python -m notifications.daily_summary --mode night
+      - run: python -m notifications.operational_alerts --notify --fail-on-critical
+
+  pre-match:
+    executor: python
+    steps:
+      - install-runtime
+      - run: python -m notifications.pre_match
+
+  result:
+    executor: python
+    steps:
+      - install-runtime
+      - verify-migrations
+      - run: python -m data_pipeline.fetch_results --lookback-days 0
+      - run: python -m evaluation.track_performance
+      - run: python -m notifications.final_results
+
+  weekly-retrain:
+    executor: python
+    steps:
+      - checkout
+      - run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+      - run: python -m pytest -q
+      - run: python -m models.train_model
+      - run: python -m models.shadow --register-newest
+      # Commit + push the newly registered shadow candidate back to GitHub.
+      # Requires a GH_PAT with `repo` scope (a normal checkout token cannot push).
+      - run: |
+          git config user.name "circleci-bot"
+          git config user.email "41898282+circleci-bot@users.noreply.github.com"
+          git add -f models/saved_models/model_v*.joblib models/saved_models/model_v*.json
+          if git diff --cached --quiet; then
+            echo "No candidate artifact changes"
+          else
+            git commit -m "chore(model): register shadow candidate [skip ci]"
+            git push --porcelain "https://$GH_PAT@github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}.git" "HEAD:${CIRCLE_BRANCH}"
+          fi
+
+workflows:
+  version: 2
+
+  ci:
+    jobs:
+      # Runs on every push / PR, replacing .github/workflows/ci.yml.
+      - test
+
+  # Daily morning: fikstür/form/kadro/tahmin güncellemesi (06:00 Türkiye).
+  daily-morning:
+    triggers:
+      - schedule:
+          cron: "0 3 * * *"
+          filters:
+            branches:
+              only: main
+    jobs:
+      - daily-morning
+
+  # Gece: sonuç ve performans değerlendirmesi (23:30 ve 02:30 Türkiye).
+  daily-night:
+    triggers:
+      - schedule:
+          cron: "30 20 * * *"
+          filters:
+            branches:
+              only: main
+    jobs:
+      - daily-night
+  daily-night-late:
+    triggers:
+      - schedule:
+          cron: "30 23 * * *"
+          filters:
+            branches:
+              only: main
+    jobs:
+      - daily-night
+
+  # Maç önü kadro/oran/tahmin ve Telegram bildirimi. GitHub'daki her 5 dk
+  # yerine saatlik — ücretsiz kredi kullanımını sürdürülebilir tutar.
+  pre-match:
+    triggers:
+      - schedule:
+          cron: "0 * * * *"
+          filters:
+            branches:
+              only: main
+    jobs:
+      - pre-match
+
+  # Sonuç Telegram kartları. GitHub'daki her 15 dk yerine saatlik.
+  result:
+    triggers:
+      - schedule:
+          cron: "15 * * * *"
+          filters:
+            branches:
+              only: main
+    jobs:
+      - result
+
+  # Haftalık model yeniden eğitimi (Pazartesi 05:00 Türkiye).
+  weekly-retrain:
+    triggers:
+      - schedule:
+          cron: "0 2 * * 1"
+          filters:
+            branches:
+              only: main
+    jobs:
+      - weekly-retrain
