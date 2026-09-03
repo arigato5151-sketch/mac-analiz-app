@@ -16,7 +16,10 @@ MAX_CONTEXT_ITEMS = 12
 # Gemini 3.x may spend part of the generation budget on internal reasoning.
 # A 700-token cap cut user-visible Turkish text mid-sentence in production.
 COMMENTARY_OUTPUT_BUDGETS = (3_072, 4_096)
-DEFAULT_REQUEST_TIMEOUT_MS = 25_000
+# A 25s deadline cut long Turkish commentary with 504 DEADLINE_EXCEEDED, leaving
+# the UI thinking the model stopped early. 60s is the hard ceiling enforced by
+# _request_timeout_ms below and proved sufficient for full 3-paragraph output.
+DEFAULT_REQUEST_TIMEOUT_MS = 60_000
 
 
 class MatchCommentaryError(RuntimeError):

@@ -159,4 +159,4 @@ def test_timeout_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GEMINI_TIMEOUT_MS", "999999")
     assert _request_timeout_ms() == 60_000
     monkeypatch.setenv("GEMINI_TIMEOUT_MS", "invalid")
-    assert _request_timeout_ms() == 25_000
+    assert _request_timeout_ms() == 60_000
