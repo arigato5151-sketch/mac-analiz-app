@@ -38,25 +38,34 @@ def get_gemini_api_key(
 ) -> str:
     """Read the key from environment/.env, then Streamlit secrets when available."""
     _load_env_file(env_file or PROJECT_ROOT / ".env")
-    environment_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if environment_key:
-        return environment_key
+    for key_name in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        environment_key = os.getenv(key_name, "").strip()
+        if environment_key:
+            return environment_key
 
     if secrets is not None:
-        configured_key = str(secrets.get("GEMINI_API_KEY", "")).strip()
-        if configured_key:
-            return configured_key
+        for key_name in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+            configured_key = str(secrets.get(key_name, "")).strip()
+            if configured_key:
+                return configured_key
 
     try:
         import streamlit as st
 
-        configured_key = str(st.secrets.get("GEMINI_API_KEY", "")).strip()
+        configured_key = next(
+            (
+                str(st.secrets.get(key_name, "")).strip()
+                for key_name in ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+                if str(st.secrets.get(key_name, "")).strip()
+            ),
+            "",
+        )
     except Exception:  # Streamlit is optional for background pipeline execution.
         configured_key = ""
     if configured_key:
         return configured_key
     raise MatchCommentaryError(
-        "GEMINI_API_KEY is not configured in the environment, .env, or Streamlit secrets",
+        "GEMINI_API_KEY or GOOGLE_API_KEY is not configured in the environment, .env, or Streamlit secrets",
         reason="configuration",
     )
 

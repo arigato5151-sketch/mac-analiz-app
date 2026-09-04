@@ -49,6 +49,13 @@ def test_key_falls_back_to_streamlit_secret_mapping(monkeypatch: pytest.MonkeyPa
     ) == "from-secrets"
 
 
+def test_key_accepts_google_api_key_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    assert get_gemini_api_key(
+        env_file=Path("does-not-exist"), secrets={"GOOGLE_API_KEY": "from-google-secret"}
+    ) == "from-google-secret"
+
+
 def test_prompt_contains_metrics_but_rejects_invalid_probability_sum() -> None:
     prompt = build_match_commentary_prompt(**_arguments())  # type: ignore[arg-type]
 
