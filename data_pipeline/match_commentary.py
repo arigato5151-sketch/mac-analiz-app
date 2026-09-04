@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -11,11 +12,12 @@ from typing import Any
 from config.settings import PROJECT_ROOT, _load_env_file
 
 
-DEFAULT_MODEL = "gemini-3.6-flash"
+DEFAULT_MODEL = "gemini-2.5-flash"
 MAX_CONTEXT_ITEMS = 12
 # Gemini 3.x may spend part of the generation budget on internal reasoning.
 # A 700-token cap cut user-visible Turkish text mid-sentence in production.
 COMMENTARY_OUTPUT_BUDGETS = (3_072, 4_096)
+MAX_PROVIDER_ATTEMPTS = 3
 # A 25s deadline cut long Turkish commentary with 504 DEADLINE_EXCEEDED, leaving
 # the UI thinking the model stopped early. 60s is the hard ceiling enforced by
 # _request_timeout_ms below and proved sufficient for full 3-paragraph output.
@@ -53,7 +55,8 @@ def get_gemini_api_key(
     if configured_key:
         return configured_key
     raise MatchCommentaryError(
-        "GEMINI_API_KEY is not configured in the environment, .env, or Streamlit secrets"
+        "GEMINI_API_KEY is not configured in the environment, .env, or Streamlit secrets",
+        reason="configuration",
     )
 
 
@@ -121,7 +124,9 @@ bitir ve paragraflar arasına boş bir satır koy."""
 def _extract_text(response: object) -> str:
     text = getattr(response, "text", None)
     if not isinstance(text, str) or not text.strip():
-        raise MatchCommentaryError("Gemini returned an empty commentary response")
+        raise MatchCommentaryError(
+            "Gemini returned an empty commentary response", reason="provider"
+        )
     return text.strip()
 
 
@@ -228,7 +233,8 @@ def generate_match_commentary(
             from google import genai
         except ImportError as error:
             raise MatchCommentaryError(
-                "google-genai is not installed; install requirements.txt"
+                "google-genai is not installed; install requirements.txt",
+                reason="configuration",
             ) from error
         client_factory = lambda key: genai.Client(
             api_key=key,
@@ -239,7 +245,17 @@ def generate_match_commentary(
 
     try:
         client = client_factory(configured_key)
-        for max_output_tokens in COMMENTARY_OUTPUT_BUDGETS:
+    except Exception as error:
+        raise MatchCommentaryError(
+            f"Gemini match commentary request failed: {type(error).__name__}",
+            reason=_provider_failure_reason(error),
+        ) from error
+    last_error: MatchCommentaryError | None = None
+    for attempt in range(MAX_PROVIDER_ATTEMPTS):
+        max_output_tokens = COMMENTARY_OUTPUT_BUDGETS[
+            min(attempt, len(COMMENTARY_OUTPUT_BUDGETS) - 1)
+        ]
+        try:
             response = client.models.generate_content(
                 model=configured_model,
                 contents=prompt,
@@ -248,11 +264,23 @@ def generate_match_commentary(
             commentary = _extract_text(response)
             if not _ended_at_token_limit(response) and not _looks_unfinished(commentary):
                 return _ensure_readable_paragraphs(commentary)
-        raise MatchCommentaryError("Gemini commentary stopped or returned an incomplete response twice")
-    except MatchCommentaryError:
-        raise
-    except Exception as error:
-        raise MatchCommentaryError(
-            f"Gemini match commentary request failed: {type(error).__name__}",
-            reason=_provider_failure_reason(error),
-        ) from error
+            last_error = MatchCommentaryError(
+                "Gemini commentary returned an incomplete response",
+                reason="provider",
+            )
+        except MatchCommentaryError as error:
+            last_error = error
+        except Exception as error:
+            wrapped_error = MatchCommentaryError(
+                f"Gemini match commentary request failed: {type(error).__name__}",
+                reason=_provider_failure_reason(error),
+            )
+            if wrapped_error.reason in {"authentication", "quota"}:
+                raise wrapped_error from error
+            last_error = wrapped_error
+        if attempt < MAX_PROVIDER_ATTEMPTS - 1:
+            time.sleep(1.5 * (attempt + 1))
+
+    raise last_error or MatchCommentaryError(
+        "Gemini commentary could not be generated", reason="provider"
+    )

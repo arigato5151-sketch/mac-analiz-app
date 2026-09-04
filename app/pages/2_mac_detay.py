@@ -255,13 +255,19 @@ try:
             # Keep provider details and credentials out of both the UI and application logs.
             LOGGER.warning("Gemini commentary unavailable: reason=%s", error.reason)
             user_messages = {
+                "configuration": "Yapay zeka yorum ayarı eksik. GEMINI_API_KEY ve google-genai kurulumu kontrol edilmelidir.",
                 "authentication": "Yapay zekâ yorum servisi doğrulanamadı. Uygulama yöneticisi anahtar ayarını kontrol etmelidir.",
                 "quota": "Yapay zekâ yorum kotası geçici olarak dolu. Birkaç dakika sonra tekrar deneyin.",
                 "timeout": "Yapay zekâ yorum servisi zaman aşımına uğradı. Lütfen tekrar deneyin.",
+                "provider": "Yapay zekâ yorum servisi bu isteği işleyemedi. GEMINI_MODEL ayarını ve API erişimini kontrol edin.",
             }
             st.error(user_messages.get(error.reason, "Yorum şu anda üretilemedi. Lütfen tekrar deneyin."))
         except Exception:
-            st.error("Yorum hazırlanırken beklenmeyen bir hata oluştu.")
+            LOGGER.exception("Unexpected error while generating Gemini commentary")
+            st.error(
+                "Yorum hazırlanırken beklenmeyen bir hata oluştu. "
+                "Uygulama logunda ayrıntılı hata kaydı oluşturuldu."
+            )
 
     commentary = st.session_state.get(commentary_key)
     if commentary:

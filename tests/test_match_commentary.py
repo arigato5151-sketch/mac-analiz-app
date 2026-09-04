@@ -159,6 +159,31 @@ def test_generation_retries_complete_response_when_first_ends_unfinished() -> No
     ]
 
 
+def test_generation_retries_after_empty_response() -> None:
+    class FakeModels:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate_content(
+            self, *, model: str, contents: str, config: dict[str, object]
+        ) -> object:
+            self.calls += 1
+            text = "" if self.calls == 1 else "Tam yorum."
+            return type("Response", (), {"text": text})()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.models = FakeModels()
+
+    client = FakeClient()
+    assert generate_match_commentary(
+        **_arguments(),  # type: ignore[arg-type]
+        api_key="private-key",
+        client_factory=lambda _: client,
+    ) == "Tam yorum."
+    assert client.models.calls == 2
+
+
 def test_generation_wraps_provider_error_without_secret() -> None:
     def failing_factory(_: str) -> object:
         raise RuntimeError("private-key")
