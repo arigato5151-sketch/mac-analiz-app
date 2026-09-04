@@ -303,7 +303,7 @@ def generate_match_commentary(
                 f"Gemini match commentary request failed: {type(error).__name__}",
                 reason=_provider_failure_reason(error),
             )
-            if wrapped_error.reason in {"authentication", "quota", "model"}:
+            if wrapped_error.reason in {"authentication", "quota"}:
                 raise wrapped_error from error
             last_error = wrapped_error
         if attempt < MAX_PROVIDER_ATTEMPTS - 1:
