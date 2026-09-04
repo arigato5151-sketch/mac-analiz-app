@@ -187,12 +187,16 @@ def _provider_failure_reason(error: Exception) -> str:
     """Classify provider failures without retaining provider response text or credentials."""
     status = getattr(error, "status_code", None)
     if status is None:
+        status = getattr(error, "code", None)
+    if status is None:
         response = getattr(error, "response", None)
         status = getattr(response, "status_code", None)
     if status in {401, 403}:
         return "authentication"
     if status == 429:
         return "quota"
+    if status == 400:
+        return "model"
     if status in {408, 504}:
         return "timeout"
 
@@ -292,7 +296,7 @@ def generate_match_commentary(
                 f"Gemini match commentary request failed: {type(error).__name__}",
                 reason=_provider_failure_reason(error),
             )
-            if wrapped_error.reason in {"authentication", "quota"}:
+            if wrapped_error.reason in {"authentication", "quota", "model"}:
                 raise wrapped_error from error
             last_error = wrapped_error
         if attempt < MAX_PROVIDER_ATTEMPTS - 1:

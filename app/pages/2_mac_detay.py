@@ -259,6 +259,7 @@ try:
                 "authentication": "Yapay zekâ yorum servisi doğrulanamadı. Uygulama yöneticisi anahtar ayarını kontrol etmelidir.",
                 "quota": "Yapay zekâ yorum kotası geçici olarak dolu. Birkaç dakika sonra tekrar deneyin.",
                 "timeout": "Yapay zekâ yorum servisi zaman aşımına uğradı. Lütfen tekrar deneyin.",
+                "model": "Gemini modeli bu API anahtarıyla kullanılamıyor. GEMINI_MODEL değerini gemini-2.5-flash yapın.",
                 "provider": "Yapay zekâ yorum servisi bu isteği işleyemedi. GEMINI_MODEL ayarını ve API erişimini kontrol edin.",
             }
             st.error(user_messages.get(error.reason, "Yorum şu anda üretilemedi. Lütfen tekrar deneyin."))
