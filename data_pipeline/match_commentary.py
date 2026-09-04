@@ -189,18 +189,25 @@ def _provider_failure_reason(error: Exception) -> str:
     if status is None:
         status = getattr(error, "code", None)
     if status is None:
+        status = getattr(error, "status", None)
+    if status is None:
         response = getattr(error, "response", None)
         status = getattr(response, "status_code", None)
     if status in {401, 403}:
         return "authentication"
     if status == 429:
         return "quota"
-    if status == 400:
+    if status in {400, 404}:
         return "model"
     if status in {408, 504}:
         return "timeout"
 
     error_name = type(error).__name__.lower()
+    error_text = str(error).lower()
+    if any(term in error_text for term in ("model", "not found", "unsupported")):
+        return "model"
+    if "api key" in error_text or "authentication" in error_text:
+        return "authentication"
     return "timeout" if "timeout" in error_name else "provider"
 
 

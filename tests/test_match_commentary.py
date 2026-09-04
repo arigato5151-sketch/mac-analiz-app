@@ -237,11 +237,15 @@ def test_provider_error_is_classified_without_keeping_response_text() -> None:
     class ModelError(Exception):
         code = 400
 
+    class NotFoundModelError(Exception):
+        status = 404
+
     class TimeoutError(Exception):
         pass
 
     assert _provider_failure_reason(QuotaError("private-provider-detail")) == "quota"
     assert _provider_failure_reason(ModelError("private-provider-detail")) == "model"
+    assert _provider_failure_reason(NotFoundModelError("model not found")) == "model"
     assert _provider_failure_reason(TimeoutError("private-provider-detail")) == "timeout"
 
 
