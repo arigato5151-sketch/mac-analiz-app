@@ -13,6 +13,7 @@ from config.settings import PROJECT_ROOT, _load_env_file
 
 
 DEFAULT_MODEL = "gemini-2.5-flash"
+FALLBACK_MODELS = ("gemini-2.5-flash-lite", "gemini-2.0-flash")
 MAX_CONTEXT_ITEMS = 12
 # Gemini 3.x may spend part of the generation budget on internal reasoning.
 # A 700-token cap cut user-visible Turkish text mid-sentence in production.
@@ -190,6 +191,11 @@ def _provider_failure_reason(error: Exception) -> str:
     return "timeout" if "timeout" in error_name else "provider"
 
 
+def _model_candidates(configured_model: str) -> list[str]:
+    """Keep a stale deployment model setting from disabling commentary."""
+    return list(dict.fromkeys([configured_model, DEFAULT_MODEL, *FALLBACK_MODELS]))
+
+
 def generate_match_commentary(
     *,
     home_team: str,
@@ -251,13 +257,15 @@ def generate_match_commentary(
             reason=_provider_failure_reason(error),
         ) from error
     last_error: MatchCommentaryError | None = None
+    models = _model_candidates(configured_model)
     for attempt in range(MAX_PROVIDER_ATTEMPTS):
         max_output_tokens = COMMENTARY_OUTPUT_BUDGETS[
             min(attempt, len(COMMENTARY_OUTPUT_BUDGETS) - 1)
         ]
+        request_model = models[min(attempt, len(models) - 1)]
         try:
             response = client.models.generate_content(
-                model=configured_model,
+                model=request_model,
                 contents=prompt,
                 config={"max_output_tokens": max_output_tokens},
             )

@@ -130,6 +130,31 @@ def test_generation_retries_once_when_the_first_response_hits_token_limit() -> N
     ]
 
 
+def test_generation_falls_back_when_deployed_model_setting_is_stale() -> None:
+    class FakeModels:
+        def __init__(self) -> None:
+            self.models: list[str] = []
+
+        def generate_content(
+            self, *, model: str, contents: str, config: dict[str, object]
+        ) -> object:
+            self.models.append(model)
+            return type("Response", (), {"text": "Tam yorum."})()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.models = FakeModels()
+
+    client = FakeClient()
+    assert generate_match_commentary(
+        **_arguments(),  # type: ignore[arg-type]
+        api_key="private-key",
+        model_name="obsolete-model",
+        client_factory=lambda _: client,
+    ) == "Tam yorum."
+    assert client.models.models == ["obsolete-model"]
+
+
 def test_generation_retries_complete_response_when_first_ends_unfinished() -> None:
     class FakeModels:
         def __init__(self) -> None:
