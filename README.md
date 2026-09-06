@@ -101,7 +101,9 @@ bir sonuçlanan maçları değerlendirip her maç için ayrı sonuç kartı yoll
 maça 25 dakika veya daha az kaldığında ilgili iki takımın form ve kadro bağlamını
 yeniler, tahmini günceller ve tek mesaj gönderir. Mesaja, Gemini ile üretilen
 bağlama dayalı kısa bir `🧠 Maç yorumu` bölümü de eklenir. Gemini erişilemezse
-zaman duyarlı tahmin bildirimi yorum bölümü olmadan yine gönderilir. Kurulum:
+zaman duyarlı tahmin bildirimi yorum bölümü olmadan yine gönderilir. GitHub'ın
+zamanlanmış pre-match çalışmasını geciktirmesine karşı aynı idempotent kontrol,
+otomatik sonuç workflow'unda da çalışır. Kurulum:
 
 1. Telegram'da `@BotFather` ile bir bot oluşturun ve bot tokenını alın.
 2. Botunuza Telegram'dan `/start` gönderin.

@@ -19,6 +19,7 @@ env:
   SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
   TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
 jobs:
   notify:
@@ -31,6 +32,8 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Send due pre-match predictions with AI commentary
+        run: python -m notifications.pre_match
       - name: Verify production migration ledger
         run: python -m db.migrations --verify-production
       - name: Reconcile today's final scores
