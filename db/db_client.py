@@ -112,6 +112,26 @@ class SupabaseRestClient:
             headers={"Prefer": "return=representation"},
         )
 
+    def update(
+        self,
+        table: str,
+        values: Mapping[str, Any],
+        *,
+        filters: Mapping[str, str | int | float | bool],
+    ) -> list[dict[str, Any]]:
+        """Patch existing rows without invoking insert constraints."""
+        if not values:
+            raise ValueError("Update requires at least one value")
+        if not filters:
+            raise ValueError("Update requires at least one filter")
+        return self._request(
+            "PATCH",
+            table,
+            params=filters,
+            json=dict(values),
+            headers={"Prefer": "return=representation"},
+        )
+
     def select(
         self,
         table: str,
@@ -179,6 +199,9 @@ class PublicSupabaseRestClient(SupabaseRestClient):
         raise PermissionError("Public Supabase client is read-only")
 
     def upsert(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        raise PermissionError("Public Supabase client is read-only")
+
+    def update(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
         raise PermissionError("Public Supabase client is read-only")
 
     def delete(self, *args: Any, **kwargs: Any) -> None:

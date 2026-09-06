@@ -67,6 +67,7 @@ class FailingStatisticsApi(FakeApi):
 class FakeDb:
     def __init__(self) -> None:
         self.upserts: list[tuple[str, list[dict[str, Any]], str | None]] = []
+        self.updates: list[tuple[str, dict[str, Any], dict[str, str]]] = []
 
     def upsert(
         self, table: str, rows: list[dict[str, Any]], *, on_conflict: str | None = None
@@ -76,6 +77,12 @@ class FakeDb:
 
     def select_all(self, *_: Any, **__: Any) -> list[dict[str, Any]]:
         return []
+
+    def update(
+        self, table: str, values: dict[str, Any], *, filters: dict[str, str]
+    ) -> list[dict[str, Any]]:
+        self.updates.append((table, values, filters))
+        return [values]
 
 
 @pytest.mark.parametrize(
@@ -87,9 +94,7 @@ def test_normalize_status(short: str, expected: str) -> None:
 
 
 def test_transform_fixtures_deduplicates_teams() -> None:
-    teams, matches = transform_fixtures(
-        [fixture(), fixture(101, home_id=1, away_id=3)]
-    )
+    teams, matches = transform_fixtures([fixture(), fixture(101, home_id=1, away_id=3)])
 
     assert {team["id"] for team in teams} == {1, 2, 3}
     assert [match["id"] for match in matches] == [100, 101]
@@ -125,21 +130,38 @@ def test_sync_recent_results_reconciles_the_configured_lookback() -> None:
 
 def test_extract_expected_goals_accepts_provider_statistic() -> None:
     payload = [
-        {"team": {"id": 1}, "statistics": [{"type": "expected_goals", "value": "1.45"}]},
-        {"team": {"id": 2}, "statistics": [{"type": "Expected Goals", "value": "0.80"}]},
+        {
+            "team": {"id": 1},
+            "statistics": [{"type": "expected_goals", "value": "1.45"}],
+        },
+        {
+            "team": {"id": 2},
+            "statistics": [{"type": "Expected Goals", "value": "0.80"}],
+        },
     ]
-    assert extract_expected_goals(payload, home_team_id=1, away_team_id=2) == (1.45, 0.8)
+    assert extract_expected_goals(payload, home_team_id=1, away_team_id=2) == (
+        1.45,
+        0.8,
+    )
 
 
-def test_extract_expected_metrics_reads_xg_and_xa_without_fabricating_missing_values() -> None:
+def test_extract_expected_metrics_reads_xg_and_xa_without_fabricating_missing_values() -> (
+    None
+):
     payload = [
-        {"team": {"id": 1}, "statistics": [
-            {"type": "Expected Goals", "value": "1.45"},
-            {"type": "Expected Assists", "value": "0.90"},
-        ]},
-        {"team": {"id": 2}, "statistics": [
-            {"type": "xG", "value": "0.80"},
-        ]},
+        {
+            "team": {"id": 1},
+            "statistics": [
+                {"type": "Expected Goals", "value": "1.45"},
+                {"type": "Expected Assists", "value": "0.90"},
+            ],
+        },
+        {
+            "team": {"id": 2},
+            "statistics": [
+                {"type": "xG", "value": "0.80"},
+            ],
+        },
     ]
 
     assert extract_expected_metrics(payload, home_team_id=1, away_team_id=2) == {
@@ -154,20 +176,61 @@ def test_optional_expected_metrics_do_not_block_result_reconciliation() -> None:
     from data_pipeline.fetch_results import sync_recent_expected_metrics
 
     db = FakeDb()
-    db.select_all = lambda *_args, **_kwargs: [{
-        "id": 1,
-        "home_team_id": 10,
-        "away_team_id": 20,
-        "home_xg": None,
-        "away_xg": None,
-        "home_xa": None,
-        "away_xa": None,
-        "expected_metrics_checked_at": None,
-    }]
+    db.select_all = lambda *_args, **_kwargs: [
+        {
+            "id": 1,
+            "home_team_id": 10,
+            "away_team_id": 20,
+            "home_xg": None,
+            "away_xg": None,
+            "home_xa": None,
+            "away_xa": None,
+            "expected_metrics_checked_at": None,
+        }
+    ]
 
-    assert sync_recent_expected_metrics(
-        FailingStatisticsApi([]), db, today=date(2026, 9, 2), lookback_days=0
-    ) == 0
+    assert (
+        sync_recent_expected_metrics(
+            FailingStatisticsApi([]), db, today=date(2026, 9, 2), lookback_days=0
+        )
+        == 0
+    )
+
+
+def test_expected_metrics_patch_existing_match_without_partial_upsert() -> None:
+    from data_pipeline.fetch_results import sync_recent_expected_metrics
+
+    db = FakeDb()
+    db.select_all = lambda *_args, **_kwargs: [
+        {
+            "id": 1,
+            "home_team_id": 10,
+            "away_team_id": 20,
+            "home_xg": None,
+            "away_xg": None,
+            "home_xa": None,
+            "away_xa": None,
+            "expected_metrics_checked_at": None,
+        }
+    ]
+    api = FakeApi(
+        [
+            {"team": {"id": 10}, "statistics": [{"type": "xG", "value": "1.4"}]},
+            {"team": {"id": 20}, "statistics": [{"type": "xG", "value": "0.9"}]},
+        ]
+    )
+
+    assert (
+        sync_recent_expected_metrics(api, db, today=date(2026, 9, 2), lookback_days=0)
+        == 1
+    )
+    assert len(db.updates) == 1
+    table, values, filters = db.updates[0]
+    assert table == "matches"
+    assert values["home_xg"] == 1.4
+    assert values["away_xg"] == 0.9
+    assert "id" not in values
+    assert filters == {"id": "eq.1"}
 
 
 def test_build_team_form_uses_team_perspective() -> None:
@@ -205,7 +268,13 @@ def test_transform_lineups_accepts_only_complete_official_xis() -> None:
     rows = transform_lineups(
         99,
         [
-            {"team": {"id": 1}, "formation": "4-3-3", "coach": {"name": "Coach"}, "startXI": full_xi, "substitutes": []},
+            {
+                "team": {"id": 1},
+                "formation": "4-3-3",
+                "coach": {"name": "Coach"},
+                "startXI": full_xi,
+                "substitutes": [],
+            },
             {"team": {"id": 2}, "startXI": full_xi[:10]},
         ],
     )
@@ -236,9 +305,7 @@ def test_backfill_only_writes_finished_matches() -> None:
     )
     db = FakeDb()
 
-    summary = backfill_history(
-        api, db, league_ids=[39], seasons=[2025], batch_size=1
-    )
+    summary = backfill_history(api, db, league_ids=[39], seasons=[2025], batch_size=1)
 
     assert summary.completed_pairs == 1
     assert summary.finished_matches == 1

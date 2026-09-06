@@ -22,4 +22,6 @@ def test_public_client_cannot_mutate() -> None:
     with pytest.raises(PermissionError, match="read-only"):
         client.upsert("matches", [{"id": 1}])
     with pytest.raises(PermissionError, match="read-only"):
+        client.update("matches", {"home_xg": 1.2}, filters={"id": "eq.1"})
+    with pytest.raises(PermissionError, match="read-only"):
         client.delete("matches", filters={"id": "eq.1"})

@@ -16,7 +16,9 @@ from monitoring.operational_events import record_api_diagnostics, record_excepti
 
 
 EXPECTED_GOALS_STAT_TYPES = frozenset({"expected_goals", "xg"})
-EXPECTED_ASSISTS_STAT_TYPES = frozenset({"expected_assists", "expected_assist", "xa", "x_a"})
+EXPECTED_ASSISTS_STAT_TYPES = frozenset(
+    {"expected_assists", "expected_assist", "xa", "x_a"}
+)
 
 
 def _statistic_key(value: object) -> str:
@@ -37,9 +39,7 @@ def sync_results(
     api: ApiFootballClient, db: SupabaseRestClient, *, match_date: date
 ) -> SyncSummary:
     # The fixture upsert is idempotent and updates scores/status atomically.
-    return sync_fixtures(
-        api, db, start_date=match_date, end_date=match_date
-    )
+    return sync_fixtures(api, db, start_date=match_date, end_date=match_date)
 
 
 def sync_recent_results(
@@ -63,7 +63,10 @@ def sync_recent_results(
 
 
 def extract_expected_goals(
-    payload: list[dict[str, Any]], *, home_team_id: int, away_team_id: int,
+    payload: list[dict[str, Any]],
+    *,
+    home_team_id: int,
+    away_team_id: int,
 ) -> tuple[float, float] | None:
     """Read API-Football xG when the plan/provider exposes the statistic."""
     metrics = extract_expected_metrics(
@@ -77,7 +80,10 @@ def extract_expected_goals(
 
 
 def extract_expected_metrics(
-    payload: list[dict[str, Any]], *, home_team_id: int, away_team_id: int,
+    payload: list[dict[str, Any]],
+    *,
+    home_team_id: int,
+    away_team_id: int,
 ) -> dict[str, float | None]:
     """Read provider xG/xA statistics for both teams without inventing missing xA.
 
@@ -93,9 +99,9 @@ def extract_expected_metrics(
         for stat in team_stats.get("statistics", []):
             kind = _statistic_key(stat.get("type", ""))
             metric = (
-                "xg" if kind in EXPECTED_GOALS_STAT_TYPES
-                else "xa" if kind in EXPECTED_ASSISTS_STAT_TYPES
-                else None
+                "xg"
+                if kind in EXPECTED_GOALS_STAT_TYPES
+                else "xa" if kind in EXPECTED_ASSISTS_STAT_TYPES else None
             )
             if metric is None:
                 continue
@@ -112,10 +118,16 @@ def extract_expected_metrics(
 
 
 def sync_recent_expected_metrics(
-    api: ApiFootballClient, db: SupabaseRestClient, *, today: date, lookback_days: int,
+    api: ApiFootballClient,
+    db: SupabaseRestClient,
+    *,
+    today: date,
+    lookback_days: int,
 ) -> int:
     """Persist available xG/xA for recent finished fixtures; missing data is harmless."""
-    start = datetime.combine(today - timedelta(days=lookback_days), datetime.min.time()).isoformat()
+    start = datetime.combine(
+        today - timedelta(days=lookback_days), datetime.min.time()
+    ).isoformat()
     end = datetime.combine(today + timedelta(days=1), datetime.min.time()).isoformat()
     matches = db.select_all(
         "matches",
@@ -123,7 +135,10 @@ def sync_recent_expected_metrics(
             "id,home_team_id,away_team_id,home_xg,away_xg,home_xa,away_xa,"
             "expected_metrics_checked_at"
         ),
-        filters={"status": "eq.finished", "and": f"(match_date.gte.{start},match_date.lt.{end})"},
+        filters={
+            "status": "eq.finished",
+            "and": f"(match_date.gte.{start},match_date.lt.{end})",
+        },
     )
     updates: list[dict[str, Any]] = []
     for match in matches:
@@ -133,11 +148,9 @@ def sync_recent_expected_metrics(
             for column in ("home_xg", "away_xg", "home_xa", "away_xa")
         )
         # Avoid paying an API request every run when a competition does not expose xA.
-        recently_checked = (
-            checked_at is not None
-            and datetime.fromisoformat(str(checked_at).replace("Z", "+00:00"))
-            >= datetime.now(ZoneInfo("UTC")) - timedelta(hours=12)
-        )
+        recently_checked = checked_at is not None and datetime.fromisoformat(
+            str(checked_at).replace("Z", "+00:00")
+        ) >= datetime.now(ZoneInfo("UTC")) - timedelta(hours=12)
         if already_complete or recently_checked:
             continue
         try:
@@ -151,27 +164,46 @@ def sync_recent_expected_metrics(
                 error=error,
                 context={"fixture_id": int(match["id"])},
             )
-            print(f"Expected-metric fetch skipped for fixture {int(match['id'])}: {type(error).__name__}")
+            print(
+                f"Expected-metric fetch skipped for fixture {int(match['id'])}: {type(error).__name__}"
+            )
             continue
         metrics = extract_expected_metrics(
             statistics,
-            home_team_id=int(match["home_team_id"]), away_team_id=int(match["away_team_id"]),
+            home_team_id=int(match["home_team_id"]),
+            away_team_id=int(match["away_team_id"]),
         )
-        updates.append({
-            "id": int(match["id"]),
-            **{column: value for column, value in metrics.items() if value is not None},
-            "expected_metrics_checked_at": datetime.now(ZoneInfo("UTC")).isoformat(),
-        })
-    if updates:
-        db.upsert("matches", updates, on_conflict="id")
+        updates.append(
+            {
+                "id": int(match["id"]),
+                **{
+                    column: value
+                    for column, value in metrics.items()
+                    if value is not None
+                },
+                "expected_metrics_checked_at": datetime.now(
+                    ZoneInfo("UTC")
+                ).isoformat(),
+            }
+        )
+    for update in updates:
+        fixture_id = update.pop("id")
+        # These rows already exist; PATCH avoids re-validating required insert fields.
+        db.update("matches", update, filters={"id": f"eq.{fixture_id}"})
     return len(updates)
 
 
 def sync_recent_xg(
-    api: ApiFootballClient, db: SupabaseRestClient, *, today: date, lookback_days: int,
+    api: ApiFootballClient,
+    db: SupabaseRestClient,
+    *,
+    today: date,
+    lookback_days: int,
 ) -> int:
     """Backward-compatible name for callers that only knew about xG."""
-    return sync_recent_expected_metrics(api, db, today=today, lookback_days=lookback_days)
+    return sync_recent_expected_metrics(
+        api, db, today=today, lookback_days=lookback_days
+    )
 
 
 def main() -> None:
@@ -197,7 +229,9 @@ def main() -> None:
                 lookback_days=args.lookback_days,
             )
     except Exception as error:
-        record_exception(db, component="fetch_results", operation="result sync", error=error)
+        record_exception(
+            db, component="fetch_results", operation="result sync", error=error
+        )
         raise
     diagnostics = api.diagnostics()
     record_api_diagnostics(db, component="fetch_results", diagnostics=diagnostics)
