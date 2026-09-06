@@ -39,7 +39,9 @@ def binary_market_performance(
     return (probability >= 0.5) == actual_positive, float((probability - target) ** 2)
 
 
-def multiclass_log_loss(probabilities: tuple[float, float, float], outcome_index: int) -> float:
+def multiclass_log_loss(
+    probabilities: tuple[float, float, float], outcome_index: int
+) -> float:
     """Return stable per-fixture negative log likelihood for the realised 1-X-2 class."""
     if not 0 <= outcome_index < len(probabilities):
         raise ValueError("outcome_index must reference a 1-X-2 probability")
@@ -81,7 +83,11 @@ def build_performance_row(
         actual_positive=over_actual,
     )
     btts_correct, btts_brier = binary_market_performance(
-        float(prediction["prob_btts"]) if prediction.get("prob_btts") is not None else None,
+        (
+            float(prediction["prob_btts"])
+            if prediction.get("prob_btts") is not None
+            else None
+        ),
         actual_positive=btts_actual,
     )
 
@@ -99,9 +105,13 @@ def build_performance_row(
         "btts_was_correct": btts_correct,
         "btts_brier_score": btts_brier,
         "evaluated_at": evaluated_at,
+        # PostgREST bulk writes require every object to expose the same keys.
+        "snapshot_id": (
+            int(prediction["snapshot_id"])
+            if prediction.get("snapshot_id") is not None
+            else None
+        ),
     }
-    if prediction.get("snapshot_id") is not None:
-        row["snapshot_id"] = int(prediction["snapshot_id"])
     return row
 
 
@@ -133,18 +143,14 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
     """Evaluate predictions once, using idempotent upserts for safe retries."""
     predictions = db.select_all(
         "predictions",
-        columns=(
-            "id,match_id,prob_home_win,prob_draw,prob_away_win,predicted_at"
-        ),
+        columns=("id,match_id,prob_home_win,prob_draw,prob_away_win,predicted_at"),
     )
     evaluated_match_ids = {
         int(row["match_id"])
         for row in db.select_all("prediction_performance", columns="match_id")
     }
     pending = [
-        row
-        for row in predictions
-        if int(row["match_id"]) not in evaluated_match_ids
+        row for row in predictions if int(row["match_id"]) not in evaluated_match_ids
     ]
     if not pending:
         return []
@@ -198,9 +204,7 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
         if (match := matches_by_id.get(int(prediction["match_id"]))) is not None
         and str(prediction["predicted_at"]) <= str(match["match_date"])
     ]
-    persisted = db.upsert(
-        "prediction_performance", rows, on_conflict="prediction_id"
-    )
+    persisted = db.upsert("prediction_performance", rows, on_conflict="prediction_id")
     queue_rows = [
         {
             "prediction_id": int(row["prediction_id"]),
@@ -209,23 +213,17 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
             "next_attempt_at": evaluated_at,
         }
         for row in persisted
-        if (
-            match := matches_by_id.get(int(row["match_id"]))
-        ) is not None
+        if (match := matches_by_id.get(int(row["match_id"]))) is not None
         and datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
         >= datetime.now(timezone.utc) - RESULT_NOTIFICATION_MAX_AGE
     ]
-    db.upsert(
-        "result_notification_queue", queue_rows, on_conflict="prediction_id"
-    )
+    db.upsert("result_notification_queue", queue_rows, on_conflict="prediction_id")
     return persisted
 
 
 def main() -> None:
     settings = get_settings()
-    db = SupabaseRestClient(
-        settings.supabase_url, settings.supabase_service_role_key
-    )
+    db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     rows = evaluate_pending_predictions(db)
     shadow_rows = evaluate_shadow_predictions(db)
     print(

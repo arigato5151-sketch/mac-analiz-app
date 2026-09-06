@@ -53,8 +53,14 @@ def test_multiclass_log_loss_uses_a_finite_floor_for_zero_probability() -> None:
 
 
 def test_binary_market_performance_uses_real_outcome_and_probability() -> None:
-    assert binary_market_performance(0.70, actual_positive=True) == (True, pytest.approx(0.09))
-    assert binary_market_performance(0.30, actual_positive=True) == (False, pytest.approx(0.49))
+    assert binary_market_performance(0.70, actual_positive=True) == (
+        True,
+        pytest.approx(0.09),
+    )
+    assert binary_market_performance(0.30, actual_positive=True) == (
+        False,
+        pytest.approx(0.49),
+    )
     assert binary_market_performance(None, actual_positive=True) == (None, None)
 
 
@@ -108,3 +114,19 @@ def test_build_performance_row_links_an_immutable_snapshot() -> None:
     )
 
     assert row["snapshot_id"] == 55
+
+
+def test_build_performance_row_keeps_bulk_insert_keys_without_snapshot() -> None:
+    row = build_performance_row(
+        {
+            "id": 10,
+            "prob_home_win": 0.4,
+            "prob_draw": 0.35,
+            "prob_away_win": 0.25,
+        },
+        {"id": 101, "home_score": 1, "away_score": 1},
+        evaluated_at="2026-08-26T12:00:00+00:00",
+    )
+
+    assert "snapshot_id" in row
+    assert row["snapshot_id"] is None
