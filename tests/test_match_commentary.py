@@ -189,7 +189,7 @@ def test_generation_continues_after_model_error() -> None:
         model_name="obsolete-model",
         client_factory=lambda _: client,
     ) == "Tam yorum."
-    assert client.models.models == ["obsolete-model", "gemini-2.5-flash"]
+    assert client.models.models == ["obsolete-model", "gemini-3.5-flash"]
 
 
 def test_generation_retries_complete_response_when_first_ends_unfinished() -> None:

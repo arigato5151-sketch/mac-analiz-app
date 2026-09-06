@@ -12,8 +12,10 @@ from typing import Any
 from config.settings import PROJECT_ROOT, _load_env_file
 
 
-DEFAULT_MODEL = "gemini-2.5-flash"
-FALLBACK_MODELS = ("gemini-2.5-flash-lite", "gemini-2.0-flash")
+# Gemini API authorization (AQ) keys are supported by the current 3.x models.
+# Keeping fallbacks in the same supported generation avoids stale 2.x deployments.
+DEFAULT_MODEL = "gemini-3.5-flash"
+FALLBACK_MODELS = ("gemini-3.5-flash-lite", "gemini-3.6-flash")
 MAX_CONTEXT_ITEMS = 12
 # Gemini 3.x may spend part of the generation budget on internal reasoning.
 # A 700-token cap cut user-visible Turkish text mid-sentence in production.

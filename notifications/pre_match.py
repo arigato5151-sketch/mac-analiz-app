@@ -31,7 +31,7 @@ from notifications.telegram import send_telegram_message
 
 NOTIFICATION_TYPE = "pre_match_20m"
 SNAPSHOT_TYPE = "pre_match_60m"
-WINDOW_START_MINUTES = 15
+WINDOW_START_MINUTES = 0
 WINDOW_END_MINUTES = 25
 LINEUP_LOOKAHEAD_MINUTES = 90
 MAX_TELEGRAM_COMMENTARY_CHARS = 1_400
@@ -153,7 +153,11 @@ def persist_production_snapshot(
 
 
 def due_matches(matches: list[dict[str, Any]], *, now: datetime) -> list[dict[str, Any]]:
-    """Return fixtures inside the five-minute tolerance around the 20-minute target."""
+    """Return unsent fixtures with at most 25 minutes left before kickoff.
+
+    GitHub schedules can start late. The notification log provides idempotency, so
+    accepting the full pre-kickoff interval avoids permanently missing a fixture.
+    """
     start = now + timedelta(minutes=WINDOW_START_MINUTES)
     end = now + timedelta(minutes=WINDOW_END_MINUTES)
     eligible: list[dict[str, Any]] = []
@@ -357,6 +361,8 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
         filters={"team_id": f"in.({','.join(map(str, team_ids))})"},
     )
     sent = 0
+    commentary_sent = 0
+    commentary_skipped = 0
     for match in matches:
         match_id = int(match["id"])
         prediction = predictions_by_match[match_id]
@@ -401,8 +407,14 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
             )
         except MatchCommentaryError as error:
             # An optional LLM must never suppress the time-sensitive model alert.
-            print(f"Gemini commentary skipped for fixture {match_id}: {type(error).__name__}")
+            print(
+                f"Gemini commentary skipped for fixture {match_id}: "
+                f"reason={error.reason}"
+            )
+            commentary_skipped += 1
             commentary = None
+        else:
+            commentary_sent += 1
         send_telegram_message(
             pre_match_message(
                 match,
@@ -422,7 +434,15 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
             on_conflict="match_id,notification_type",
         )
         sent += 1
-    return {"due_matches": len(matches), "sent": sent, "lineup_rows": lineup_rows, "odds_history_rows": odds_history_rows, "api": api.diagnostics()}
+    return {
+        "due_matches": len(matches),
+        "sent": sent,
+        "commentary_sent": commentary_sent,
+        "commentary_skipped": commentary_skipped,
+        "lineup_rows": lineup_rows,
+        "odds_history_rows": odds_history_rows,
+        "api": api.diagnostics(),
+    }
 
 
 def main() -> None:

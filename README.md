@@ -97,15 +97,19 @@ Gece iş akışı son 30 değerlendirmedeki 1-X-2
 performansını gönderir. `Result Telegram notifications` iş akışı her 15 dakikada
 bir sonuçlanan maçları değerlendirip her maç için ayrı sonuç kartı yollar; kartta
 1-X-2, Üst 2.5 ve KG Var tahminlerinin doğru/yanlış durumu `✓`/`✗` ile gösterilir.
-`Pre-match Telegram notifications` iş akışı her 15
-dakikada bir kontrol yapar; maçtan 45–75 dakika önce ilgili iki takımın form
-ve kadro bağlamını yeniler, tahmini günceller ve tek mesaj gönderir. Kurulum:
+`Pre-match Telegram notifications` iş akışı her 5 dakikada bir kontrol yapar;
+maça 25 dakika veya daha az kaldığında ilgili iki takımın form ve kadro bağlamını
+yeniler, tahmini günceller ve tek mesaj gönderir. Mesaja, Gemini ile üretilen
+bağlama dayalı kısa bir `🧠 Maç yorumu` bölümü de eklenir. Gemini erişilemezse
+zaman duyarlı tahmin bildirimi yorum bölümü olmadan yine gönderilir. Kurulum:
 
 1. Telegram'da `@BotFather` ile bir bot oluşturun ve bot tokenını alın.
 2. Botunuza Telegram'dan `/start` gönderin.
 3. Kişisel mesaj için `@userinfobot` ile sayısal chat ID'nizi alın.
 4. GitHub deposunda **Settings → Secrets and variables → Actions** alanına
-   `TELEGRAM_BOT_TOKEN` ve `TELEGRAM_CHAT_ID` secrets değerlerini ekleyin.
+   `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` ve `GEMINI_API_KEY` secrets
+   değerlerini ekleyin. `GEMINI_API_KEY`, Google AI Studio'da oluşturulan
+   güncel `AQ.` Auth Key olmalıdır.
 
 Tokenı veya chat ID'yi kaynak koda, issue'ya ya da sohbete yazmayın. Secrets
 yoksa iş akışı bildirim adımını güvenle atlar; Telegram hatası veri

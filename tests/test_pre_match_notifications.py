@@ -11,7 +11,7 @@ from notifications.pre_match import (
 )
 
 
-def test_due_matches_uses_the_twenty_minute_window() -> None:
+def test_due_matches_uses_the_full_pre_kickoff_window() -> None:
     now = datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc)
     matches = [
         {"id": 1, "match_date": "2026-08-29T12:14:00+00:00"},
@@ -19,7 +19,7 @@ def test_due_matches_uses_the_twenty_minute_window() -> None:
         {"id": 3, "match_date": "2026-08-29T12:26:00+00:00"},
     ]
 
-    assert [row["id"] for row in due_matches(matches, now=now)] == [2]
+    assert [row["id"] for row in due_matches(matches, now=now)] == [1, 2]
 
 
 def test_pre_match_message_shows_every_market() -> None:
