@@ -75,6 +75,30 @@ if metadata:
             hide_index=True,
             use_container_width=True,
         )
+
+    confidence_rows = metadata.get("confidence_coverage", [])
+    if confidence_rows:
+        st.subheader("1-X-2 güven ve kapsama dengesi")
+        confidence_frame = pd.DataFrame(confidence_rows)
+        confidence_frame["Güven eşiği"] = confidence_frame["threshold"].map(
+            lambda value: f"%{value * 100:.0f}"
+        )
+        confidence_frame["Kapsama"] = confidence_frame["coverage"].map(
+            lambda value: f"%{value * 100:.1f}"
+        )
+        confidence_frame["Doğruluk"] = confidence_frame["accuracy"].map(
+            lambda value: f"%{value * 100:.1f}" if pd.notna(value) else "—"
+        )
+        st.dataframe(
+            confidence_frame[["Güven eşiği", "matches", "Kapsama", "Doğruluk"]]
+            .rename(columns={"matches": "Maç"}),
+            hide_index=True,
+            use_container_width=True,
+        )
+        st.caption(
+            "Daha yüksek eşik daha az maça tahmin verir. Eşik seçimi yalnızca "
+            "kronolojik testte yeterli örneklem bıraktığında yapılmalıdır."
+        )
 else:
     st.warning("Kaydedilmiş model değerlendirme metadatası bulunamadı.")
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Mapping
 
 import numpy as np
@@ -164,31 +164,43 @@ def vig_free_market_probabilities(odds: Mapping[str, object]) -> dict[str, float
 
 
 def attach_pre_match_odds(
-    matches: list[dict[str, Any]], quotes: list[dict[str, Any]], *, observed_at: datetime | None = None,
+    matches: list[dict[str, Any]],
+    quotes: list[dict[str, Any]],
+    *,
+    observed_at: datetime | None = None,
+    training_lead_minutes: int = 20,
 ) -> list[dict[str, Any]]:
-    """Attach only the newest quote captured strictly before each fixture's kickoff."""
+    """Attach causal opening/current quotes at the intended decision time."""
+    if training_lead_minutes < 0:
+        raise ValueError("training_lead_minutes must not be negative")
     kickoff_by_match = {
         int(match["id"]): datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
         for match in matches
     }
-    latest: dict[int, dict[str, Any]] = {}
+    valid_by_match: dict[int, list[dict[str, Any]]] = {}
     for quote in sorted(quotes, key=lambda item: str(item.get("captured_at", ""))):
         if quote.get("match_id") is None or not quote.get("captured_at"):
             continue
         captured = datetime.fromisoformat(str(quote["captured_at"]).replace("Z", "+00:00"))
-        if (
-            int(quote["match_id"]) in kickoff_by_match
-            and captured < kickoff_by_match[int(quote["match_id"])]
-            and (observed_at is None or captured <= observed_at)
-        ):
-            latest[int(quote["match_id"])] = quote
+        match_id = int(quote["match_id"])
+        if match_id not in kickoff_by_match:
+            continue
+        cutoff = (
+            observed_at
+            if observed_at is not None
+            else kickoff_by_match[match_id] - timedelta(minutes=training_lead_minutes)
+        )
+        if captured <= cutoff and captured < kickoff_by_match[match_id]:
+            valid_by_match.setdefault(match_id, []).append(quote)
 
     enriched: list[dict[str, Any]] = []
     for match in matches:
         row = dict(match)
-        quote = latest.get(int(row["id"]))
-        if quote:
-            row["market_odds"] = quote.get("odds") or {}
-            row["market_captured_at"] = quote["captured_at"]
+        history = valid_by_match.get(int(row["id"]), [])
+        if history:
+            opening, latest = history[0], history[-1]
+            row["market_opening_odds"] = opening.get("odds") or {}
+            row["market_odds"] = latest.get("odds") or {}
+            row["market_captured_at"] = latest["captured_at"]
         enriched.append(row)
     return enriched

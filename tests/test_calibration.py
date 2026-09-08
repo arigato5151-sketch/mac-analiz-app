@@ -10,6 +10,7 @@ from models.calibration import (
     apply_multiclass_temperature,
     expected_calibration_error,
     fit_multiclass_temperature,
+    guarded_multiclass_temperature,
 )
 from models.train_model import recency_sample_weights
 
@@ -61,3 +62,27 @@ def test_recency_weights_prioritize_newer_matches_and_normalize() -> None:
 
     assert weights[0] < weights[1] < weights[2]
     assert weights.mean() == pytest.approx(1.0)
+
+
+def test_guarded_temperature_accepts_stable_overconfidence() -> None:
+    labels = np.array(([0, 1, 2] * 40), dtype=int)
+    raw = np.full((len(labels), 3), 0.02)
+    for index, label in enumerate(labels):
+        predicted = label if index % 2 == 0 else (label + 1) % 3
+        raw[index, predicted] = 0.96
+
+    assert guarded_multiclass_temperature(labels, raw) > 1.0
+
+
+def test_guarded_temperature_rejects_regime_shift() -> None:
+    labels = np.array(([0, 1, 2] * 40), dtype=int)
+    raw = np.full((len(labels), 3), 0.02)
+    for index, label in enumerate(labels):
+        if index < 72:
+            predicted = label if index % 2 == 0 else (label + 1) % 3
+            raw[index, predicted] = 0.96
+        else:
+            raw[index] = 0.20
+            raw[index, label] = 0.60
+
+    assert guarded_multiclass_temperature(labels, raw) == 1.0

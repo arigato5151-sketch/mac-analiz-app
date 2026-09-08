@@ -6,7 +6,8 @@ import argparse
 import json
 import os
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from bisect import bisect_right
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,8 +24,8 @@ from models.calibration import (
     apply_binary_temperature,
     apply_multiclass_temperature,
     expected_calibration_error,
-    fit_binary_temperature,
-    fit_multiclass_temperature,
+    guarded_binary_temperature,
+    guarded_multiclass_temperature,
 )
 from models.feature_engineering import FEATURE_COLUMNS, build_training_dataset
 
@@ -52,18 +53,45 @@ def multiclass_brier_score(y_true: np.ndarray, probabilities: np.ndarray) -> flo
     return float(np.mean(np.sum((probabilities - one_hot) ** 2, axis=1)))
 
 
-def _result_model() -> XGBClassifier:
+def normalize_multiclass_probabilities(probabilities: np.ndarray) -> np.ndarray:
+    """Clip numerical noise and make every multiclass row sum exactly to one."""
+    values = np.clip(np.asarray(probabilities, dtype=float), 1e-12, None)
+    if values.ndim != 2 or values.shape[1] < 2:
+        raise ValueError("Multiclass probabilities must have shape (n, classes)")
+    totals = values.sum(axis=1, keepdims=True)
+    if np.any(totals <= 0):
+        raise ValueError("Multiclass probability rows must have positive mass")
+    return values / totals
+
+
+RESULT_MODEL_PRESETS: dict[str, dict[str, float | int]] = {
+    "balanced": {
+        "max_depth": 4,
+        "min_child_weight": 5,
+        "reg_alpha": 0.1,
+        "reg_lambda": 2.0,
+    },
+    "regularized": {
+        "max_depth": 3,
+        "min_child_weight": 10,
+        "reg_alpha": 0.3,
+        "reg_lambda": 4.0,
+    },
+}
+BINARY_MODEL_PRESETS = RESULT_MODEL_PRESETS
+
+
+def _result_model(preset: str = "balanced") -> XGBClassifier:
+    if preset not in RESULT_MODEL_PRESETS:
+        raise ValueError(f"Unknown result model preset: {preset}")
     return XGBClassifier(
         objective="multi:softprob",
         num_class=3,
         n_estimators=600,
         learning_rate=0.035,
-        max_depth=4,
-        min_child_weight=5,
+        **RESULT_MODEL_PRESETS[preset],
         subsample=0.85,
         colsample_bytree=0.85,
-        reg_alpha=0.1,
-        reg_lambda=2.0,
         early_stopping_rounds=40,
         eval_metric="mlogloss",
         random_state=42,
@@ -72,17 +100,16 @@ def _result_model() -> XGBClassifier:
     )
 
 
-def _binary_model() -> XGBClassifier:
+def _binary_model(preset: str = "balanced") -> XGBClassifier:
+    if preset not in BINARY_MODEL_PRESETS:
+        raise ValueError(f"Unknown binary model preset: {preset}")
     return XGBClassifier(
         objective="binary:logistic",
         n_estimators=500,
         learning_rate=0.04,
-        max_depth=4,
-        min_child_weight=5,
+        **BINARY_MODEL_PRESETS[preset],
         subsample=0.85,
         colsample_bytree=0.85,
-        reg_alpha=0.1,
-        reg_lambda=2.0,
         early_stopping_rounds=35,
         eval_metric="logloss",
         random_state=42,
@@ -142,6 +169,100 @@ def _segment_metrics(
     return rows
 
 
+def confidence_coverage_report(
+    y_true: np.ndarray,
+    probabilities: np.ndarray,
+    *,
+    thresholds: tuple[float, ...] = (0.0, 0.45, 0.50, 0.55, 0.60, 0.65),
+) -> list[dict[str, Any]]:
+    """Measure the accuracy/coverage trade-off without changing probabilities."""
+    labels = np.asarray(y_true, dtype=int)
+    values = np.asarray(probabilities, dtype=float)
+    if values.ndim != 2 or len(labels) != len(values):
+        raise ValueError("Labels and multiclass probabilities must be aligned")
+    confidence = values.max(axis=1)
+    predicted = values.argmax(axis=1)
+    rows: list[dict[str, Any]] = []
+    for threshold in thresholds:
+        if threshold < 0 or threshold > 1:
+            raise ValueError("Confidence thresholds must be between 0 and 1")
+        mask = confidence >= threshold
+        selected = int(mask.sum())
+        rows.append(
+            {
+                "threshold": float(threshold),
+                "matches": selected,
+                "coverage": float(mask.mean()),
+                "accuracy": (
+                    float(accuracy_score(labels[mask], predicted[mask]))
+                    if selected
+                    else None
+                ),
+            }
+        )
+    return rows
+
+
+def select_blend_weight(
+    y_true: np.ndarray,
+    model_probabilities: np.ndarray,
+    anchor_probabilities: np.ndarray,
+) -> tuple[float, float]:
+    """Choose a conservative model/market blend on chronological validation data."""
+    labels = np.asarray(y_true, dtype=int)
+    model_values = np.asarray(model_probabilities, dtype=float)
+    anchor_values = np.asarray(anchor_probabilities, dtype=float)
+    if model_values.shape != anchor_values.shape or len(labels) != len(model_values):
+        raise ValueError("Blend inputs must have aligned shapes")
+    label_set = list(range(model_values.shape[1])) if model_values.ndim == 2 else [0, 1]
+    best_weight = 1.0
+    best_loss = float("inf")
+    for weight in np.linspace(0.0, 1.0, 21):
+        blended = weight * model_values + (1.0 - weight) * anchor_values
+        if blended.ndim == 2:
+            blended = normalize_multiclass_probabilities(blended)
+        loss = float(log_loss(labels, blended, labels=label_set))
+        if loss < best_loss:
+            best_weight, best_loss = float(weight), loss
+    return best_weight, best_loss
+
+
+def _fit_best_model(
+    *,
+    binary: bool,
+    x_fit: pd.DataFrame,
+    y_fit: np.ndarray,
+    fit_weights: np.ndarray,
+    x_validation: pd.DataFrame,
+    y_validation: np.ndarray,
+) -> tuple[XGBClassifier, str, float]:
+    """Select a small, bounded preset search on a future validation slice."""
+    best: tuple[XGBClassifier, str, float] | None = None
+    presets = BINARY_MODEL_PRESETS if binary else RESULT_MODEL_PRESETS
+    for preset in presets:
+        model = _binary_model(preset) if binary else _result_model(preset)
+        model.fit(
+            x_fit,
+            y_fit,
+            sample_weight=fit_weights,
+            eval_set=[(x_validation, y_validation)],
+            verbose=False,
+        )
+        probabilities = model.predict_proba(x_validation)
+        loss = float(
+            log_loss(
+                y_validation,
+                probabilities[:, 1] if binary else probabilities,
+                labels=[0, 1] if binary else [0, 1, 2],
+            )
+        )
+        if best is None or loss < best[2]:
+            best = model, preset, loss
+    if best is None:  # Defensive: preset dictionaries are module constants.
+        raise RuntimeError("No model candidate was evaluated")
+    return best
+
+
 def walk_forward_report(
     features: pd.DataFrame, labels: pd.DataFrame, *, folds: int = 3,
 ) -> list[dict[str, Any]]:
@@ -162,18 +283,20 @@ def walk_forward_report(
         test_start = first_test_start + fold * block_size
         test_end = len(features) if fold == folds - 1 else test_start + block_size
         validation_start = max(1_000, int(test_start * 0.85))
-        model = _result_model()
-        model.fit(
-            features.iloc[:validation_start], y_result[:validation_start],
-            sample_weight=recency_sample_weights(labels.iloc[:validation_start]["match_date"]),
-            eval_set=[(features.iloc[validation_start:test_start], y_result[validation_start:test_start])],
-            verbose=False,
+        model, preset, _ = _fit_best_model(
+            binary=False,
+            x_fit=features.iloc[:validation_start],
+            y_fit=y_result[:validation_start],
+            fit_weights=recency_sample_weights(labels.iloc[:validation_start]["match_date"]),
+            x_validation=features.iloc[validation_start:test_start],
+            y_validation=y_result[validation_start:test_start],
         )
         probabilities = model.predict_proba(features.iloc[test_start:test_end])
         actual = y_result[test_start:test_end]
         report.append(
             {
                 "fold": fold + 1,
+                "preset": preset,
                 "train_rows": test_start,
                 "test_rows": test_end - test_start,
                 "test_start": labels.iloc[test_start]["match_date"].isoformat(),
@@ -207,43 +330,91 @@ def train_models(
     y_btts = labels["btts"].to_numpy(dtype=int)
     fit_weights = recency_sample_weights(labels.iloc[fit_slice]["match_date"])
 
-    result_model = _result_model()
-    result_model.fit(
-        x_fit,
-        y_result[fit_slice],
-        sample_weight=fit_weights,
-        eval_set=[(x_validation, y_result[validation_slice])],
-        verbose=False,
+    result_model, result_preset, result_validation_loss = _fit_best_model(
+        binary=False,
+        x_fit=x_fit,
+        y_fit=y_result[fit_slice],
+        fit_weights=fit_weights,
+        x_validation=x_validation,
+        y_validation=y_result[validation_slice],
     )
-    over_model = _binary_model()
-    over_model.fit(
-        x_fit,
-        y_over[fit_slice],
-        sample_weight=fit_weights,
-        eval_set=[(x_validation, y_over[validation_slice])],
-        verbose=False,
+    over_model, over_preset, over_validation_loss = _fit_best_model(
+        binary=True,
+        x_fit=x_fit,
+        y_fit=y_over[fit_slice],
+        fit_weights=fit_weights,
+        x_validation=x_validation,
+        y_validation=y_over[validation_slice],
     )
-    btts_model = _binary_model()
-    btts_model.fit(
-        x_fit,
-        y_btts[fit_slice],
-        sample_weight=fit_weights,
-        eval_set=[(x_validation, y_btts[validation_slice])],
-        verbose=False,
+    btts_model, btts_preset, btts_validation_loss = _fit_best_model(
+        binary=True,
+        x_fit=x_fit,
+        y_fit=y_btts[fit_slice],
+        fit_weights=fit_weights,
+        x_validation=x_validation,
+        y_validation=y_btts[validation_slice],
     )
 
-    calibration_result_probabilities = result_model.predict_proba(x_calibration)
-    result_temperature = fit_multiclass_temperature(
+    validation_result_anchor = x_validation[
+        ["market_implied_home_win", "market_implied_draw", "market_implied_away_win"]
+    ].to_numpy(dtype=float)
+    result_blend_weight, _ = select_blend_weight(
+        y_result[validation_slice],
+        result_model.predict_proba(x_validation),
+        validation_result_anchor,
+    )
+    over_blend_weight, _ = select_blend_weight(
+        y_over[validation_slice],
+        over_model.predict_proba(x_validation)[:, 1],
+        x_validation["market_implied_over_2_5"].to_numpy(dtype=float),
+    )
+    btts_blend_weight, _ = select_blend_weight(
+        y_btts[validation_slice],
+        btts_model.predict_proba(x_validation)[:, 1],
+        x_validation["market_implied_btts"].to_numpy(dtype=float),
+    )
+
+    def result_blend(frame: pd.DataFrame) -> np.ndarray:
+        model_values = result_model.predict_proba(frame)
+        anchor = frame[
+            ["market_implied_home_win", "market_implied_draw", "market_implied_away_win"]
+        ].to_numpy(dtype=float)
+        return normalize_multiclass_probabilities(
+            result_blend_weight * model_values
+            + (1.0 - result_blend_weight) * anchor
+        )
+
+    def binary_blend(
+        model: XGBClassifier, frame: pd.DataFrame, column: str, weight: float
+    ) -> np.ndarray:
+        return weight * model.predict_proba(frame)[:, 1] + (1.0 - weight) * frame[
+            column
+        ].to_numpy(dtype=float)
+
+    calibration_result_probabilities = result_blend(x_calibration)
+    result_temperature = guarded_multiclass_temperature(
         y_result[calibration_slice], calibration_result_probabilities
     )
-    over_temperature = fit_binary_temperature(
-        y_over[calibration_slice], over_model.predict_proba(x_calibration)[:, 1]
+    over_temperature = guarded_binary_temperature(
+        y_over[calibration_slice],
+        binary_blend(
+            over_model,
+            x_calibration,
+            "market_implied_over_2_5",
+            over_blend_weight,
+        ),
     )
-    btts_temperature = fit_binary_temperature(
-        y_btts[calibration_slice], btts_model.predict_proba(x_calibration)[:, 1]
+    btts_temperature = guarded_binary_temperature(
+        y_btts[calibration_slice],
+        binary_blend(
+            btts_model,
+            x_calibration,
+            "market_implied_btts",
+            btts_blend_weight,
+        ),
     )
 
-    raw_result_probabilities = result_model.predict_proba(x_test)
+    raw_result_probabilities = result_blend(x_test)
     result_probabilities = apply_multiclass_temperature(
         raw_result_probabilities, result_temperature
     )
@@ -267,10 +438,16 @@ def train_models(
         )
 
     over_probabilities = apply_binary_temperature(
-        over_model.predict_proba(x_test)[:, 1], over_temperature
+        binary_blend(
+            over_model, x_test, "market_implied_over_2_5", over_blend_weight
+        ),
+        over_temperature,
     )
     btts_probabilities = apply_binary_temperature(
-        btts_model.predict_proba(x_test)[:, 1], btts_temperature
+        binary_blend(
+            btts_model, x_test, "market_implied_btts", btts_blend_weight
+        ),
+        btts_temperature,
     )
     test_dates = labels.iloc[test_slice]["match_date"]
     metrics = EvaluationMetrics(
@@ -305,16 +482,40 @@ def train_models(
         "training_end": labels["match_date"].iloc[-1].isoformat(),
         "metrics": asdict(metrics),
         "calibration": {
-            "method": "chronological_temperature_scaling",
+            "method": "guarded_chronological_temperature_scaling",
             "result_temperature": result_temperature,
             "over_2_5_temperature": over_temperature,
             "btts_temperature": btts_temperature,
             "training_half_life_days": 365.0,
         },
+        "model_selection": {
+            "method": "bounded_chronological_preset_search",
+            "result": {
+                "preset": result_preset,
+                "validation_log_loss": result_validation_loss,
+            },
+            "over_2_5": {
+                "preset": over_preset,
+                "validation_log_loss": over_validation_loss,
+            },
+            "btts": {
+                "preset": btts_preset,
+                "validation_log_loss": btts_validation_loss,
+            },
+        },
+        "blend": {
+            "anchor": "vig_free_market_or_poisson",
+            "result_model_weight": result_blend_weight,
+            "over_2_5_model_weight": over_blend_weight,
+            "btts_model_weight": btts_blend_weight,
+        },
         "league_metrics": _segment_metrics(
             evaluated_labels,
             result_probabilities,
             x_test["league_id"].to_numpy(dtype=int),
+        ),
+        "confidence_coverage": confidence_coverage_report(
+            evaluated_labels, result_probabilities
         ),
     }
     return bundle, metrics
@@ -357,7 +558,7 @@ def load_completed_matches(db: SupabaseRestClient) -> list[dict[str, Any]]:
         "matches",
         columns=(
             "id,league_id,home_team_id,away_team_id,match_date,status,"
-            "home_score,away_score"
+            "home_score,away_score,home_xg,away_xg,home_xa,away_xa"
         ),
         filters={
             "status": "eq.finished",
@@ -366,8 +567,75 @@ def load_completed_matches(db: SupabaseRestClient) -> list[dict[str, Any]]:
         },
         order="match_date.asc,id.asc",
     )
-    quotes = db.select_all("odds_quote_history", columns="match_id,odds,captured_at", order="captured_at.asc")
-    return attach_pre_match_odds(matches, quotes)
+    quotes = db.select_all(
+        "odds_quote_history",
+        columns="match_id,odds,captured_at",
+        order="captured_at.asc",
+    )
+    availability = db.select_all(
+        "team_availability_history",
+        columns="team_id,refreshed_at,available_count",
+        order="refreshed_at.asc",
+    )
+    lineups = db.select_all(
+        "fixture_lineups",
+        columns="match_id,team_id,confirmed_at",
+        order="confirmed_at.asc",
+    )
+    return attach_historical_context(
+        attach_pre_match_odds(matches, quotes),
+        availability_history=availability,
+        lineups=lineups,
+    )
+
+
+def attach_historical_context(
+    matches: list[dict[str, Any]],
+    *,
+    availability_history: list[dict[str, Any]],
+    lineups: list[dict[str, Any]],
+    decision_lead_minutes: int = 20,
+) -> list[dict[str, Any]]:
+    """Attach only context that existed before each historical kickoff."""
+    if decision_lead_minutes < 0:
+        raise ValueError("decision_lead_minutes must not be negative")
+    availability_by_team: dict[int, list[tuple[datetime, int]]] = {}
+    for item in availability_history:
+        refreshed_at = datetime.fromisoformat(
+            str(item["refreshed_at"]).replace("Z", "+00:00")
+        )
+        availability_by_team.setdefault(int(item["team_id"]), []).append(
+            (refreshed_at, int(item["available_count"]))
+        )
+    for observations in availability_by_team.values():
+        observations.sort(key=lambda item: item[0])
+
+    confirmed_at_by_fixture = {
+        (int(item["match_id"]), int(item["team_id"])): datetime.fromisoformat(
+            str(item["confirmed_at"]).replace("Z", "+00:00")
+        )
+        for item in lineups
+    }
+    enriched: list[dict[str, Any]] = []
+    for match in matches:
+        row = dict(match)
+        kickoff = datetime.fromisoformat(str(row["match_date"]).replace("Z", "+00:00"))
+        decision_at = kickoff - timedelta(minutes=decision_lead_minutes)
+        for side in ("home", "away"):
+            team_id = int(row[f"{side}_team_id"])
+            observations = availability_by_team.get(team_id, [])
+            timestamps = [item[0] for item in observations]
+            index = bisect_right(timestamps, decision_at) - 1
+            if index >= 0:
+                available_count = observations[index][1]
+                row[f"{side}_available_count"] = available_count
+                row[f"{side}_unavailable_count"] = max(0, 22 - available_count)
+            confirmed_at = confirmed_at_by_fixture.get((int(row["id"]), team_id))
+            row[f"{side}_lineup_confirmed"] = bool(
+                confirmed_at is not None and confirmed_at <= decision_at
+            )
+        enriched.append(row)
+    return enriched
 
 
 def main() -> None:

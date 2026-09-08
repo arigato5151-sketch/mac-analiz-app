@@ -77,7 +77,7 @@ def test_upcoming_matches_do_not_mutate_state_without_results() -> None:
     assert features.loc[2, "elo_diff"] == features.loc[3, "elo_diff"]
 
 
-def test_upcoming_features_use_latest_live_team_form() -> None:
+def test_upcoming_features_do_not_override_causal_state_with_provider_form() -> None:
     history = [completed_match(1, "2026-01-01T12:00:00+00:00", 1, 0)]
     upcoming = [
         {
@@ -107,11 +107,11 @@ def test_upcoming_features_use_latest_live_team_form() -> None:
         history, upcoming, team_form_by_id=team_forms
     )
 
-    assert features.loc[2, "home_win_rate_5"] == 0.8
-    assert features.loc[2, "away_goal_diff_5"] == pytest.approx(-0.4)
-    assert features.loc[2, "home_venue_win_rate_5"] == 0.75
-    assert features.loc[2, "away_venue_win_rate_5"] == 0.25
-    assert features.loc[2, "elo_diff"] == 135
+    assert features.loc[2, "home_win_rate_5"] == 1.0
+    assert features.loc[2, "away_goal_diff_5"] == -1.0
+    assert features.loc[2, "home_venue_win_rate_5"] == 1.0
+    assert features.loc[2, "away_venue_win_rate_5"] == 0.0
+    assert features.loc[2, "elo_diff"] != 135
 
 
 def test_market_odds_are_vig_free_and_fall_back_to_poisson() -> None:
@@ -122,6 +122,10 @@ def test_market_odds_are_vig_free_and_fall_back_to_poisson() -> None:
                 "home_win": "2.0", "draw": "4.0", "away_win": "4.0",
                 "over_2_5": "1.8", "under_2_5": "2.2", "btts_yes": "1.9", "btts_no": "2.0",
             },
+            "market_opening_odds": {
+                "home_win": "2.5", "draw": "4.0", "away_win": "3.0",
+                "over_2_5": "2.0", "under_2_5": "2.0", "btts_yes": "2.0", "btts_no": "2.0",
+            },
         },
         completed_match(2, "2026-01-08T12:00:00+00:00", 0, 1),
     ]
@@ -130,6 +134,7 @@ def test_market_odds_are_vig_free_and_fall_back_to_poisson() -> None:
     assert features.loc[0, "market_odds_available"] == 1
     assert features.loc[0, "market_implied_home_win"] == pytest.approx(0.5)
     assert features.loc[0, "market_implied_draw"] == pytest.approx(0.25)
+    assert features.loc[0, "market_home_move"] > 0
     assert features.loc[1, "market_odds_available"] == 0
     assert features.loc[1, "market_implied_home_win"] == features.loc[1, "poisson_home_win"]
 
@@ -158,3 +163,17 @@ def test_elo_margin_and_season_regression_are_conservative() -> None:
     assert margin_of_victory_multiplier(4, 0) > margin_of_victory_multiplier(1, 0)
     assert regress_elo_to_league_mean(1600, 1500) == pytest.approx(1570)
     assert regress_elo_to_league_mean(None, 1510) == 1510
+
+
+def test_expected_goal_features_are_causal() -> None:
+    first = completed_match(1, "2026-01-01T12:00:00+00:00", 1, 0)
+    first.update({"home_xg": 2.4, "away_xg": 0.6})
+    second = completed_match(2, "2026-01-08T12:00:00+00:00", 0, 0)
+    second.update({"home_xg": 0.1, "away_xg": 3.0})
+
+    features, _ = build_training_dataset([first, second])
+
+    assert features.loc[0, "home_xg_diff_5"] == 0.0
+    assert features.loc[1, "home_xg_diff_5"] == pytest.approx(1.8)
+    assert features.loc[1, "away_xg_diff_5"] == pytest.approx(-1.8)
+    assert features.loc[1, "home_venue_xg_for_5"] == pytest.approx(2.4)

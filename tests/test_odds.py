@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
-from data_pipeline.odds import closing_line_value, parse_match_odds
+from data_pipeline.odds import attach_pre_match_odds, closing_line_value, parse_match_odds
 from data_pipeline.value_bets import analyze_value_bets
 from notifications.pre_match import pre_match_message
 
@@ -96,3 +98,53 @@ def test_value_bet_analysis_skips_incomplete_markets() -> None:
     )
 
     assert signals == []
+
+
+def test_training_odds_use_opening_and_latest_quote_before_decision_time() -> None:
+    matches = [{"id": 1, "match_date": "2026-09-06T18:00:00+00:00"}]
+    quotes = [
+        {
+            "match_id": 1,
+            "captured_at": "2026-09-06T15:00:00+00:00",
+            "odds": {"home_win": "2.2"},
+        },
+        {
+            "match_id": 1,
+            "captured_at": "2026-09-06T17:35:00+00:00",
+            "odds": {"home_win": "2.0"},
+        },
+        {
+            "match_id": 1,
+            "captured_at": "2026-09-06T17:45:00+00:00",
+            "odds": {"home_win": "1.8"},
+        },
+    ]
+
+    row = attach_pre_match_odds(matches, quotes, training_lead_minutes=20)[0]
+
+    assert row["market_opening_odds"]["home_win"] == "2.2"
+    assert row["market_odds"]["home_win"] == "2.0"
+
+
+def test_live_odds_never_use_quote_after_observation_time() -> None:
+    matches = [{"id": 1, "match_date": "2026-09-06T18:00:00+00:00"}]
+    quotes = [
+        {
+            "match_id": 1,
+            "captured_at": "2026-09-06T17:30:00+00:00",
+            "odds": {"home_win": "2.1"},
+        },
+        {
+            "match_id": 1,
+            "captured_at": "2026-09-06T17:50:00+00:00",
+            "odds": {"home_win": "1.9"},
+        },
+    ]
+
+    row = attach_pre_match_odds(
+        matches,
+        quotes,
+        observed_at=datetime(2026, 9, 6, 17, 40, tzinfo=timezone.utc),
+    )[0]
+
+    assert row["market_odds"]["home_win"] == "2.1"

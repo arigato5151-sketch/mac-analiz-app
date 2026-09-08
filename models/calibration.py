@@ -75,6 +75,60 @@ def fit_binary_temperature(
     return float(result.x) if result.success else 1.0
 
 
+def guarded_multiclass_temperature(
+    y_true: np.ndarray,
+    probabilities: np.ndarray,
+    *,
+    minimum_improvement: float = 1e-4,
+) -> float:
+    """Accept calibration only when it improves a later chronological guard set."""
+    labels = np.asarray(y_true, dtype=int)
+    values = np.asarray(probabilities, dtype=float)
+    if len(labels) != len(values) or len(labels) < 100:
+        raise ValueError("At least 100 aligned calibration rows are required")
+    split = max(50, int(len(labels) * 0.6))
+    if len(labels) - split < 50:
+        split = len(labels) - 50
+    candidate = fit_multiclass_temperature(labels[:split], values[:split])
+    raw_loss = log_loss(
+        labels[split:], values[split:], labels=list(range(values.shape[1]))
+    )
+    candidate_loss = log_loss(
+        labels[split:],
+        apply_multiclass_temperature(values[split:], candidate),
+        labels=list(range(values.shape[1])),
+    )
+    if candidate_loss > raw_loss - minimum_improvement:
+        return 1.0
+    return fit_multiclass_temperature(labels, values)
+
+
+def guarded_binary_temperature(
+    y_true: np.ndarray,
+    probabilities: np.ndarray,
+    *,
+    minimum_improvement: float = 1e-4,
+) -> float:
+    """Guard binary temperature scaling against chronological degradation."""
+    labels = np.asarray(y_true, dtype=int)
+    values = np.asarray(probabilities, dtype=float)
+    if len(labels) != len(values) or len(labels) < 100:
+        raise ValueError("At least 100 aligned calibration rows are required")
+    split = max(50, int(len(labels) * 0.6))
+    if len(labels) - split < 50:
+        split = len(labels) - 50
+    candidate = fit_binary_temperature(labels[:split], values[:split])
+    raw_loss = log_loss(labels[split:], values[split:], labels=[0, 1])
+    candidate_loss = log_loss(
+        labels[split:],
+        apply_binary_temperature(values[split:], candidate),
+        labels=[0, 1],
+    )
+    if candidate_loss > raw_loss - minimum_improvement:
+        return 1.0
+    return fit_binary_temperature(labels, values)
+
+
 def expected_calibration_error(
     y_true: np.ndarray, probabilities: np.ndarray, *, bins: int = 10
 ) -> float:

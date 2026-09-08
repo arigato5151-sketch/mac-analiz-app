@@ -16,7 +16,7 @@ from db.db_client import SupabaseRestClient
 from data_pipeline.odds import attach_pre_match_odds
 from models.calibration import apply_binary_temperature, apply_multiclass_temperature
 from models.feature_engineering import FEATURE_COLUMNS, build_upcoming_features
-from models.train_model import load_completed_matches
+from models.train_model import load_completed_matches, normalize_multiclass_probabilities
 
 
 def resolve_model_path(model_path: Path | None = None) -> Path:
@@ -67,10 +67,6 @@ def load_upcoming_matches(
     unavailable_counts = {
         int(row["team_id"]): int(row["unavailable_count"]) for row in availability
     }
-    unavailable_players = db.select_all("player_availability", columns="team_id,status")
-    unavailable_by_team: dict[int, list[dict[str, Any]]] = {}
-    for player in unavailable_players:
-        unavailable_by_team.setdefault(int(player["team_id"]), []).append(player)
     lineups = db.select_all("fixture_lineups", columns="match_id,team_id")
     confirmed = {(int(row["match_id"]), int(row["team_id"])) for row in lineups}
     enriched = attach_pre_match_odds(matches, quotes, observed_at=now)
@@ -80,8 +76,8 @@ def load_upcoming_matches(
         match["away_available_count"] = available_counts.get(away_id, 22)
         match["home_unavailable_count"] = unavailable_counts.get(home_id, 0)
         match["away_unavailable_count"] = unavailable_counts.get(away_id, 0)
-        match["home_unavailable_players"] = unavailable_by_team.get(home_id, [])
-        match["away_unavailable_players"] = unavailable_by_team.get(away_id, [])
+        # Training history preserves counts, not player-level status snapshots.
+        # Use the same representation at inference to avoid train/serve skew.
         match["home_lineup_confirmed"] = (int(match["id"]), home_id) in confirmed
         match["away_lineup_confirmed"] = (int(match["id"]), away_id) in confirmed
     return enriched
@@ -95,8 +91,8 @@ def generate_prediction_rows(
     model_version: str,
     team_form_by_id: dict[int, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    expected_columns = list(FEATURE_COLUMNS)
-    if bundle.get("feature_columns") != expected_columns:
+    expected_columns = list(bundle.get("feature_columns") or [])
+    if not expected_columns or not set(expected_columns).issubset(FEATURE_COLUMNS):
         raise ValueError("Saved model feature contract is incompatible")
     if not upcoming_matches:
         return []
@@ -104,22 +100,43 @@ def generate_prediction_rows(
     ordered_upcoming = sorted(
         upcoming_matches, key=lambda row: (row["match_date"], int(row["id"]))
     )
-    features = build_upcoming_features(
+    all_features = build_upcoming_features(
         historical_matches,
         ordered_upcoming,
         team_form_by_id=team_form_by_id,
     )
+    features = all_features.loc[:, expected_columns]
     calibration = bundle.get("calibration", {})
+    blend = bundle.get("blend", {})
+    result_model_weight = float(blend.get("result_model_weight", 1.0))
+    over_model_weight = float(blend.get("over_2_5_model_weight", 1.0))
+    btts_model_weight = float(blend.get("btts_model_weight", 1.0))
+    raw_result_probabilities = bundle["result_model"].predict_proba(features)
+    result_anchor = all_features[
+        ["market_implied_home_win", "market_implied_draw", "market_implied_away_win"]
+    ].to_numpy(dtype=float)
+    raw_result_probabilities = normalize_multiclass_probabilities(
+        result_model_weight * raw_result_probabilities
+        + (1.0 - result_model_weight) * result_anchor
+    )
     result_probabilities = apply_multiclass_temperature(
-        bundle["result_model"].predict_proba(features),
+        raw_result_probabilities,
         float(calibration.get("result_temperature", 1.0)),
     )
+    raw_over_probabilities = bundle["over_2_5_model"].predict_proba(features)[:, 1]
+    raw_over_probabilities = over_model_weight * raw_over_probabilities + (
+        1.0 - over_model_weight
+    ) * all_features["market_implied_over_2_5"].to_numpy(dtype=float)
     over_probabilities = apply_binary_temperature(
-        bundle["over_2_5_model"].predict_proba(features)[:, 1],
+        raw_over_probabilities,
         float(calibration.get("over_2_5_temperature", 1.0)),
     )
+    raw_btts_probabilities = bundle["btts_model"].predict_proba(features)[:, 1]
+    raw_btts_probabilities = btts_model_weight * raw_btts_probabilities + (
+        1.0 - btts_model_weight
+    ) * all_features["market_implied_btts"].to_numpy(dtype=float)
     btts_probabilities = apply_binary_temperature(
-        bundle["btts_model"].predict_proba(features)[:, 1],
+        raw_btts_probabilities,
         float(calibration.get("btts_temperature", 1.0)),
     )
 

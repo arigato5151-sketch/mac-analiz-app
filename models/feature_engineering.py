@@ -6,7 +6,6 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
-import json
 
 import numpy as np
 import pandas as pd
@@ -24,6 +23,10 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     "away_win_rate_10",
     "home_goal_diff_5",
     "away_goal_diff_5",
+    "home_xg_diff_5",
+    "away_xg_diff_5",
+    "home_venue_xg_for_5",
+    "away_venue_xg_for_5",
     "home_venue_win_rate_5",
     "away_venue_win_rate_5",
     "home_venue_goals_for_5",
@@ -46,6 +49,11 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     "market_implied_over_2_5",
     "market_implied_btts",
     "market_odds_available",
+    "market_home_move",
+    "market_draw_move",
+    "market_away_move",
+    "market_over_2_5_move",
+    "market_btts_move",
     "home_available_count",
     "away_available_count",
     "home_impact_score",
@@ -95,6 +103,8 @@ class MatchResult:
     goals_against: int
     points: int
     was_home: bool
+    xg_for: float | None = None
+    xg_against: float | None = None
 
 
 @dataclass(slots=True)
@@ -142,6 +152,35 @@ def _goal_diff(state: TeamState, n: int) -> float:
     return _safe_mean(
         [float(result.goals_for - result.goals_against) for result in results], 0.0
     )
+
+
+def _xg_average(
+    state: TeamState,
+    n: int,
+    *,
+    for_team: bool,
+    venue_home: bool | None = None,
+) -> float:
+    results = _recent(state, 10)
+    if venue_home is not None:
+        results = [result for result in results if result.was_home is venue_home]
+    results = results[-n:]
+    values = [
+        result.xg_for if for_team else result.xg_against
+        for result in results
+    ]
+    observed = [float(value) for value in values if value is not None]
+    return _safe_mean(observed, 1.25)
+
+
+def _xg_diff(state: TeamState, n: int) -> float:
+    results = _recent(state, n)
+    values = [
+        float(result.xg_for - result.xg_against)
+        for result in results
+        if result.xg_for is not None and result.xg_against is not None
+    ]
+    return _safe_mean(values, 0.0)
 
 
 def _rest_days(last_match: datetime | None, current: datetime) -> float:
@@ -224,6 +263,9 @@ class CausalFeatureState:
         away_for = _goal_average(away, 5, scored=True, venue_home=False)
         poisson = self.poisson_baseline(row)
         market = vig_free_market_probabilities(row.get("market_odds") or {})
+        opening_market = vig_free_market_probabilities(
+            row.get("market_opening_odds") or {}
+        )
         market_features = market or {
             "market_implied_home_win": poisson.prob_home_win,
             "market_implied_draw": poisson.prob_draw,
@@ -248,6 +290,14 @@ class CausalFeatureState:
             "away_win_rate_10": _win_rate(away, 10),
             "home_goal_diff_5": _goal_diff(home, 5),
             "away_goal_diff_5": _goal_diff(away, 5),
+            "home_xg_diff_5": _xg_diff(home, 5),
+            "away_xg_diff_5": _xg_diff(away, 5),
+            "home_venue_xg_for_5": _xg_average(
+                home, 5, for_team=True, venue_home=True
+            ),
+            "away_venue_xg_for_5": _xg_average(
+                away, 5, for_team=True, venue_home=False
+            ),
             "home_venue_win_rate_5": _win_rate(home, 5, venue_home=True),
             "away_venue_win_rate_5": _win_rate(away, 5, venue_home=False),
             "home_venue_goals_for_5": home_for,
@@ -270,6 +320,26 @@ class CausalFeatureState:
             "poisson_btts": poisson.prob_btts,
             **market_features,
             "market_odds_available": float(market is not None),
+            "market_home_move": float(
+                market_features["market_implied_home_win"]
+                - (opening_market or market_features)["market_implied_home_win"]
+            ),
+            "market_draw_move": float(
+                market_features["market_implied_draw"]
+                - (opening_market or market_features)["market_implied_draw"]
+            ),
+            "market_away_move": float(
+                market_features["market_implied_away_win"]
+                - (opening_market or market_features)["market_implied_away_win"]
+            ),
+            "market_over_2_5_move": float(
+                market_features["market_implied_over_2_5"]
+                - (opening_market or market_features)["market_implied_over_2_5"]
+            ),
+            "market_btts_move": float(
+                market_features["market_implied_btts"]
+                - (opening_market or market_features)["market_implied_btts"]
+            ),
             "home_available_count": float(row.get("home_available_count", 22)),
             "away_available_count": float(row.get("away_available_count", 22)),
             "home_impact_score": home_impact_score,
@@ -290,8 +360,14 @@ class CausalFeatureState:
 
         home_points = 3 if home_score > away_score else 1 if home_score == away_score else 0
         away_points = 3 if away_score > home_score else 1 if home_score == away_score else 0
-        home.results.append(MatchResult(home_score, away_score, home_points, True))
-        away.results.append(MatchResult(away_score, home_score, away_points, False))
+        home_xg = float(row["home_xg"]) if row.get("home_xg") is not None else None
+        away_xg = float(row["away_xg"]) if row.get("away_xg") is not None else None
+        home.results.append(
+            MatchResult(home_score, away_score, home_points, True, home_xg, away_xg)
+        )
+        away.results.append(
+            MatchResult(away_score, home_score, away_points, False, away_xg, home_xg)
+        )
         score = 1.0 if home_score > away_score else 0.5 if home_score == away_score else 0.0
         _update_elo(
             home, away, score, goal_diff=abs(home_score - away_score),
@@ -369,27 +445,6 @@ def build_upcoming_features(
     for row in completed:
         state.update(row)
     rows = [state.feature_row(row) for row in targets]
-    if team_form_by_id:
-        for features, match in zip(rows, targets, strict=True):
-            home_id = int(match["home_team_id"])
-            away_id = int(match["away_team_id"])
-            for prefix, team_id, venue_key in (
-                ("home", home_id, "home_win_rate"),
-                ("away", away_id, "away_win_rate"),
-            ):
-                form = team_form_by_id.get(team_id)
-                if not form:
-                    continue
-                features[f"{prefix}_win_rate_5"] = float(form["win_rate_last5"])
-                features[f"{prefix}_goal_diff_5"] = float(
-                    form["avg_goals_scored_last5"]
-                ) - float(form["avg_goals_conceded_last5"])
-                split = form.get("home_away_split") or {}
-                if isinstance(split, str):
-                    split = json.loads(split)
-                venue_value = split.get(venue_key)
-                if venue_value is not None:
-                    features[f"{prefix}_venue_win_rate_5"] = float(venue_value)
-                features[f"{prefix}_elo"] = float(form["elo_rating"])
-            features["elo_diff"] = features["home_elo"] - features["away_elo"]
+    # Provider team-form rows remain useful for UI/commentary, but the model uses
+    # the identical causal state builder in training and inference.
     return pd.DataFrame(rows, index=[int(row["id"]) for row in targets], columns=FEATURE_COLUMNS)
