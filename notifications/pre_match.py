@@ -169,7 +169,13 @@ def due_matches(matches: list[dict[str, Any]], *, now: datetime) -> list[dict[st
         kickoff = datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
         if start <= kickoff <= end:
             eligible.append(match)
-    return sorted(eligible, key=lambda row: str(row["match_date"]))
+    return sorted(
+        eligible,
+        key=lambda row: (
+            datetime.fromisoformat(str(row["match_date"]).replace("Z", "+00:00")),
+            int(row["id"]),
+        ),
+    )
 
 
 def pre_match_message(
@@ -227,7 +233,23 @@ def _pending_matches(db: SupabaseRestClient, *, now: datetime) -> list[dict[str,
         },
     )
     sent_ids = {int(row["match_id"]) for row in sent}
-    return [match for match in candidates if int(match["id"]) not in sent_ids]
+    # The database dispatcher claims fixtures in pre_match_telegram_queue (via its
+    # match_id primary key) before its HTTP response resolves. Exclude those too so
+    # the two delivery paths never send a second card for the same fixture.
+    claimed = db.select_all(
+        "pre_match_telegram_queue",
+        columns="match_id",
+        filters={
+            "match_id": f"in.({match_ids})",
+            "delivered_at": "is.null",
+        },
+    )
+    claimed_ids = {int(row["match_id"]) for row in claimed}
+    return [
+        match
+        for match in candidates
+        if int(match["id"]) not in sent_ids and int(match["id"]) not in claimed_ids
+    ]
 
 
 def sync_soon_lineups(api: ApiFootballClient, db: SupabaseRestClient, *, now: datetime) -> int:
@@ -378,7 +400,12 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
     commentary_skipped = 0
     for match in matches:
         match_id = int(match["id"])
-        prediction = predictions_by_match[match_id]
+        prediction = predictions_by_match.get(match_id)
+        if prediction is None:
+            # A fixture without a persisted forecast cannot produce a validated
+            # snapshot; skip it instead of crashing the whole delivery cycle.
+            print(f"Pre-match prediction unavailable for fixture {match_id}")
+            continue
         snapshot = persist_production_snapshot(
             db,
             prediction,

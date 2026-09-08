@@ -53,18 +53,21 @@ def resolve_model_path(model_path: Path | None = None) -> Path:
         return model_path
 
     model_dir = PROJECT_ROOT / "models" / "saved_models"
+    # Scheduled runs publish the promoted model to Storage under `latest.joblib`.
+    # Prefer that copy so a stale git-committed binary never serves predictions or
+    # pre-match cards after a promotion. Local files only become the fallback when
+    # Storage is unreachable (e.g. the read-only UI client).
+    try:
+        return download_model("latest.joblib", dest_dir=model_dir)
+    except ArtifactStoreError:
+        pass
     latest_path = model_dir / "latest.joblib"
     if latest_path.is_file():
         return latest_path
     newest = newest_versioned_model(model_dir)
     if newest is not None:
         return newest
-    # A fresh clone may lack the binary; never fail a scheduled run over a
-    # missing local artifact when a storage copy exists.
-    try:
-        return download_model("latest.joblib", dest_dir=model_dir)
-    except ArtifactStoreError:
-        raise FileNotFoundError("No versioned trained model was found")
+    raise FileNotFoundError("No trained model artifact was found")
 
 
 def load_upcoming_matches(
@@ -88,7 +91,12 @@ def load_upcoming_matches(
         },
         order="match_date.asc,id.asc",
     )
-    quotes = db.select_all("odds_quote_history", columns="match_id,odds,captured_at", order="captured_at.asc")
+    quotes = db.select_all(
+        "odds_quote_history",
+        columns="id,match_id,odds,captured_at",
+        filters={"captured_at": f"gte.{(now - timedelta(days=horizon_days)).isoformat()}"},
+        order="captured_at.asc,id.asc",
+    )
     availability = db.select_all(
         "team_availability_status",
         columns="team_id,available_count,unavailable_count",

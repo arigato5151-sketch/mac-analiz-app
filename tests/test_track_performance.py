@@ -152,9 +152,11 @@ class _ScopedDb:
 
     def __init__(self) -> None:
         self.queried: set[str] = set()
+        self.last_filters: dict[object, object] = {}
 
     def select_all(self, table: str, **kwargs: object) -> list[dict]:
         self.queried.add(table)
+        self.last_filters[table] = kwargs.get("filters")
         if table == "prediction_performance":
             return [{"match_id": 100}]
         if table == "matches":
@@ -178,3 +180,12 @@ def test_evaluate_pending_skips_database_scans_when_nothing_is_pending() -> None
     # The evaluator broadens exactly the finished-window matches; the growing
     # predictions/snapshots tables are only touched when a match is pending.
     assert db.queried <= {"prediction_performance", "matches"}
+
+
+def test_evaluate_pending_bounds_finished_window_recently() -> None:
+    db = _ScopedDb()
+
+    evaluate_pending_predictions(db)
+
+    match_filters = db.last_filters["matches"]
+    assert any(f.startswith("gte.") for f in match_filters.values() if isinstance(f, str))

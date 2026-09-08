@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from config.leagues import LEAGUES_BY_ID, TRACKED_LEAGUE_IDS
 from config.settings import get_settings
@@ -140,7 +141,7 @@ def main() -> None:
     db = SupabaseRestClient(
         settings.supabase_url, settings.supabase_service_role_key
     )
-    today = date.today()
+    today = datetime.now(ZoneInfo("Europe/Istanbul")).date()
     try:
         summary = sync_fixtures(
             api, db, start_date=today, end_date=today + timedelta(days=args.days - 1)

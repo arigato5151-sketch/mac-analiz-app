@@ -57,9 +57,9 @@ jobs:
         run: |
           test -n "${{ inputs.candidate_version }}"
           python -m models.shadow --promote "${{ inputs.candidate_version }}"
-      - name: Refresh upcoming predictions
-        if: github.event_name == 'workflow_dispatch' && inputs.promote_candidate == true
-        run: python -m models.predict --model models/saved_models/latest.joblib --days 3
       - name: Publish promoted model artifact to Supabase Storage
         if: github.event_name == 'workflow_dispatch' && inputs.promote_candidate == true
         run: python -m models.artifact_store --push models/saved_models
+      - name: Refresh upcoming predictions
+        if: github.event_name == 'workflow_dispatch' && inputs.promote_candidate == true
+        run: python -m models.predict --days 3

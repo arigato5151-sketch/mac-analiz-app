@@ -52,9 +52,29 @@ jobs:
       - name: Refresh team form, Elo, and availability
         run: python -m data_pipeline.refresh_context --days 3
       - name: Generate upcoming predictions
-        run: python -m models.predict --model models/saved_models/latest.joblib --days 3
+        run: python -m models.predict --days 3
       - name: Validate data quality
         run: python -m data_pipeline.data_quality --days 3 | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Sync today's final scores
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'full'
+        run: python -m data_pipeline.fetch_results --lookback-days 7
+      - name: Evaluate completed predictions
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'full'
+        run: python -m evaluation.track_performance
+      - name: Send Telegram performance summary
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'full'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m notifications.daily_summary --mode night
+      - name: Validate operational health
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'full'
+        id: health
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m notifications.operational_alerts --notify --fail-on-critical | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Alert failed morning pipeline
         if: failure()
         env:
@@ -66,8 +86,7 @@ jobs:
     if: >-
       github.event.schedule == '30 20 * * *' ||
       github.event.schedule == '30 23 * * *' ||
-      github.event.inputs.task == 'night' ||
-      github.event.inputs.task == 'full'
+      github.event.inputs.task == 'night'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

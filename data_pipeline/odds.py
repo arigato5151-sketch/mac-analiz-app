@@ -185,10 +185,19 @@ def attach_pre_match_odds(
         int(match["id"]): datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
         for match in matches
     }
+    valid_with_captured_at = [
+        quote
+        for quote in quotes
+        if quote.get("match_id") is not None and quote.get("captured_at")
+    ]
     valid_by_match: dict[int, list[dict[str, Any]]] = {}
-    for quote in sorted(quotes, key=lambda item: str(item.get("captured_at", ""))):
-        if quote.get("match_id") is None or not quote.get("captured_at"):
-            continue
+    for quote in sorted(
+        valid_with_captured_at,
+        key=lambda item: (
+            datetime.fromisoformat(str(item["captured_at"]).replace("Z", "+00:00")),
+            int(item.get("id", 0)),
+        ),
+    ):
         captured = datetime.fromisoformat(str(quote["captured_at"]).replace("Z", "+00:00"))
         match_id = int(quote["match_id"])
         if match_id not in kickoff_by_match:

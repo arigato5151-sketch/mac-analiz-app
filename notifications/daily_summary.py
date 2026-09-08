@@ -8,6 +8,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from config.settings import get_settings
+from data_pipeline.isotime import parse_iso_datetime
 from db.db_client import SupabaseRestClient
 from notifications.telegram import send_from_environment, send_many_from_environment
 
@@ -22,11 +23,11 @@ def build_morning_messages(
     teams_by_id = {int(row["id"]): str(row["name"]) for row in teams}
     leagues_by_id = {int(row["id"]): str(row["name"]) for row in leagues}
     latest_predictions: dict[int, dict[str, Any]] = {}
-    for row in sorted(predictions, key=lambda item: str(item["predicted_at"]), reverse=True):
+    for row in sorted(predictions, key=lambda item: parse_iso_datetime(item["predicted_at"]), reverse=True):
         latest_predictions.setdefault(int(row["match_id"]), row)
 
     messages: list[str] = []
-    for match in sorted(matches, key=lambda item: str(item["match_date"])):
+    for match in sorted(matches, key=lambda item: parse_iso_datetime(item["match_date"])):
         prediction = latest_predictions.get(int(match["id"]))
         if prediction is None:
             continue
@@ -92,16 +93,21 @@ def _official_performance_rows(
 ) -> list[dict[str, Any]]:
     """Choose one latest model snapshot per match for the nightly summary."""
     predicted_at_by_id = {
-        int(row["id"]): str(row["predicted_at"]) for row in predictions
+        int(row["id"]): parse_iso_datetime(row["predicted_at"]) for row in predictions
     }
     selected: dict[int, dict[str, Any]] = {}
     for row in performance:
         match_id = int(row["match_id"])
         current = selected.get(match_id)
-        key = (predicted_at_by_id.get(int(row["prediction_id"]), ""), int(row["prediction_id"]))
+        key = (
+            predicted_at_by_id.get(int(row["prediction_id"]), datetime.min.replace(tzinfo=timezone.utc)),
+            int(row["prediction_id"]),
+        )
         current_key = (
             (
-                predicted_at_by_id.get(int(current["prediction_id"]), ""),
+                predicted_at_by_id.get(
+                    int(current["prediction_id"]), datetime.min.replace(tzinfo=timezone.utc)
+                ),
                 int(current["prediction_id"]),
             )
             if current is not None
@@ -109,7 +115,11 @@ def _official_performance_rows(
         )
         if current_key is None or key > current_key:
             selected[match_id] = row
-    return sorted(selected.values(), key=lambda row: str(row["evaluated_at"]), reverse=True)
+    return sorted(
+        selected.values(),
+        key=lambda row: (parse_iso_datetime(row["evaluated_at"]), int(row["prediction_id"])),
+        reverse=True,
+    )
 
 
 def _morning_data(db: SupabaseRestClient) -> tuple[list[dict[str, Any]], ...]:

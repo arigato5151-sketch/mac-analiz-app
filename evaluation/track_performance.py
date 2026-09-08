@@ -10,12 +10,14 @@ from typing import Any
 from config.settings import get_settings
 from data_pipeline.isotime import parse_iso_datetime
 from db.db_client import SupabaseRestClient
-from models.shadow import evaluate_shadow_predictions
 
 
 RESULT_LABELS = ("home_win", "draw", "away_win")
 PROBABILITY_COLUMNS = ("prob_home_win", "prob_draw", "prob_away_win")
 RESULT_NOTIFICATION_MAX_AGE = timedelta(hours=24)
+# Evaluations only ever target recently finished fixtures; bounding the finished
+# scan keeps the `match_id=in.(...)` filter small even after many seasons.
+EVALUATION_LOOKBACK_DAYS = 14
 LOG_LOSS_EPSILON = 1e-15
 
 
@@ -146,6 +148,9 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
         int(row["match_id"])
         for row in db.select_all("prediction_performance", columns="match_id")
     }
+    lookback_cutoff = (
+        datetime.now(timezone.utc) - timedelta(days=EVALUATION_LOOKBACK_DAYS)
+    ).isoformat()
     finished_matches = db.select_all(
         "matches",
         columns="id,match_date,home_score,away_score",
@@ -153,6 +158,7 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
             "status": "eq.finished",
             "home_score": "not.is.null",
             "away_score": "not.is.null",
+            "match_date": f"gte.{lookback_cutoff}",
         },
     )
     matches_by_id = {int(row["id"]): row for row in finished_matches}
@@ -227,6 +233,8 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
 
 
 def main() -> None:
+    from models.shadow import evaluate_shadow_predictions
+
     settings = get_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     rows = evaluate_pending_predictions(db)

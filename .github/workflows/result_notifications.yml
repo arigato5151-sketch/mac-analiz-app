@@ -31,8 +31,6 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install --disable-pip-version-check -r requirements.txt
-      - name: Send due pre-match predictions with AI commentary
-        run: python -m notifications.pre_match
       - name: Verify production migration ledger
         run: python -m db.migrations --verify-production
       - name: Reconcile today's final scores

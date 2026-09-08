@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,7 @@ import joblib
 from config.settings import PROJECT_ROOT, get_settings
 from data_pipeline.isotime import parse_iso_datetime
 from db.db_client import DatabaseError, SupabaseRestClient
+from evaluation.track_performance import EVALUATION_LOOKBACK_DAYS
 from models.artifact_store import ArtifactStoreError, download_model
 from models.predict import (
     generate_prediction_rows,
@@ -50,6 +51,16 @@ def register_newest_candidate(db: SupabaseRestClient) -> dict[str, Any]:
         raise FileNotFoundError("No versioned model artifact was found")
     bundle = joblib.load(path)
     version = str(bundle.get("model_version", path.stem))
+    existing = db.select(
+        "model_candidates",
+        columns="model_version,status",
+        filters={"model_version": f"eq.{version}"},
+        limit=1,
+    )
+    if existing and existing[0]["status"] == "promoted":
+        # Re-registering a promoted version would flip it back to shadow and let
+        # promote_candidate "re-promote" the live model for no reason.
+        return existing[0]
     row = {
         "model_version": version,
         "status": "shadow",
@@ -112,12 +123,20 @@ def evaluate_shadow_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]:
             "shadow_prediction_performance", columns="shadow_prediction_id"
         )
     }
+    lookback_cutoff = (
+        datetime.now(timezone.utc) - timedelta(days=EVALUATION_LOOKBACK_DAYS)
+    ).isoformat()
     finished = {
         int(row["id"]): row
         for row in db.select_all(
             "matches",
             columns="id,status,match_date,home_score,away_score",
-            filters={"status": "eq.finished", "home_score": "not.is.null", "away_score": "not.is.null"},
+            filters={
+                "status": "eq.finished",
+                "home_score": "not.is.null",
+                "away_score": "not.is.null",
+                "match_date": f"gte.{lookback_cutoff}",
+            },
         )
     }
     if not finished:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -125,10 +125,13 @@ def sync_recent_expected_metrics(
     lookback_days: int,
 ) -> int:
     """Persist available xG/xA for recent finished fixtures; missing data is harmless."""
+    istanbul = ZoneInfo("Europe/Istanbul")
     start = datetime.combine(
-        today - timedelta(days=lookback_days), datetime.min.time()
-    ).isoformat()
-    end = datetime.combine(today + timedelta(days=1), datetime.min.time()).isoformat()
+        today - timedelta(days=lookback_days), datetime.min.time(), tzinfo=istanbul
+    ).astimezone(timezone.utc).isoformat()
+    end = datetime.combine(
+        today + timedelta(days=1), datetime.min.time(), tzinfo=istanbul
+    ).astimezone(timezone.utc).isoformat()
     matches = db.select_all(
         "matches",
         columns=(
