@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from config.settings import get_settings
+from data_pipeline.isotime import parse_iso_datetime
 from db.db_client import SupabaseRestClient
 from models.shadow import evaluate_shadow_predictions
 
@@ -128,9 +129,9 @@ def select_official_predictions(
     for prediction in predictions:
         match_id = int(prediction["match_id"])
         current = latest.get(match_id)
-        candidate_key = (str(prediction["predicted_at"]), int(prediction["id"]))
+        candidate_key = (parse_iso_datetime(prediction["predicted_at"]), int(prediction["id"]))
         current_key = (
-            (str(current["predicted_at"]), int(current["id"]))
+            (parse_iso_datetime(current["predicted_at"]), int(current["id"]))
             if current is not None
             else None
         )
@@ -141,27 +142,41 @@ def select_official_predictions(
 
 def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]:
     """Evaluate predictions once, using idempotent upserts for safe retries."""
-    predictions = db.select_all(
-        "predictions",
-        columns=("id,match_id,prob_home_win,prob_draw,prob_away_win,predicted_at"),
-    )
     evaluated_match_ids = {
         int(row["match_id"])
         for row in db.select_all("prediction_performance", columns="match_id")
     }
-    pending = [
-        row for row in predictions if int(row["match_id"]) not in evaluated_match_ids
+    finished_matches = db.select_all(
+        "matches",
+        columns="id,match_date,home_score,away_score",
+        filters={
+            "status": "eq.finished",
+            "home_score": "not.is.null",
+            "away_score": "not.is.null",
+        },
+    )
+    matches_by_id = {int(row["id"]): row for row in finished_matches}
+    pending_match_ids = [
+        int(match_id)
+        for match_id in matches_by_id
+        if int(match_id) not in evaluated_match_ids
     ]
-    if not pending:
+    if not pending_match_ids:
         return []
+    pending_filter = f"in.({','.join(str(match_id) for match_id in sorted(pending_match_ids))})"
 
+    predictions = db.select_all(
+        "predictions",
+        columns=("id,match_id,prob_home_win,prob_draw,prob_away_win,predicted_at"),
+        filters={"match_id": pending_filter},
+    )
     snapshots = db.select_all(
         "prediction_snapshots",
         columns=(
             "id,source_prediction_id,match_id,model_version,prob_home_win,prob_draw,"
             "prob_away_win,prob_over_2_5,prob_btts,captured_at"
         ),
-        filters={"snapshot_type": "eq.pre_match_60m"},
+        filters={"snapshot_type": "eq.pre_match_60m", "match_id": pending_filter},
     )
     snapshots_by_match = {
         int(snapshot["match_id"]): {
@@ -179,20 +194,10 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
         for snapshot in snapshots
     }
 
-    finished_matches = db.select_all(
-        "matches",
-        columns="id,status,match_date,home_score,away_score",
-        filters={
-            "status": "eq.finished",
-            "home_score": "not.is.null",
-            "away_score": "not.is.null",
-        },
-    )
-    matches_by_id = {int(row["id"]): row for row in finished_matches}
     evaluated_at = datetime.now(timezone.utc).isoformat()
     fallback_predictions = {
         int(prediction["match_id"]): prediction
-        for prediction in select_official_predictions(pending)
+        for prediction in select_official_predictions(predictions)
     }
     official_predictions = [
         snapshots_by_match.get(match_id, prediction)
@@ -202,7 +207,7 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
         build_performance_row(prediction, match, evaluated_at=evaluated_at)
         for prediction in official_predictions
         if (match := matches_by_id.get(int(prediction["match_id"]))) is not None
-        and str(prediction["predicted_at"]) <= str(match["match_date"])
+        and parse_iso_datetime(prediction["predicted_at"]) <= parse_iso_datetime(match["match_date"])
     ]
     persisted = db.upsert("prediction_performance", rows, on_conflict="prediction_id")
     queue_rows = [
@@ -214,7 +219,7 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
         }
         for row in persisted
         if (match := matches_by_id.get(int(row["match_id"]))) is not None
-        and datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
+        and parse_iso_datetime(match["match_date"])
         >= datetime.now(timezone.utc) - RESULT_NOTIFICATION_MAX_AGE
     ]
     db.upsert("result_notification_queue", queue_rows, on_conflict="prediction_id")

@@ -8,6 +8,7 @@ from evaluation.track_performance import (
     actual_result,
     binary_market_performance,
     build_performance_row,
+    evaluate_pending_predictions,
     multiclass_log_loss,
     select_official_predictions,
 )
@@ -92,6 +93,20 @@ def test_select_official_predictions_keeps_latest_snapshot_per_match() -> None:
     assert {int(row["id"]) for row in selected} == {2, 3}
 
 
+def test_select_official_predictions_compares_parsed_timestamps() -> None:
+    # id 1 reads as the "larger" string but lands earlier in UTC when parsed
+    # (10:00:00+01:00 is 09:00 UTC, while id 2 is 09:30 UTC). Lexicographic
+    # comparison would wrongly crown id 1; parse-aware ordering must pick id 2.
+    selected = select_official_predictions(
+        [
+            {"id": 1, "match_id": 10, "predicted_at": "2026-08-30T10:00:00+01:00"},
+            {"id": 2, "match_id": 10, "predicted_at": "2026-08-30T09:30:00Z"},
+        ]
+    )
+
+    assert {int(row["id"]) for row in selected} == {2}
+
+
 def test_build_performance_row_requires_a_pre_kickoff_prediction() -> None:
     # The evaluator compares timestamps before persisting a production score.
     prediction = {"id": 4, "match_id": 7, "predicted_at": "2026-08-30T10:00:00+00:00"}
@@ -130,3 +145,36 @@ def test_build_performance_row_keeps_bulk_insert_keys_without_snapshot() -> None
 
     assert "snapshot_id" in row
     assert row["snapshot_id"] is None
+
+
+class _ScopedDb:
+    """Records which tables are queried to prove pending-only narrowing."""
+
+    def __init__(self) -> None:
+        self.queried: set[str] = set()
+
+    def select_all(self, table: str, **kwargs: object) -> list[dict]:
+        self.queried.add(table)
+        if table == "prediction_performance":
+            return [{"match_id": 100}]
+        if table == "matches":
+            return [{"id": 100, "match_date": "2026-08-26T10:00:00+00:00", "home_score": 1, "away_score": 0}]
+        if table == "predictions":
+            return [{"id": 5, "match_id": 100, "prob_home_win": 0.6, "prob_draw": 0.25, "prob_away_win": 0.15, "predicted_at": "2026-08-26T09:00:00+00:00"}]
+        if table == "prediction_snapshots":
+            return []
+        return []
+
+    def upsert(self, table: str, records: list[dict], **kwargs: object) -> list[dict]:
+        return records
+
+
+def test_evaluate_pending_skips_database_scans_when_nothing_is_pending() -> None:
+    db = _ScopedDb()
+
+    rows = evaluate_pending_predictions(db)
+
+    assert rows == []
+    # The evaluator broadens exactly the finished-window matches; the growing
+    # predictions/snapshots tables are only touched when a match is pending.
+    assert db.queried <= {"prediction_performance", "matches"}

@@ -1,6 +1,35 @@
 from __future__ import annotations
 
-from models.shadow import MINIMUM_PROMOTION_SAMPLE, promotion_decision
+from models.shadow import (
+    MINIMUM_PROMOTION_SAMPLE,
+    evaluate_shadow_predictions,
+    promotion_decision,
+)
+
+
+class _NoFinishedMatchesDb:
+    def __init__(self) -> None:
+        self.queried: set[str] = set()
+
+    def select_all(self, table: str, **kwargs: object) -> list[dict]:
+        self.queried.add(table)
+        if table == "shadow_prediction_performance":
+            return []
+        if table == "matches":
+            return []
+        if table == "shadow_predictions":
+            raise AssertionError("shadow_predictions must not be scanned with no finished fixtures")
+        return []
+
+    def upsert(self, table: str, records: list[dict], **kwargs: object) -> list[dict]:
+        return records
+
+
+def test_shadow_evaluation_skips_scan_when_no_finished_matches() -> None:
+    db = _NoFinishedMatchesDb()
+
+    assert evaluate_shadow_predictions(db) == []
+    assert db.queried <= {"shadow_prediction_performance", "matches"}
 
 
 def test_shadow_candidate_needs_a_sufficient_same_match_sample() -> None:

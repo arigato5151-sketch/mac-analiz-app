@@ -1,10 +1,28 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from models.feature_engineering import FEATURE_COLUMNS
-from models.predict import generate_prediction_rows
+from models.predict import generate_prediction_rows, newest_versioned_model
+
+
+def test_newest_versioned_model_orders_by_embedded_timestamp() -> None:
+    directory = Path(__file__).parent / "_models"
+    directory.mkdir(exist_ok=True)
+    candidate = directory / "model_v2.joblib"
+    newest = directory / "model_v20260901T203949Z.joblib"
+    try:
+        candidate.touch()
+        newest.touch()
+
+        assert newest_versioned_model(directory) == newest
+    finally:
+        candidate.unlink(missing_ok=True)
+        newest.unlink(missing_ok=True)
+        directory.rmdir()
 
 
 class FixedMulticlassModel:

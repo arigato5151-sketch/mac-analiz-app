@@ -12,9 +12,15 @@ from typing import Any
 import joblib
 
 from config.settings import PROJECT_ROOT, get_settings
+from data_pipeline.isotime import parse_iso_datetime
 from db.db_client import DatabaseError, SupabaseRestClient
 from models.artifact_store import ArtifactStoreError, download_model
-from models.predict import generate_prediction_rows, load_latest_team_forms, load_upcoming_matches
+from models.predict import (
+    generate_prediction_rows,
+    load_latest_team_forms,
+    load_upcoming_matches,
+    newest_versioned_model,
+)
 from models.train_model import load_historical_matches
 
 
@@ -39,10 +45,9 @@ def candidate_path(model_version: str) -> Path:
 def register_newest_candidate(db: SupabaseRestClient) -> dict[str, Any]:
     """Register the newest versioned artifact; `latest.joblib` is never a candidate."""
     model_dir = PROJECT_ROOT / "models" / "saved_models"
-    candidates = sorted(model_dir.glob("model_v*.joblib"))
-    if not candidates:
+    path = newest_versioned_model(model_dir)
+    if path is None:
         raise FileNotFoundError("No versioned model artifact was found")
-    path = candidates[-1]
     bundle = joblib.load(path)
     version = str(bundle.get("model_version", path.stem))
     row = {
@@ -101,13 +106,6 @@ def evaluate_shadow_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]:
     """Score shadow forecasts when their fixtures become final."""
     from evaluation.track_performance import build_performance_row
 
-    predictions = db.select_all(
-        "shadow_predictions",
-        columns=(
-            "id,match_id,prob_home_win,prob_draw,prob_away_win,prob_over_2_5,"
-            "prob_btts,predicted_at"
-        ),
-    )
     already_evaluated = {
         int(row["shadow_prediction_id"])
         for row in db.select_all(
@@ -122,14 +120,27 @@ def evaluate_shadow_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]:
             filters={"status": "eq.finished", "home_score": "not.is.null", "away_score": "not.is.null"},
         )
     }
+    if not finished:
+        return []
+    finished_filter = f"in.({','.join(str(match_id) for match_id in sorted(finished))})"
+    predictions = db.select_all(
+        "shadow_predictions",
+        columns=(
+            "id,match_id,prob_home_win,prob_draw,prob_away_win,prob_over_2_5,"
+            "prob_btts,predicted_at"
+        ),
+        filters={"match_id": finished_filter},
+    )
     evaluated_at = datetime.now(timezone.utc).isoformat()
     rows: list[dict[str, Any]] = []
     for prediction in predictions:
         prediction_id = int(prediction["id"])
-        match = finished.get(int(prediction["match_id"]))
-        if prediction_id in already_evaluated or match is None:
+        if prediction_id in already_evaluated:
             continue
-        if str(prediction["predicted_at"]) > str(match["match_date"]):
+        match = finished.get(int(prediction["match_id"]))
+        if match is None:
+            continue
+        if parse_iso_datetime(prediction["predicted_at"]) > parse_iso_datetime(match["match_date"]):
             continue
         # Reuse production metric calculations, then map to shadow schema.
         source = {**prediction, "id": prediction_id}
@@ -203,7 +214,7 @@ def promote_candidate(db: SupabaseRestClient, model_version: str) -> str:
     for row in production_rows:
         match_id = int(row["match_id"])
         current = production_by_match.get(match_id)
-        if current is None or str(row["evaluated_at"]) > str(current["evaluated_at"]):
+        if current is None or parse_iso_datetime(row["evaluated_at"]) > parse_iso_datetime(current["evaluated_at"]):
             production_by_match[match_id] = row
     paired = [
         (candidate_row, production_by_match[int(candidate_row["match_id"])])

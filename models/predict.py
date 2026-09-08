@@ -20,6 +20,32 @@ from models.feature_engineering import FEATURE_COLUMNS, build_upcoming_features
 from models.train_model import load_historical_matches, normalize_multiclass_probabilities
 
 
+def newest_versioned_model(model_dir: Path) -> Path | None:
+    """Return the artifact with the newest embedded version timestamp.
+
+    ``sorted(...)[-1]`` breaks the moment a name deviates from the fixed-width
+    ``model_vYYYYMMDDTHHMMSSZ`` scheme (for example ``model_v2.joblib``). Parse
+    the timestamp so scheduling decisions follow true chronological order.
+    """
+    candidates = list(model_dir.glob("model_v*.joblib"))
+    if not candidates:
+        return None
+
+    def version_key(path: Path) -> tuple[datetime, str]:
+        raw = path.stem[len("model_v"):]
+        if len(raw) == 15 and raw[8] == "T":
+            try:
+                parsed = datetime.strptime(raw[:15], "%Y%m%dT%H%M%SZ")
+                return (parsed, path.stem)
+            except ValueError:
+                pass
+        # Unparseable/legacy names sort as oldest so a real timestamp always wins
+        # regardless of lexical ordering.
+        return (datetime.min, path.stem)
+
+    return max(candidates, key=version_key)
+
+
 def resolve_model_path(model_path: Path | None = None) -> Path:
     if model_path is not None:
         if not model_path.is_file():
@@ -30,15 +56,15 @@ def resolve_model_path(model_path: Path | None = None) -> Path:
     latest_path = model_dir / "latest.joblib"
     if latest_path.is_file():
         return latest_path
-    candidates = sorted(model_dir.glob("model_v*.joblib"))
-    if not candidates:
-        # A fresh clone may lack the binary; never fail a scheduled run over a
-        # missing local artifact when a storage copy exists.
-        try:
-            return download_model("latest.joblib", dest_dir=model_dir)
-        except ArtifactStoreError:
-            raise FileNotFoundError("No versioned trained model was found")
-    return candidates[-1]
+    newest = newest_versioned_model(model_dir)
+    if newest is not None:
+        return newest
+    # A fresh clone may lack the binary; never fail a scheduled run over a
+    # missing local artifact when a storage copy exists.
+    try:
+        return download_model("latest.joblib", dest_dir=model_dir)
+    except ArtifactStoreError:
+        raise FileNotFoundError("No versioned trained model was found")
 
 
 def load_upcoming_matches(
