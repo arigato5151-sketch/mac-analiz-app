@@ -14,6 +14,7 @@ import numpy as np
 from config.settings import PROJECT_ROOT, get_settings
 from db.db_client import SupabaseRestClient
 from data_pipeline.odds import attach_pre_match_odds
+from models.artifact_store import ArtifactStoreError, download_model
 from models.calibration import apply_binary_temperature, apply_multiclass_temperature
 from models.feature_engineering import FEATURE_COLUMNS, build_upcoming_features
 from models.train_model import load_completed_matches, normalize_multiclass_probabilities
@@ -31,7 +32,12 @@ def resolve_model_path(model_path: Path | None = None) -> Path:
         return latest_path
     candidates = sorted(model_dir.glob("model_v*.joblib"))
     if not candidates:
-        raise FileNotFoundError("No versioned trained model was found")
+        # A fresh clone may lack the binary; never fail a scheduled run over a
+        # missing local artifact when a storage copy exists.
+        try:
+            return download_model("latest.joblib", dest_dir=model_dir)
+        except ArtifactStoreError:
+            raise FileNotFoundError("No versioned trained model was found")
     return candidates[-1]
 
 

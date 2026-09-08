@@ -170,7 +170,15 @@ def attach_pre_match_odds(
     observed_at: datetime | None = None,
     training_lead_minutes: int = 20,
 ) -> list[dict[str, Any]]:
-    """Attach causal opening/current quotes at the intended decision time."""
+    """Attach causal opening/current quotes at the intended decision time.
+
+    A quote is eligible only when it was captured (1) at or before the decision
+    cutoff (``observed_at`` for live inference, ``kickoff - lead`` for training)
+    AND (2) before kickoff. The second clause is a defensive guard: in the live
+    path a caller-supplied ``observed_at`` that is later than kickoff must not
+    allow a post-kickoff quote into the pre-match feature matrix. With
+    ``training_lead_minutes >= 0`` the two conditions coincide.
+    """
     if training_lead_minutes < 0:
         raise ValueError("training_lead_minutes must not be negative")
     kickoff_by_match = {

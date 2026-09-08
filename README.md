@@ -56,21 +56,51 @@ işlemleri idempotent `upsert` kullanır.
 
 ## Veritabanı kurulumu ve güncellemeler
 
-Yeni bir Supabase projesinde SQL Editor üzerinden şu dosyaları sırasıyla
-uygulayın:
+Tek doğruluk kaynağı `db/migrations/` klasöründeki numaralanmış, salt-okunur
+migration dosyalarıdır (ledger). Her dosya bir işleme (transaction) sarılıdır ve
+SHA-256 özeti `db.migrations` aracıyla `schema_migrations` ledger tablosunda
+denetlenir. Üst düzey `db/*.sql` dosyaları yoktur; şemayı elle uygulamayın.
+
+Yeni bir Supabase projesinde SQL Editor üzerinden migration'ları **sırayla**
+(000 ile başlayıp en yeniye doğru) uygulayın:
 
 ```text
-db/schema.sql
-db/public_read_policies.sql
-db/evaluated_prediction_results.sql
-db/availability_context.sql
-db/pre_match_notifications.sql
+db/migrations/000_migration_ledger.sql
+db/migrations/001_prediction_snapshots.sql
+db/migrations/002_binary_market_performance.sql
+db/migrations/003_shadow_model_evaluation.sql
+db/migrations/004_confirmed_lineups.sql
+db/migrations/005_odds_quote_history.sql
+db/migrations/006_database_telegram_scheduler.sql
+db/migrations/007_twenty_minute_telegram_window.sql
+db/migrations/008_public_evaluated_results_view.sql
+db/migrations/009_availability_history.sql
+db/migrations/010_reliable_telegram_delivery.sql
+db/migrations/011_simplify_telegram_pre_match_message.sql
+db/migrations/012_result_telegram_delivery_queue.sql
+db/migrations/013_expected_assists_metrics.sql
+db/migrations/014_prediction_quality_metrics.sql
+db/migrations/015_operational_event_log.sql
+db/migrations/016_fix_availability_count_semantics.sql
+db/migrations/017_restrict_raw_prediction_tables.sql
+db/migrations/018_rename_pre_match_notification_type.sql
+db/migrations/019_add_automatic_pre_match_commentary.sql
+db/migrations/020_fix_public_performance_view_permissions.sql
 ```
 
-Mevcut bir kurulumda son iki dosya sonuç ekranının tek-sorgu görünümünü ve
-kadro verisinin yenilik işaretçisini ekler. SQL dosyaları tekrarlanabilir
-olarak tasarlanmıştır; yine de üretim veritabanında uygulamadan önce gözden
-geçirin.
+Migration'lar idempotent olacak şekilde tasarlanmıştır; yine de üretim
+veritabanında uygulamadan önce her birini gözden geçirin. Deployed ledger'ın
+repo ile birebir eşleştiğini doğrulamak için (CI'da da çalışır):
+
+```powershell
+python -m db.migrations --verify-production
+```
+
+Güvenlik notu: `020` public performans görünümünü `security_invoker = false`
+(owner-executed) olarak sabitler ve yalnızca dar sütun seçimini anon'a açar —
+`prediction_performance`, `prediction_snapshots` ve `team_form` gibi ham tablolar
+anon için kapalıdır. Görünüme yeni sütun eklerken anon'a ifşa olmamasına dikkat
+edin (RLS owner-executed görünümlerde bypass edilir; sütun seçimi tek savunmadır).
 
 ## Dağıtım ve operasyon
 
@@ -86,6 +116,15 @@ sonunda veri kalite denetimi; eksik tahmin ve 36 saati aşmış form/kadro
 bağlamını çalışma özetine yazar. API-Football kota uyarıları ilgili adımın
 günlüklerinde görünür. Eksik veya eski bağlam bulunduğunda iş akışı başarısız
 olur; böylece sorun sessizce canlıya taşınmaz.
+
+Model artefaktları (`.joblib` + metadata `.json`) git'e değil Supabase Storage'a
+saklanır; `Weekly retrain` iş akışı yeni candidate artefaktları
+`python -m models.artifact_store --push models/saved_models` ile `models`
+bucket'ına yükler ve doğrulama sonrası promote eder. Tahmin/deneme çalışmaları
+(`models/predict.py`, `models/shadow.py`) artefaktı önce `models/saved_models/`
+altında arar, yoksa `SUPABASE_URL` ve `SUPABASE_SERVICE_ROLE_KEY` ile Storage'dan
+indirir (`--pull` ile elle de indirilebilir). Depodaki `.joblib` dosyaları CI'da
+güncellenmez; eski track'li artefaktlar artık kaynak olarak kabul edilmez.
 
 ## Telegram bildirimleri
 

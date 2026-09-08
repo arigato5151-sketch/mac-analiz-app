@@ -6,7 +6,12 @@ from config.settings import ConfigurationError, get_public_supabase_settings
 from db.db_client import PublicSupabaseRestClient
 
 
-def test_public_settings_require_anon_key(tmp_path) -> None:
+def test_public_settings_require_anon_key(tmp_path, monkeypatch) -> None:
+    # Environment leakage from other modules' _load_env_file calls (which use
+    # setdefault semantics) can populate SUPABASE_ANON_KEY at process scope.
+    # Clear both variables so this test stays deterministic regardless of order.
+    monkeypatch.delenv("SUPABASE_ANON_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
     env_file = tmp_path / ".env"
     env_file.write_text("SUPABASE_URL=https://example.supabase.co\n", encoding="utf-8")
 

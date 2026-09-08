@@ -20,8 +20,11 @@ concurrency:
   group: weekly-model-retraining
   cancel-in-progress: false
 
+# Least privilege: this workflow only needs read access to the repository. Model
+# artifacts are published to Supabase Storage, never committed to git, so a
+# compromised training output cannot inject a binary into the repo.
 permissions:
-  contents: write
+  contents: read
 
 env:
   API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
@@ -45,17 +48,10 @@ jobs:
         run: python -m models.train_model
       - name: Register newest model as a shadow candidate
         run: python -m models.shadow --register-newest
-      - name: Publish shadow candidate artifact
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f models/saved_models/model_v*.joblib models/saved_models/model_v*.json
-          if git diff --cached --quiet; then
-            echo "No candidate artifact changes"
-          else
-            git commit -m "chore(model): register shadow candidate"
-            git push
-          fi
+      - name: Seed upcoming shadow predictions
+        run: python -m models.shadow --days 3
+      - name: Publish shadow candidate artifacts to Supabase Storage
+        run: python -m models.artifact_store --push models/saved_models
       - name: Promote proven shadow candidate
         if: github.event_name == 'workflow_dispatch' && inputs.promote_candidate == true
         run: |
@@ -64,15 +60,6 @@ jobs:
       - name: Refresh upcoming predictions
         if: github.event_name == 'workflow_dispatch' && inputs.promote_candidate == true
         run: python -m models.predict --model models/saved_models/latest.joblib --days 3
-      - name: Publish promoted model artifact
+      - name: Publish promoted model artifact to Supabase Storage
         if: github.event_name == 'workflow_dispatch' && inputs.promote_candidate == true
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f models/saved_models/latest.joblib
-          if git diff --cached --quiet; then
-            echo "No model artifact changes"
-          else
-            git commit -m "chore(model): promote proven shadow candidate"
-            git push
-          fi
+        run: python -m models.artifact_store --push models/saved_models

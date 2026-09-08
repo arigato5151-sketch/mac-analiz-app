@@ -13,6 +13,7 @@ import joblib
 
 from config.settings import PROJECT_ROOT, get_settings
 from db.db_client import DatabaseError, SupabaseRestClient
+from models.artifact_store import ArtifactStoreError, download_model
 from models.predict import generate_prediction_rows, load_latest_team_forms, load_upcoming_matches
 from models.train_model import load_completed_matches
 
@@ -24,7 +25,14 @@ MINIMUM_BRIER_IMPROVEMENT = 0.005
 def candidate_path(model_version: str) -> Path:
     path = PROJECT_ROOT / "models" / "saved_models" / f"{model_version}.joblib"
     if not path.is_file():
-        raise FileNotFoundError(f"Candidate model artifact is missing: {model_version}")
+        # A fresh clone or CI checkout may not carry the binary. Re-hydrate it
+        # from Supabase Storage rather than failing shadow evaluation.
+        try:
+            return download_model(f"{model_version}.joblib", dest_dir=path.parent)
+        except ArtifactStoreError as error:
+            raise FileNotFoundError(
+                f"Candidate model artifact is missing: {model_version}"
+            ) from error
     return path
 
 
