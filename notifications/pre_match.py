@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 import joblib
 
 from config.leagues import LEAGUES_BY_ID
-from config.settings import PROJECT_ROOT, get_settings
+from config.settings import get_settings
 from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_injuries import sync_injuries
 from data_pipeline.fetch_lineups import sync_fixture_lineups
@@ -25,7 +25,7 @@ from db.db_client import DatabaseError, SupabaseRestClient
 from models.feature_engineering import CausalFeatureState
 from models.predict import generate_prediction_rows, load_latest_team_forms, persist_predictions, resolve_model_path
 from models.shadow import run_shadow_predictions
-from models.train_model import load_completed_matches
+from models.train_model import load_historical_matches
 from notifications.telegram import send_telegram_message
 
 
@@ -65,7 +65,11 @@ def _telegram_commentary(text: str | None) -> str | None:
         return None
     normalized = text.strip()
     if len(normalized) > MAX_TELEGRAM_COMMENTARY_CHARS:
-        normalized = normalized[:MAX_TELEGRAM_COMMENTARY_CHARS].rsplit(" ", 1)[0] + "…"
+        truncated = normalized[:MAX_TELEGRAM_COMMENTARY_CHARS]
+        head, sep, _ = truncated.rpartition(" ")
+        # A huge run-on string has no split point; hard cut so the "…" suffix
+        # never pushes the message over Telegram's documented size limit.
+        normalized = (head if sep else truncated[: MAX_TELEGRAM_COMMENTARY_CHARS - 1]) + "…"
     return normalized
 
 
@@ -255,22 +259,31 @@ def sync_soon_lineups(api: ApiFootballClient, db: SupabaseRestClient, *, now: da
     return written
 
 
-def sync_soon_odds(api: ApiFootballClient, db: SupabaseRestClient, *, now: datetime) -> int:
-    """Capture meaningful market moves in the same bounded pre-kickoff window."""
+def sync_soon_odds(
+    api: ApiFootballClient, db: SupabaseRestClient, *, now: datetime
+) -> tuple[int, dict[int, MatchOdds]]:
+    """Capture meaningful market moves and return freshly fetched quotes by fixture.
+
+    The due-match loop reuses these quotes instead of issuing a second API request
+    for the same fixture in the same scheduled run.
+    """
     soon = db.select_all(
         "matches", columns="id",
         filters={"status": "eq.scheduled", "and": f"(match_date.gte.{now.isoformat()},match_date.lte.{(now + timedelta(minutes=LINEUP_LOOKAHEAD_MINUTES)).isoformat()})"},
     )
     written = 0
+    odds_by_fixture: dict[int, MatchOdds] = {}
     for match in soon:
         match_id = int(match["id"])
         try:
             odds = fetch_match_odds(api, fixture_id=match_id)
+            if odds is not None:
+                odds_by_fixture[match_id] = odds
             if odds and record_odds_quote(db, match_id=match_id, odds=odds, captured_at=now.isoformat()):
                 written += 1
         except Exception as error:
             print(f"Odds history unavailable for fixture {match_id}: {type(error).__name__}")
-    return written
+    return written, odds_by_fixture
 
 
 def _refresh_and_predict(
@@ -281,7 +294,7 @@ def _refresh_and_predict(
     list[dict[str, Any]], str, list[dict[str, Any]], dict[int, dict[str, Any]]
 ]:
     """Refresh only the affected teams, then regenerate their probabilities."""
-    historical = load_completed_matches(db)
+    historical = load_historical_matches(db)
     team_ids = {
         int(team_id)
         for match in matches
@@ -302,7 +315,7 @@ def _refresh_and_predict(
             sync_team_form(api, db, team_id=team_id, season=season, elo_rating=elo_by_team[team_id])
         sync_injuries(api, db, league_id=league_id, team_ids=affected_teams)
 
-    model_path = resolve_model_path(PROJECT_ROOT / "models" / "saved_models" / "latest.joblib")
+    model_path = resolve_model_path()
     bundle = joblib.load(model_path)
     model_version = str(bundle.get("model_version", model_path.stem))
     team_forms = load_latest_team_forms(db, team_ids)
@@ -340,9 +353,9 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
 
     api = ApiFootballClient(settings.api_football_key)
     lineup_rows = sync_soon_lineups(api, db, now=now)
-    odds_history_rows = sync_soon_odds(api, db, now=now)
+    odds_history_written, odds_by_fixture = sync_soon_odds(api, db, now=now)
     if not matches:
-        return {"due_matches": 0, "sent": 0, "lineup_rows": lineup_rows, "odds_history_rows": odds_history_rows, "api": api.diagnostics()}
+        return {"due_matches": 0, "sent": 0, "lineup_rows": lineup_rows, "odds_history_rows": odds_history_written, "api": api.diagnostics()}
     predictions, model_version, historical, team_forms = _refresh_and_predict(api, db, matches)
     predictions_by_match = {int(row["match_id"]): row for row in predictions}
     team_ids = {int(team_id) for match in matches for team_id in (match["home_team_id"], match["away_team_id"])}
@@ -374,7 +387,7 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
             captured_at=now.isoformat(),
         )
         try:
-            odds = fetch_match_odds(api, fixture_id=match_id)
+            odds = odds_by_fixture.get(match_id) or fetch_match_odds(api, fixture_id=match_id)
         except Exception as error:  # Odds are optional; never suppress a prediction alert.
             print(f"Odds unavailable for fixture {match_id}: {type(error).__name__}")
             odds = None
@@ -440,7 +453,7 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
         "commentary_sent": commentary_sent,
         "commentary_skipped": commentary_skipped,
         "lineup_rows": lineup_rows,
-        "odds_history_rows": odds_history_rows,
+        "odds_history_rows": odds_history_written,
         "api": api.diagnostics(),
     }
 

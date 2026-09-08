@@ -553,8 +553,16 @@ def save_model_bundle(
     return model_path, metadata_path
 
 
-def load_completed_matches(db: SupabaseRestClient) -> list[dict[str, Any]]:
-    matches = db.select_all(
+def load_historical_matches(db: SupabaseRestClient) -> list[dict[str, Any]]:
+    """Load finished matches with scores/xg only — the causal feature builder's input.
+
+    Inference paths (`predict`, `pre_match`, `shadow`) feed history exclusively
+    into ``CausalFeatureState``, which reads team ids, scores, xg, league and
+    date. Market/availability/lineup context columns are never consumed there, so
+    avoid transferring the (fast-growing) historical odds quote table once per
+    scheduled run. Training and the UI still call ``load_completed_matches``.
+    """
+    return db.select_all(
         "matches",
         columns=(
             "id,league_id,home_team_id,away_team_id,match_date,status,"
@@ -567,6 +575,10 @@ def load_completed_matches(db: SupabaseRestClient) -> list[dict[str, Any]]:
         },
         order="match_date.asc,id.asc",
     )
+
+
+def load_completed_matches(db: SupabaseRestClient) -> list[dict[str, Any]]:
+    matches = load_historical_matches(db)
     quotes = db.select_all(
         "odds_quote_history",
         columns="match_id,odds,captured_at",

@@ -50,6 +50,16 @@ def test_pre_match_message_adds_a_bounded_ai_commentary_section() -> None:
     assert len(_telegram_commentary("kelime " * 500) or "") <= 1_401
 
 
+def test_telegram_commentary_hard_cuts_a_run_on_string() -> None:
+    text = "x" * 5_000
+
+    result = _telegram_commentary(text)
+
+    assert result is not None
+    assert len(result) <= 1_401
+    assert result.endswith("…")
+
+
 def test_absence_summary_keeps_only_relevant_confirmed_absences() -> None:
     rows = [
         {"team_id": 1, "player_name": "A", "status": "injured"},

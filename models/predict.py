@@ -17,7 +17,7 @@ from data_pipeline.odds import attach_pre_match_odds
 from models.artifact_store import ArtifactStoreError, download_model
 from models.calibration import apply_binary_temperature, apply_multiclass_temperature
 from models.feature_engineering import FEATURE_COLUMNS, build_upcoming_features
-from models.train_model import load_completed_matches, normalize_multiclass_probabilities
+from models.train_model import load_historical_matches, normalize_multiclass_probabilities
 
 
 def resolve_model_path(model_path: Path | None = None) -> Path:
@@ -211,7 +211,7 @@ def main() -> None:
     model_path = resolve_model_path(args.model)
     bundle = joblib.load(model_path)
     now = datetime.now(timezone.utc)
-    historical = load_completed_matches(db)
+    historical = load_historical_matches(db)
     upcoming = load_upcoming_matches(db, now=now, horizon_days=args.days)
     upcoming_team_ids = {
         int(team_id)

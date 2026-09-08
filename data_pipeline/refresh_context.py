@@ -16,7 +16,7 @@ from data_pipeline.fetch_team_stats import sync_team_form
 from db.db_client import SupabaseRestClient
 from monitoring.operational_events import record_api_diagnostics, record_event, record_exception
 from models.feature_engineering import CausalFeatureState
-from models.train_model import load_completed_matches
+from models.train_model import load_historical_matches
 
 
 def upcoming_team_targets(
@@ -81,7 +81,7 @@ def refresh_upcoming_context(
             "failures": [],
         }
 
-    elo_by_team = current_elo_ratings(load_completed_matches(db), all_team_ids)
+    elo_by_team = current_elo_ratings(load_historical_matches(db), all_team_ids)
     failures: list[dict[str, Any]] = []
     form_count = 0
     availability_count = 0

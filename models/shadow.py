@@ -15,7 +15,7 @@ from config.settings import PROJECT_ROOT, get_settings
 from db.db_client import DatabaseError, SupabaseRestClient
 from models.artifact_store import ArtifactStoreError, download_model
 from models.predict import generate_prediction_rows, load_latest_team_forms, load_upcoming_matches
-from models.train_model import load_completed_matches
+from models.train_model import load_historical_matches
 
 
 MINIMUM_PROMOTION_SAMPLE = 100
@@ -48,7 +48,7 @@ def register_newest_candidate(db: SupabaseRestClient) -> dict[str, Any]:
     row = {
         "model_version": version,
         "status": "shadow",
-        "offline_metrics": bundle["metrics"],
+        "offline_metrics": bundle.get("metrics", {}),
         "registered_at": datetime.now(timezone.utc).isoformat(),
     }
     return db.upsert("model_candidates", [row], on_conflict="model_version")[0]
@@ -261,7 +261,7 @@ def main() -> None:
         result["shadow_predictions"] = run_shadow_predictions(
             db,
             matches=matches,
-            historical_matches=load_completed_matches(db),
+            historical_matches=load_historical_matches(db),
             team_form_by_id=load_latest_team_forms(db, team_ids),
         )
     print(json.dumps(result, ensure_ascii=False))

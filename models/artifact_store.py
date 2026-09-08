@@ -126,7 +126,7 @@ def download_model(
 
 
 def list_models(prefix: str = DEFAULT_PREFIX) -> list[str]:
-    """Return artifact object names under ``prefix`` (empty when the column is empty)."""
+    """Return artifact object names under ``prefix`` (empty when none exist)."""
     url = f"{_storage_url()}/object/list/{STORAGE_BUCKET}"
     body: dict[str, Any] = {"prefix": prefix, "limit": 1000, "offset": 0}
     response = requests.post(url, headers=_headers(), json=body, timeout=30.0)

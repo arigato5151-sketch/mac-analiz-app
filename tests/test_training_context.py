@@ -1,6 +1,42 @@
 from __future__ import annotations
 
-from models.train_model import attach_historical_context
+from models.train_model import attach_historical_context, load_historical_matches
+
+
+def test_historical_loader_requests_only_base_match_columns() -> None:
+    calls: list[dict[str, object]] = []
+
+    class _Db:
+        def select_all(self, table: str, **kwargs: object) -> list[dict]:
+            calls.append({"table": table, **kwargs})
+            return [{
+                "id": 10,
+                "league_id": 1,
+                "home_team_id": 1,
+                "away_team_id": 2,
+                "match_date": "2026-01-10T12:00:00+00:00",
+                "status": "finished",
+                "home_score": 2,
+                "away_score": 1,
+                "home_xg": 1.8,
+                "away_xg": 0.9,
+                "home_xa": None,
+                "away_xa": None,
+            }]
+
+    rows = load_historical_matches(_Db())
+
+    assert rows[0]["home_score"] == 2
+    assert len(calls) == 1
+    assert calls[0]["table"] == "matches"
+    asserted_columns = str(calls[0]["columns"])
+    # Inference only consumes team ids, scores, xg, league and date. Quote,
+    # availability and lineup history are deliberately not transferred here.
+    assert "odds_quote_history" not in str(calls[0].get("table"))
+    assert all(
+        column in asserted_columns
+        for column in ("home_team_id", "away_team_id", "home_score", "away_score", "match_date")
+    )
 
 
 def test_historical_context_uses_only_pre_kickoff_observations() -> None:
