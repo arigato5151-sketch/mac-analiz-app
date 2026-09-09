@@ -5,6 +5,7 @@ from math import log
 import pytest
 
 from evaluation.track_performance import (
+    _select_rows_for_match_ids,
     actual_result,
     binary_market_performance,
     build_performance_row,
@@ -189,3 +190,41 @@ def test_evaluate_pending_bounds_finished_window_recently() -> None:
 
     match_filters = db.last_filters["matches"]
     assert any(f.startswith("gte.") for f in match_filters.values() if isinstance(f, str))
+
+
+class _BatchDb:
+    def __init__(self) -> None:
+        self.filters: list[dict[str, str]] = []
+
+    def select_all(self, _table: str, **kwargs: object) -> list[dict]:
+        self.filters.append(dict(kwargs["filters"]))
+        return []
+
+
+def test_match_id_queries_are_split_below_proxy_url_limits() -> None:
+    db = _BatchDb()
+
+    rows = _select_rows_for_match_ids(
+        db,
+        "predictions",
+        columns="id,match_id",
+        match_ids=list(range(1, 206)) + [1],
+        filters={"status": "eq.ready"},
+        batch_size=100,
+    )
+
+    assert rows == []
+    assert len(db.filters) == 3
+    assert all(query["status"] == "eq.ready" for query in db.filters)
+    assert [query["match_id"].count(",") + 1 for query in db.filters] == [100, 100, 5]
+
+
+def test_match_id_query_rejects_invalid_batch_size() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        _select_rows_for_match_ids(
+            _BatchDb(),
+            "predictions",
+            columns="id",
+            match_ids=[1],
+            batch_size=0,
+        )

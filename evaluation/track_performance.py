@@ -18,6 +18,8 @@ RESULT_NOTIFICATION_MAX_AGE = timedelta(hours=24)
 # Evaluations only ever target recently finished fixtures; bounding the finished
 # scan keeps the `match_id=in.(...)` filter small even after many seasons.
 EVALUATION_LOOKBACK_DAYS = 14
+# Keep PostgREST `in.(...)` query strings comfortably below proxy URL limits.
+MATCH_ID_QUERY_BATCH_SIZE = 100
 LOG_LOSS_EPSILON = 1e-15
 
 
@@ -142,6 +144,34 @@ def select_official_predictions(
     return list(latest.values())
 
 
+def _select_rows_for_match_ids(
+    db: SupabaseRestClient,
+    table: str,
+    *,
+    columns: str,
+    match_ids: list[int],
+    filters: dict[str, str] | None = None,
+    batch_size: int = MATCH_ID_QUERY_BATCH_SIZE,
+) -> list[dict[str, Any]]:
+    """Fetch rows in bounded `match_id` batches to avoid HTTP 414 errors."""
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
+
+    rows: list[dict[str, Any]] = []
+    unique_match_ids = sorted(set(int(match_id) for match_id in match_ids))
+    for start in range(0, len(unique_match_ids), batch_size):
+        batch = unique_match_ids[start : start + batch_size]
+        batch_filter = f"in.({','.join(str(match_id) for match_id in batch)})"
+        rows.extend(
+            db.select_all(
+                table,
+                columns=columns,
+                filters={**(filters or {}), "match_id": batch_filter},
+            )
+        )
+    return rows
+
+
 def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]:
     """Evaluate predictions once, using idempotent upserts for safe retries."""
     evaluated_match_ids = {
@@ -169,20 +199,21 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
     ]
     if not pending_match_ids:
         return []
-    pending_filter = f"in.({','.join(str(match_id) for match_id in sorted(pending_match_ids))})"
-
-    predictions = db.select_all(
+    predictions = _select_rows_for_match_ids(
+        db,
         "predictions",
-        columns=("id,match_id,prob_home_win,prob_draw,prob_away_win,predicted_at"),
-        filters={"match_id": pending_filter},
+        columns="id,match_id,prob_home_win,prob_draw,prob_away_win,predicted_at",
+        match_ids=pending_match_ids,
     )
-    snapshots = db.select_all(
+    snapshots = _select_rows_for_match_ids(
+        db,
         "prediction_snapshots",
         columns=(
             "id,source_prediction_id,match_id,model_version,prob_home_win,prob_draw,"
             "prob_away_win,prob_over_2_5,prob_btts,captured_at"
         ),
-        filters={"snapshot_type": "eq.pre_match_60m", "match_id": pending_filter},
+        match_ids=pending_match_ids,
+        filters={"snapshot_type": "eq.pre_match_60m"},
     )
     snapshots_by_match = {
         int(snapshot["match_id"]): {
