@@ -146,24 +146,36 @@ def generate_prediction_rows(
         team_form_by_id=team_form_by_id,
     )
     features = all_features.loc[:, expected_columns]
+    binary_columns = list(bundle.get("binary_feature_columns") or expected_columns)
+    if not binary_columns or not set(binary_columns).issubset(FEATURE_COLUMNS):
+        raise ValueError("Saved binary model feature contract is incompatible")
+    binary_features = all_features.loc[:, binary_columns]
     calibration = bundle.get("calibration", {})
     blend = bundle.get("blend", {})
     result_model_weight = float(blend.get("result_model_weight", 1.0))
+    result_market_model_weight = float(
+        blend.get("result_market_model_weight", result_model_weight)
+    )
     over_model_weight = float(blend.get("over_2_5_model_weight", 1.0))
     btts_model_weight = float(blend.get("btts_model_weight", 1.0))
     raw_result_probabilities = bundle["result_model"].predict_proba(features)
     result_anchor = all_features[
         ["market_implied_home_win", "market_implied_draw", "market_implied_away_win"]
     ].to_numpy(dtype=float)
+    result_weights = np.where(
+        all_features["market_odds_available"].to_numpy(dtype=bool),
+        result_market_model_weight,
+        result_model_weight,
+    )[:, None]
     raw_result_probabilities = normalize_multiclass_probabilities(
-        result_model_weight * raw_result_probabilities
-        + (1.0 - result_model_weight) * result_anchor
+        result_weights * raw_result_probabilities
+        + (1.0 - result_weights) * result_anchor
     )
     result_probabilities = apply_multiclass_temperature(
         raw_result_probabilities,
         float(calibration.get("result_temperature", 1.0)),
     )
-    raw_over_probabilities = bundle["over_2_5_model"].predict_proba(features)[:, 1]
+    raw_over_probabilities = bundle["over_2_5_model"].predict_proba(binary_features)[:, 1]
     raw_over_probabilities = over_model_weight * raw_over_probabilities + (
         1.0 - over_model_weight
     ) * all_features["market_implied_over_2_5"].to_numpy(dtype=float)
@@ -171,7 +183,7 @@ def generate_prediction_rows(
         raw_over_probabilities,
         float(calibration.get("over_2_5_temperature", 1.0)),
     )
-    raw_btts_probabilities = bundle["btts_model"].predict_proba(features)[:, 1]
+    raw_btts_probabilities = bundle["btts_model"].predict_proba(binary_features)[:, 1]
     raw_btts_probabilities = btts_model_weight * raw_btts_probabilities + (
         1.0 - btts_model_weight
     ) * all_features["market_implied_btts"].to_numpy(dtype=float)

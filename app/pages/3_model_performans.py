@@ -16,6 +16,7 @@ from app.components.live_performance import summarize_live_performance
 from app.components.monte_carlo import simulate_top_pick_accuracy
 from app.components.ui import configure_page, disclaimer
 from config.leagues import LEAGUES_BY_ID
+from models.decision_policy import MINIMUM_ACTIONABLE_1X2_CONFIDENCE
 
 
 configure_page("Model Performansı")
@@ -154,14 +155,35 @@ else:
         reference_accuracy=reference_accuracy,
     )
 
-    summary_columns = st.columns(4)
+    result_confidence = performance[
+        ["prob_home_win", "prob_draw", "prob_away_win"]
+    ].astype(float).max(axis=1)
+    actionable = performance[result_confidence >= MINIMUM_ACTIONABLE_1X2_CONFIDENCE]
+    actionable_accuracy = (
+        actionable["was_correct"].astype(bool).mean() if not actionable.empty else None
+    )
+
+    summary_columns = st.columns(6)
     summary_columns[0].metric("Değerlendirilen maç", str(summary.sample_size))
-    summary_columns[1].metric("Canlı isabet", f"%{summary.accuracy * 100:.1f}")
+    summary_columns[1].metric("Tüm 1X2 isabet", f"%{summary.accuracy * 100:.1f}")
     summary_columns[2].metric(
         "%95 güven aralığı",
         f"%{summary.accuracy_lower * 100:.1f} – %{summary.accuracy_upper * 100:.1f}",
     )
-    summary_columns[3].metric("Canlı Brier", f"{summary.brier_score:.3f}")
+    summary_columns[3].metric(
+        "Güvenli 1X2 isabet",
+        f"%{actionable_accuracy * 100:.1f}" if actionable_accuracy is not None else "—",
+    )
+    summary_columns[4].metric(
+        "Güvenli 1X2 kapsama",
+        f"%{len(actionable) / len(performance) * 100:.1f}",
+    )
+    summary_columns[5].metric("Canlı Brier", f"{summary.brier_score:.3f}")
+    st.caption(
+        f"Güvenli 1X2, en yüksek sonuç olasılığı en az "
+        f"%{MINIMUM_ACTIONABLE_1X2_CONFIDENCE * 100:.0f} olan maçları kapsar; "
+        "diğer maçlar Telegram'da Pas olarak işaretlenir."
+    )
 
     market_rows = [
         {

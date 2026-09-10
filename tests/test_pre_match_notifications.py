@@ -31,7 +31,20 @@ def test_pre_match_message_shows_every_market() -> None:
         league_name="Lig",
     )
 
-    assert "Tahmin: Ev kazanır %60" in message
+    assert "1X2 Tahmin: Ev kazanır %60" in message
+    assert "Üst 2.5: %55 · KG Var: %45" in message
+
+
+def test_pre_match_message_marks_low_confidence_1x2_as_pass() -> None:
+    message = pre_match_message(
+        {"match_date": "2026-08-29T16:00:00+00:00"},
+        {"prob_home_win": 0.4, "prob_draw": 0.32, "prob_away_win": 0.28, "prob_over_2_5": 0.55, "prob_btts": 0.45},
+        home_team="Ev",
+        away_team="Deplasman",
+        league_name="Lig",
+    )
+
+    assert "1X2: Pas · en yüksek Ev kazanır %40" in message
     assert "Üst 2.5: %55 · KG Var: %45" in message
 
 

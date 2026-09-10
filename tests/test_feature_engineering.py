@@ -1,7 +1,9 @@
 import pytest
 
 from models.feature_engineering import (
+    BINARY_FEATURE_COLUMNS,
     FEATURE_COLUMNS,
+    RESULT_ONLY_FEATURE_COLUMNS,
     availability_impact_score,
     build_training_dataset,
     build_upcoming_features,
@@ -50,7 +52,12 @@ def test_features_are_causal_and_updates_apply_to_next_match() -> None:
     assert tuple(features.columns) == FEATURE_COLUMNS
     assert features.iloc[0]["home_win_rate_5"] == 0.33
     assert features.iloc[1]["home_win_rate_5"] == 1.0
+    assert features.iloc[1]["home_draw_rate_5"] == 0.0
+    assert features.iloc[1]["home_points_per_game_5"] == 3.0
+    assert features.iloc[1]["league_home_win_rate_200"] == 1.0
+    assert features.iloc[1]["league_draw_rate_200"] == 0.0
     assert features.iloc[1]["elo_diff"] > 0
+    assert features.iloc[1]["elo_abs_diff"] == abs(features.iloc[1]["elo_diff"])
     assert features.iloc[1]["home_rest_days"] == 7.0
     assert labels["result"].tolist() == [0, 1]
 
@@ -177,3 +184,9 @@ def test_expected_goal_features_are_causal() -> None:
     assert features.loc[1, "home_xg_diff_5"] == pytest.approx(1.8)
     assert features.loc[1, "away_xg_diff_5"] == pytest.approx(-1.8)
     assert features.loc[1, "home_venue_xg_for_5"] == pytest.approx(2.4)
+
+
+def test_result_only_features_do_not_enter_binary_goal_models() -> None:
+    assert RESULT_ONLY_FEATURE_COLUMNS
+    assert RESULT_ONLY_FEATURE_COLUMNS.isdisjoint(BINARY_FEATURE_COLUMNS)
+    assert set(BINARY_FEATURE_COLUMNS) | RESULT_ONLY_FEATURE_COLUMNS == set(FEATURE_COLUMNS)

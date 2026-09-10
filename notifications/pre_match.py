@@ -23,6 +23,7 @@ from data_pipeline.odds import MatchOdds, fetch_match_odds, record_odds_quote
 from data_pipeline.refresh_context import current_elo_ratings
 from db.db_client import DatabaseError, SupabaseRestClient
 from models.feature_engineering import CausalFeatureState
+from models.decision_policy import MINIMUM_ACTIONABLE_1X2_CONFIDENCE, select_1x2
 from models.predict import generate_prediction_rows, load_latest_team_forms, persist_predictions, resolve_model_path
 from models.shadow import run_shadow_predictions
 from models.train_model import load_historical_matches
@@ -189,17 +190,28 @@ def pre_match_message(
     commentary: str | None = None,
 ) -> str:
     kickoff = datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
-    outcomes = {
-        "Ev kazanır": float(prediction["prob_home_win"]),
-        "Beraberlik": float(prediction["prob_draw"]),
-        "Deplasman kazanır": float(prediction["prob_away_win"]),
-    }
-    outcome, probability = max(outcomes.items(), key=lambda item: item[1])
+    outcome_labels = ("Ev kazanır", "Beraberlik", "Deplasman kazanır")
+    outcome_index, probability, actionable = select_1x2(
+        (
+            prediction["prob_home_win"],
+            prediction["prob_draw"],
+            prediction["prob_away_win"],
+        )
+    )
+    outcome = outcome_labels[outcome_index]
+    result_line = (
+        f"1X2 Tahmin: {outcome} %{probability * 100:.0f}"
+        if actionable
+        else (
+            f"1X2: Pas · en yüksek {outcome} %{probability * 100:.0f} "
+            f"(<%{MINIMUM_ACTIONABLE_1X2_CONFIDENCE * 100:.0f} güven eşiği)"
+        )
+    )
     lines = [
         f"⚽ {home_team} — {away_team}",
         f"⏰ {kickoff.astimezone(ZoneInfo('Europe/Istanbul')).strftime('%d.%m · %H:%M')}",
         "",
-        f"Tahmin: {outcome} %{probability * 100:.0f}",
+        result_line,
         f"Üst 2.5: %{float(prediction['prob_over_2_5']) * 100:.0f} · "
         f"KG Var: %{float(prediction['prob_btts']) * 100:.0f}",
     ]

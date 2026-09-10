@@ -9,6 +9,7 @@ from typing import Any
 
 from config.settings import get_settings
 from db.db_client import SupabaseRestClient
+from models.decision_policy import MINIMUM_ACTIONABLE_1X2_CONFIDENCE, select_1x2
 from notifications.telegram import TelegramError, send_telegram_message
 
 
@@ -48,20 +49,31 @@ def final_result_message(
     """Build one concise audited result card with all model markets."""
     home_score = int(match["home_score"])
     away_score = int(match["away_score"])
-    outcome_probabilities = {
-        "Ev kazanır": float(prediction["prob_home_win"]),
-        "Beraberlik": float(prediction["prob_draw"]),
-        "Deplasman kazanır": float(prediction["prob_away_win"]),
-    }
-    predicted_outcome, outcome_probability = max(
-        outcome_probabilities.items(), key=lambda item: item[1]
+    outcome_labels = ("Ev kazanır", "Beraberlik", "Deplasman kazanır")
+    outcome_index, outcome_probability, actionable = select_1x2(
+        (
+            prediction["prob_home_win"],
+            prediction["prob_draw"],
+            prediction["prob_away_win"],
+        )
     )
+    predicted_outcome = outcome_labels[outcome_index]
     outcome_correct = predicted_outcome == _outcome_label(home_score, away_score)
+    outcome_line = (
+        f"1-X-2: {predicted_outcome} %{outcome_probability * 100:.0f} "
+        f"{'✓' if outcome_correct else '✗'}"
+        if actionable
+        else (
+            f"1-X-2: Pas · en yüksek {predicted_outcome} "
+            f"%{outcome_probability * 100:.0f} "
+            f"(<%{MINIMUM_ACTIONABLE_1X2_CONFIDENCE * 100:.0f})"
+        )
+    )
     return "\n".join(
         (
             f"🏁 {home_team} {home_score} — {away_score} {away_team}",
             "Tahmin sonuçları",
-            f"1-X-2: {predicted_outcome} %{outcome_probability * 100:.0f} {'✓' if outcome_correct else '✗'}",
+            outcome_line,
             "Üst 2.5: "
             + _result_line(
                 float(prediction["prob_over_2_5"]),

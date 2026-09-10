@@ -7,6 +7,7 @@ from models.train_model import (
     confidence_coverage_report,
     normalize_multiclass_probabilities,
     select_blend_weight,
+    select_source_aware_result_weights,
     walk_forward_report,
 )
 
@@ -57,3 +58,45 @@ def test_multiclass_normalization_removes_float_drift() -> None:
     )
 
     assert abs(float(normalized.sum(axis=1)[0]) - 1.0) < 1e-12
+
+
+def test_source_aware_blend_keeps_a_safe_market_default_until_evidence_accumulates() -> None:
+    labels = pd.Series([0, 1, 2, 0]).to_numpy()
+    model = pd.DataFrame(
+        [[0.8, 0.1, 0.1], [0.1, 0.8, 0.1], [0.1, 0.1, 0.8], [0.8, 0.1, 0.1]]
+    ).to_numpy()
+    anchor = pd.DataFrame(
+        [[0.7, 0.2, 0.1], [0.2, 0.7, 0.1], [0.2, 0.1, 0.7], [0.7, 0.2, 0.1]]
+    ).to_numpy()
+
+    fallback_weight, market_weight = select_source_aware_result_weights(
+        labels,
+        model,
+        anchor,
+        pd.Series([False, False, True, True]).to_numpy(),
+        minimum_market_sample=3,
+        default_market_model_weight=0.25,
+    )
+
+    assert fallback_weight == 1.0
+    assert market_weight == 0.25
+
+
+def test_source_aware_blend_learns_market_weight_after_minimum_sample() -> None:
+    labels = pd.Series([0, 1, 2, 0]).to_numpy()
+    model = pd.DataFrame(
+        [[0.1, 0.8, 0.1], [0.8, 0.1, 0.1], [0.8, 0.1, 0.1], [0.1, 0.8, 0.1]]
+    ).to_numpy()
+    anchor = pd.DataFrame(
+        [[0.8, 0.1, 0.1], [0.1, 0.8, 0.1], [0.1, 0.1, 0.8], [0.8, 0.1, 0.1]]
+    ).to_numpy()
+
+    _, market_weight = select_source_aware_result_weights(
+        labels,
+        model,
+        anchor,
+        pd.Series([True, True, True, True]).to_numpy(),
+        minimum_market_sample=4,
+    )
+
+    assert market_weight == 0.0

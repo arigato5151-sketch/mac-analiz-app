@@ -21,31 +21,46 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     "away_win_rate_5",
     "home_win_rate_10",
     "away_win_rate_10",
+    "home_draw_rate_5",
+    "away_draw_rate_5",
+    "home_points_per_game_5",
+    "away_points_per_game_5",
+    "form_points_diff_5",
     "home_goal_diff_5",
     "away_goal_diff_5",
+    "goal_diff_form_difference",
     "home_xg_diff_5",
     "away_xg_diff_5",
+    "xg_form_difference",
     "home_venue_xg_for_5",
     "away_venue_xg_for_5",
     "home_venue_win_rate_5",
     "away_venue_win_rate_5",
+    "venue_win_rate_diff_5",
     "home_venue_goals_for_5",
     "away_venue_goals_for_5",
     "home_elo",
     "away_elo",
     "elo_diff",
+    "elo_abs_diff",
     "home_rest_days",
     "away_rest_days",
+    "rest_days_diff",
     "h2h_home_win_rate_5",
     "h2h_draw_rate_5",
+    "league_home_win_rate_200",
+    "league_draw_rate_200",
+    "league_away_win_rate_200",
     "poisson_home_win",
     "poisson_draw",
     "poisson_away_win",
+    "poisson_result_margin",
     "poisson_over_2_5",
     "poisson_btts",
     "market_implied_home_win",
     "market_implied_draw",
     "market_implied_away_win",
+    "market_result_margin",
     "market_implied_over_2_5",
     "market_implied_btts",
     "market_odds_available",
@@ -61,6 +76,31 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     "impact_score_diff",
     "home_lineup_confirmed",
     "away_lineup_confirmed",
+)
+
+# These features target the three-way result boundary. Keeping them out of the
+# binary goal models avoids letting a 1X2 experiment regress Üst/KG performance.
+RESULT_ONLY_FEATURE_COLUMNS: frozenset[str] = frozenset(
+    {
+        "home_draw_rate_5",
+        "away_draw_rate_5",
+        "home_points_per_game_5",
+        "away_points_per_game_5",
+        "form_points_diff_5",
+        "goal_diff_form_difference",
+        "xg_form_difference",
+        "venue_win_rate_diff_5",
+        "elo_abs_diff",
+        "rest_days_diff",
+        "league_home_win_rate_200",
+        "league_draw_rate_200",
+        "league_away_win_rate_200",
+        "poisson_result_margin",
+        "market_result_margin",
+    }
+)
+BINARY_FEATURE_COLUMNS: tuple[str, ...] = tuple(
+    column for column in FEATURE_COLUMNS if column not in RESULT_ONLY_FEATURE_COLUMNS
 )
 
 
@@ -127,6 +167,25 @@ def _win_rate(state: TeamState, n: int, *, venue_home: bool | None = None) -> fl
     if venue_home is not None:
         results = [result for result in results if result.was_home is venue_home][-n:]
     return _safe_mean([float(result.points == 3) for result in results], 0.33)
+
+
+def _draw_rate(state: TeamState, n: int) -> float:
+    return _safe_mean(
+        [float(result.points == 1) for result in _recent(state, n)],
+        0.28,
+    )
+
+
+def _points_per_game(state: TeamState, n: int) -> float:
+    return _safe_mean(
+        [float(result.points) for result in _recent(state, n)],
+        1.33,
+    )
+
+
+def _top_probability_margin(probabilities: tuple[float, float, float]) -> float:
+    ordered = sorted(probabilities, reverse=True)
+    return float(ordered[0] - ordered[1])
 
 
 def _goal_average(
@@ -234,6 +293,9 @@ class CausalFeatureState:
         self.h2h: defaultdict[tuple[int, int], deque[tuple[int, int]]] = defaultdict(
             lambda: deque(maxlen=5)
         )
+        self.league_results: defaultdict[int, deque[int]] = defaultdict(
+            lambda: deque(maxlen=200)
+        )
 
     def poisson_baseline(self, row: dict[str, Any]):
         """Return the causal Poisson baseline available before a target match."""
@@ -281,6 +343,36 @@ class CausalFeatureState:
             row.get("away_unavailable_players"),
             fallback_unavailable_count=row.get("away_unavailable_count"),
         )
+        home_points = _points_per_game(home, 5)
+        away_points = _points_per_game(away, 5)
+        home_goal_diff = _goal_diff(home, 5)
+        away_goal_diff = _goal_diff(away, 5)
+        home_xg_diff = _xg_diff(home, 5)
+        away_xg_diff = _xg_diff(away, 5)
+        home_venue_win_rate = _win_rate(home, 5, venue_home=True)
+        away_venue_win_rate = _win_rate(away, 5, venue_home=False)
+        home_rest_days = _rest_days(home.last_match_at, match_at)
+        away_rest_days = _rest_days(away.last_match_at, match_at)
+        league_history = self.league_results[int(row["league_id"])]
+        league_home_rate = _safe_mean(
+            [float(result == 0) for result in league_history], 0.44
+        )
+        league_draw_rate = _safe_mean(
+            [float(result == 1) for result in league_history], 0.26
+        )
+        league_away_rate = _safe_mean(
+            [float(result == 2) for result in league_history], 0.30
+        )
+        poisson_margin = _top_probability_margin(
+            (poisson.prob_home_win, poisson.prob_draw, poisson.prob_away_win)
+        )
+        market_margin = _top_probability_margin(
+            (
+                market_features["market_implied_home_win"],
+                market_features["market_implied_draw"],
+                market_features["market_implied_away_win"],
+            )
+        )
 
         return {
             "league_id": float(row["league_id"]),
@@ -288,37 +380,52 @@ class CausalFeatureState:
             "away_win_rate_5": _win_rate(away, 5),
             "home_win_rate_10": _win_rate(home, 10),
             "away_win_rate_10": _win_rate(away, 10),
-            "home_goal_diff_5": _goal_diff(home, 5),
-            "away_goal_diff_5": _goal_diff(away, 5),
-            "home_xg_diff_5": _xg_diff(home, 5),
-            "away_xg_diff_5": _xg_diff(away, 5),
+            "home_draw_rate_5": _draw_rate(home, 5),
+            "away_draw_rate_5": _draw_rate(away, 5),
+            "home_points_per_game_5": home_points,
+            "away_points_per_game_5": away_points,
+            "form_points_diff_5": home_points - away_points,
+            "home_goal_diff_5": home_goal_diff,
+            "away_goal_diff_5": away_goal_diff,
+            "goal_diff_form_difference": home_goal_diff - away_goal_diff,
+            "home_xg_diff_5": home_xg_diff,
+            "away_xg_diff_5": away_xg_diff,
+            "xg_form_difference": home_xg_diff - away_xg_diff,
             "home_venue_xg_for_5": _xg_average(
                 home, 5, for_team=True, venue_home=True
             ),
             "away_venue_xg_for_5": _xg_average(
                 away, 5, for_team=True, venue_home=False
             ),
-            "home_venue_win_rate_5": _win_rate(home, 5, venue_home=True),
-            "away_venue_win_rate_5": _win_rate(away, 5, venue_home=False),
+            "home_venue_win_rate_5": home_venue_win_rate,
+            "away_venue_win_rate_5": away_venue_win_rate,
+            "venue_win_rate_diff_5": home_venue_win_rate - away_venue_win_rate,
             "home_venue_goals_for_5": home_for,
             "away_venue_goals_for_5": away_for,
             "home_elo": home.elo,
             "away_elo": away.elo,
             "elo_diff": home.elo - away.elo,
-            "home_rest_days": _rest_days(home.last_match_at, match_at),
-            "away_rest_days": _rest_days(away.last_match_at, match_at),
+            "elo_abs_diff": abs(home.elo - away.elo),
+            "home_rest_days": home_rest_days,
+            "away_rest_days": away_rest_days,
+            "rest_days_diff": home_rest_days - away_rest_days,
             "h2h_home_win_rate_5": _safe_mean(
                 [float(value) for value in home_h2h_wins], 0.33
             ),
             "h2h_draw_rate_5": _safe_mean(
                 [float(value) for value in h2h_draws], 0.28
             ),
+            "league_home_win_rate_200": league_home_rate,
+            "league_draw_rate_200": league_draw_rate,
+            "league_away_win_rate_200": league_away_rate,
             "poisson_home_win": poisson.prob_home_win,
             "poisson_draw": poisson.prob_draw,
             "poisson_away_win": poisson.prob_away_win,
+            "poisson_result_margin": poisson_margin,
             "poisson_over_2_5": poisson.prob_over_2_5,
             "poisson_btts": poisson.prob_btts,
             **market_features,
+            "market_result_margin": market_margin,
             "market_odds_available": float(market is not None),
             "market_home_move": float(
                 market_features["market_implied_home_win"]
@@ -378,6 +485,9 @@ class CausalFeatureState:
         winner = home_id if home_score > away_score else away_id if away_score > home_score else 0
         self.h2h[tuple(sorted((home_id, away_id)))].append(
             (winner, int(home_score == away_score))
+        )
+        self.league_results[int(row["league_id"])].append(
+            _result_label(home_score, away_score)
         )
 
 

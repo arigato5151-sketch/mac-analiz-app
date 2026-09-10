@@ -133,9 +133,10 @@ def load_match_baseline(match_id: int) -> dict[str, Any]:
 def load_prediction_performance() -> pd.DataFrame:
     db = get_db()
     rows = db.select_all(
-        "live_prediction_performance",
+        "evaluated_prediction_results",
         columns=(
             "prediction_id,match_id,actual_result,was_correct,brier_score,"
+            "prob_home_win,prob_draw,prob_away_win,"
             "evaluated_at,over_2_5_actual,over_2_5_was_correct,over_2_5_brier_score,"
             "btts_actual,btts_was_correct,btts_brier_score"
         ),

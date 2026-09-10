@@ -27,7 +27,11 @@ from models.calibration import (
     guarded_binary_temperature,
     guarded_multiclass_temperature,
 )
-from models.feature_engineering import FEATURE_COLUMNS, build_training_dataset
+from models.feature_engineering import (
+    BINARY_FEATURE_COLUMNS,
+    FEATURE_COLUMNS,
+    build_training_dataset,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +83,8 @@ RESULT_MODEL_PRESETS: dict[str, dict[str, float | int]] = {
     },
 }
 BINARY_MODEL_PRESETS = RESULT_MODEL_PRESETS
+DEFAULT_MARKET_RESULT_MODEL_WEIGHT = 0.25
+MINIMUM_MARKET_BLEND_SAMPLE = 100
 
 
 def _result_model(preset: str = "balanced") -> XGBClassifier:
@@ -227,6 +233,58 @@ def select_blend_weight(
     return best_weight, best_loss
 
 
+def select_source_aware_result_weights(
+    y_true: np.ndarray,
+    model_probabilities: np.ndarray,
+    anchor_probabilities: np.ndarray,
+    market_available: np.ndarray,
+    *,
+    minimum_market_sample: int = MINIMUM_MARKET_BLEND_SAMPLE,
+    default_market_model_weight: float = DEFAULT_MARKET_RESULT_MODEL_WEIGHT,
+) -> tuple[float, float]:
+    """Select separate 1X2 weights for real odds and the Poisson fallback.
+
+    Historical odds coverage starts much later than match history. A single
+    validation weight otherwise learns only the Poisson fallback and silently
+    discards stronger closing-market information in live predictions.
+    """
+    labels = np.asarray(y_true, dtype=int)
+    model_values = np.asarray(model_probabilities, dtype=float)
+    anchor_values = np.asarray(anchor_probabilities, dtype=float)
+    available = np.asarray(market_available, dtype=bool)
+    if (
+        model_values.shape != anchor_values.shape
+        or len(labels) != len(model_values)
+        or len(available) != len(labels)
+    ):
+        raise ValueError("Source-aware blend inputs must have aligned shapes")
+    if minimum_market_sample < 1:
+        raise ValueError("minimum_market_sample must be positive")
+    if not 0 <= default_market_model_weight <= 1:
+        raise ValueError("default_market_model_weight must be between zero and one")
+
+    fallback_mask = ~available
+    fallback_weight = (
+        select_blend_weight(
+            labels[fallback_mask],
+            model_values[fallback_mask],
+            anchor_values[fallback_mask],
+        )[0]
+        if fallback_mask.any()
+        else 1.0
+    )
+    market_weight = (
+        select_blend_weight(
+            labels[available],
+            model_values[available],
+            anchor_values[available],
+        )[0]
+        if int(available.sum()) >= minimum_market_sample
+        else float(default_market_model_weight)
+    )
+    return fallback_weight, market_weight
+
+
 def _fit_best_model(
     *,
     binary: bool,
@@ -340,37 +398,38 @@ def train_models(
     )
     over_model, over_preset, over_validation_loss = _fit_best_model(
         binary=True,
-        x_fit=x_fit,
+        x_fit=x_fit.loc[:, BINARY_FEATURE_COLUMNS],
         y_fit=y_over[fit_slice],
         fit_weights=fit_weights,
-        x_validation=x_validation,
+        x_validation=x_validation.loc[:, BINARY_FEATURE_COLUMNS],
         y_validation=y_over[validation_slice],
     )
     btts_model, btts_preset, btts_validation_loss = _fit_best_model(
         binary=True,
-        x_fit=x_fit,
+        x_fit=x_fit.loc[:, BINARY_FEATURE_COLUMNS],
         y_fit=y_btts[fit_slice],
         fit_weights=fit_weights,
-        x_validation=x_validation,
+        x_validation=x_validation.loc[:, BINARY_FEATURE_COLUMNS],
         y_validation=y_btts[validation_slice],
     )
 
     validation_result_anchor = x_validation[
         ["market_implied_home_win", "market_implied_draw", "market_implied_away_win"]
     ].to_numpy(dtype=float)
-    result_blend_weight, _ = select_blend_weight(
+    result_blend_weight, result_market_model_weight = select_source_aware_result_weights(
         y_result[validation_slice],
         result_model.predict_proba(x_validation),
         validation_result_anchor,
+        x_validation["market_odds_available"].to_numpy(dtype=bool),
     )
     over_blend_weight, _ = select_blend_weight(
         y_over[validation_slice],
-        over_model.predict_proba(x_validation)[:, 1],
+        over_model.predict_proba(x_validation.loc[:, BINARY_FEATURE_COLUMNS])[:, 1],
         x_validation["market_implied_over_2_5"].to_numpy(dtype=float),
     )
     btts_blend_weight, _ = select_blend_weight(
         y_btts[validation_slice],
-        btts_model.predict_proba(x_validation)[:, 1],
+        btts_model.predict_proba(x_validation.loc[:, BINARY_FEATURE_COLUMNS])[:, 1],
         x_validation["market_implied_btts"].to_numpy(dtype=float),
     )
 
@@ -379,17 +438,19 @@ def train_models(
         anchor = frame[
             ["market_implied_home_win", "market_implied_draw", "market_implied_away_win"]
         ].to_numpy(dtype=float)
-        return normalize_multiclass_probabilities(
-            result_blend_weight * model_values
-            + (1.0 - result_blend_weight) * anchor
-        )
+        weights = np.where(
+            frame["market_odds_available"].to_numpy(dtype=bool),
+            result_market_model_weight,
+            result_blend_weight,
+        )[:, None]
+        return normalize_multiclass_probabilities(weights * model_values + (1.0 - weights) * anchor)
 
     def binary_blend(
         model: XGBClassifier, frame: pd.DataFrame, column: str, weight: float
     ) -> np.ndarray:
-        return weight * model.predict_proba(frame)[:, 1] + (1.0 - weight) * frame[
-            column
-        ].to_numpy(dtype=float)
+        return weight * model.predict_proba(frame.loc[:, BINARY_FEATURE_COLUMNS])[
+            :, 1
+        ] + (1.0 - weight) * frame[column].to_numpy(dtype=float)
 
     calibration_result_probabilities = result_blend(x_calibration)
     result_temperature = guarded_multiclass_temperature(
@@ -477,6 +538,7 @@ def train_models(
         "over_2_5_model": over_model,
         "btts_model": btts_model,
         "feature_columns": list(FEATURE_COLUMNS),
+        "binary_feature_columns": list(BINARY_FEATURE_COLUMNS),
         "class_labels": ["home_win", "draw", "away_win"],
         "trained_rows": len(features),
         "training_end": labels["match_date"].iloc[-1].isoformat(),
@@ -504,8 +566,10 @@ def train_models(
             },
         },
         "blend": {
-            "anchor": "vig_free_market_or_poisson",
+            "anchor": "source_aware_vig_free_market_or_poisson",
             "result_model_weight": result_blend_weight,
+            "result_market_model_weight": result_market_model_weight,
+            "minimum_market_blend_sample": MINIMUM_MARKET_BLEND_SAMPLE,
             "over_2_5_model_weight": over_blend_weight,
             "btts_model_weight": btts_blend_weight,
         },
