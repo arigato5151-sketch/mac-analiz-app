@@ -48,6 +48,42 @@ def test_build_performance_row_calculates_multiclass_brier_score() -> None:
     assert row["btts_actual"] is True
     assert row["btts_was_correct"] is False
     assert row["btts_brier_score"] == pytest.approx(0.7225)
+    assert row["market_performance"] == {}
+
+
+def test_build_performance_row_evaluates_diversified_markets() -> None:
+    prediction = {
+        "id": 9,
+        "prob_home_win": 0.60,
+        "prob_draw": 0.25,
+        "prob_away_win": 0.15,
+        "market_probabilities": {
+            "double_chance": {"1X": 0.85, "X2": 0.4, "12": 0.75},
+            "total_goals": {
+                "over_1_5": 0.8,
+                "under_1_5": 0.2,
+                "over_3_5": 0.3,
+                "under_3_5": 0.7,
+            },
+            "team_goals": {
+                "home_over_0_5": 0.8,
+                "away_over_0_5": 0.55,
+                "home_over_1_5": 0.45,
+                "away_over_1_5": 0.2,
+            },
+            "correct_scores": [{"score": "2-1", "probability": 0.12}],
+        },
+    }
+
+    row = build_performance_row(
+        prediction,
+        {"id": 100, "home_score": 2, "away_score": 1},
+        evaluated_at="2026-08-26T12:00:00+00:00",
+    )
+
+    assert row["market_performance"]["double_chance"]["1X"]["actual"] is True
+    assert row["market_performance"]["total_goals"]["under_3_5"]["actual"] is True
+    assert row["market_performance"]["correct_score"]["top_3_hit"] is True
 
 
 def test_multiclass_log_loss_uses_a_finite_floor_for_zero_probability() -> None:

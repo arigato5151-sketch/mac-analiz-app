@@ -91,3 +91,5 @@ def test_legacy_model_contract_remains_usable_after_feature_expansion() -> None:
     assert row["prob_home_win"] == pytest.approx(0.6)
     assert row["prob_over_2_5"] == pytest.approx(0.55)
     assert row["prob_btts"] == pytest.approx(0.45)
+    assert row["market_probabilities"]["double_chance"]["1X"] == pytest.approx(0.85)
+    assert len(row["market_probabilities"]["correct_scores"]) == 3

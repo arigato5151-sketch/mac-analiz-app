@@ -10,6 +10,7 @@ from typing import Any
 from config.settings import get_settings
 from data_pipeline.isotime import parse_iso_datetime
 from db.db_client import SupabaseRestClient
+from models.market_forecast import evaluate_market_probabilities
 
 
 RESULT_LABELS = ("home_win", "draw", "away_win")
@@ -95,6 +96,14 @@ def build_performance_row(
         ),
         actual_positive=btts_actual,
     )
+    market_probabilities = prediction.get("market_probabilities") or {}
+    market_performance = (
+        evaluate_market_probabilities(
+            market_probabilities, home_score=home_score, away_score=away_score
+        )
+        if market_probabilities
+        else {}
+    )
 
     row = {
         "prediction_id": int(prediction["id"]),
@@ -109,6 +118,7 @@ def build_performance_row(
         "btts_actual": btts_actual,
         "btts_was_correct": btts_correct,
         "btts_brier_score": btts_brier,
+        "market_performance": market_performance,
         "evaluated_at": evaluated_at,
         # PostgREST bulk writes require every object to expose the same keys.
         "snapshot_id": (
@@ -202,7 +212,10 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
     predictions = _select_rows_for_match_ids(
         db,
         "predictions",
-        columns="id,match_id,prob_home_win,prob_draw,prob_away_win,predicted_at",
+        columns=(
+            "id,match_id,prob_home_win,prob_draw,prob_away_win,prob_over_2_5,"
+            "prob_btts,market_probabilities,predicted_at"
+        ),
         match_ids=pending_match_ids,
     )
     snapshots = _select_rows_for_match_ids(
@@ -210,7 +223,7 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
         "prediction_snapshots",
         columns=(
             "id,source_prediction_id,match_id,model_version,prob_home_win,prob_draw,"
-            "prob_away_win,prob_over_2_5,prob_btts,captured_at"
+            "prob_away_win,prob_over_2_5,prob_btts,market_probabilities,captured_at"
         ),
         match_ids=pending_match_ids,
         filters={"snapshot_type": "eq.pre_match_60m"},
@@ -226,6 +239,7 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
             "prob_away_win": snapshot["prob_away_win"],
             "prob_over_2_5": snapshot["prob_over_2_5"],
             "prob_btts": snapshot["prob_btts"],
+            "market_probabilities": snapshot.get("market_probabilities") or {},
             "predicted_at": snapshot["captured_at"],
         }
         for snapshot in snapshots

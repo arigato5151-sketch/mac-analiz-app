@@ -24,6 +24,7 @@ from app.components.ui import (
     probability_percent,
 )
 from data_pipeline.match_commentary import MatchCommentaryError, generate_match_commentary
+from models.market_forecast import derive_market_probabilities, format_market_summary
 
 
 LOGGER = logging.getLogger(__name__)
@@ -202,6 +203,34 @@ except Exception as exc:
 try:
     detail = load_match_baseline(int(selected_id))
     baseline = detail["prediction"]
+    result_probabilities = (
+        selected.get("prob_home_win"),
+        selected.get("prob_draw"),
+        selected.get("prob_away_win"),
+    )
+    if not all(pd.notna(probability) for probability in result_probabilities):
+        result_probabilities = (
+            baseline.prob_home_win,
+            baseline.prob_draw,
+            baseline.prob_away_win,
+        )
+    diversified_markets = derive_market_probabilities(
+        result_probabilities, baseline
+    )
+
+    st.subheader("Çeşitlendirilmiş tahminler")
+    diversified_lines = format_market_summary(diversified_markets)
+    if diversified_lines:
+        st.markdown("\n".join(f"- {line}" for line in diversified_lines))
+    else:
+        st.info("Güven eşiğini geçen ek tahmin bulunmuyor.")
+    expected_goals = diversified_markets["expected_goals"]
+    st.caption(
+        f"Beklenen gol: {selected['home_team']} {expected_goals['home']:.2f} · "
+        f"{selected['away_team']} {expected_goals['away']:.2f}. Ek tahminler aynı "
+        "skor dağılımından üretilir ve düşük güvenli sinyaller gösterilmez."
+    )
+
     st.subheader("Poisson skor matrisi")
     matrix = baseline.score_matrix[:7, :7]
     heatmap = px.imshow(

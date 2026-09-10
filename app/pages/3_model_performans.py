@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.components.data import load_latest_model_metadata, load_prediction_performance, load_upcoming_dashboard
 from app.components.live_performance import summarize_live_performance
+from app.components.market_performance import summarize_diversified_market_performance
 from app.components.monte_carlo import simulate_top_pick_accuracy
 from app.components.ui import configure_page, disclaimer
 from config.leagues import LEAGUES_BY_ID
@@ -207,9 +208,14 @@ else:
                     "Brier": market[brier_column].astype(float).mean(),
                 }
             )
+    market_rows.extend(
+        summarize_diversified_market_performance(performance.to_dict("records"))
+    )
     market_frame = pd.DataFrame(market_rows)
     market_frame["İsabet"] = market_frame["İsabet"].map(lambda value: f"%{value * 100:.1f}")
-    market_frame["Brier"] = market_frame["Brier"].map(lambda value: f"{value:.3f}")
+    market_frame["Brier"] = market_frame["Brier"].map(
+        lambda value: f"{value:.3f}" if pd.notna(value) else "—"
+    )
     st.subheader("Pazar bazlı canlı performans")
     st.dataframe(market_frame, hide_index=True, use_container_width=True)
 

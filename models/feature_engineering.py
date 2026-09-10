@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from models.poisson_model import predict_score_probabilities
+from models.poisson_model import PoissonPrediction, predict_score_probabilities
 from data_pipeline.odds import vig_free_market_probabilities
 from config.leagues import home_advantage_for_league
 
@@ -558,3 +558,28 @@ def build_upcoming_features(
     # Provider team-form rows remain useful for UI/commentary, but the model uses
     # the identical causal state builder in training and inference.
     return pd.DataFrame(rows, index=[int(row["id"]) for row in targets], columns=FEATURE_COLUMNS)
+
+
+def build_upcoming_poisson_predictions(
+    historical_matches: list[dict[str, Any]],
+    upcoming_matches: list[dict[str, Any]],
+) -> dict[int, PoissonPrediction]:
+    """Return the same causal score baselines used by upcoming feature rows."""
+    completed = [
+        row
+        for row in historical_matches
+        if row.get("home_score") is not None
+        and row.get("away_score") is not None
+        and row.get("match_date")
+    ]
+    completed.sort(key=lambda row: (row["match_date"], int(row["id"])))
+    targets = sorted(
+        upcoming_matches, key=lambda row: (row["match_date"], int(row["id"]))
+    )
+    if not completed or not targets:
+        raise ValueError("Completed history and upcoming matches are required")
+
+    state = CausalFeatureState()
+    for row in completed:
+        state.update(row)
+    return {int(row["id"]): state.poisson_baseline(row) for row in targets}

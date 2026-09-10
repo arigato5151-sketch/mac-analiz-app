@@ -146,7 +146,7 @@ def evaluate_shadow_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]:
         "shadow_predictions",
         columns=(
             "id,match_id,prob_home_win,prob_draw,prob_away_win,prob_over_2_5,"
-            "prob_btts,predicted_at"
+            "prob_btts,market_probabilities,predicted_at"
         ),
         filters={"match_id": finished_filter},
     )
@@ -174,6 +174,7 @@ def evaluate_shadow_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]:
                 "over_2_5_brier_score": performance["over_2_5_brier_score"],
                 "btts_was_correct": performance["btts_was_correct"],
                 "btts_brier_score": performance["btts_brier_score"],
+                "market_performance": performance["market_performance"],
                 "evaluated_at": evaluated_at,
             }
         )

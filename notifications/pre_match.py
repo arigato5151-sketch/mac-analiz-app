@@ -24,6 +24,7 @@ from data_pipeline.refresh_context import current_elo_ratings
 from db.db_client import DatabaseError, SupabaseRestClient
 from models.feature_engineering import CausalFeatureState
 from models.decision_policy import MINIMUM_ACTIONABLE_1X2_CONFIDENCE, select_1x2
+from models.market_forecast import format_market_summary
 from models.predict import generate_prediction_rows, load_latest_team_forms, persist_predictions, resolve_model_path
 from models.shadow import run_shadow_predictions
 from models.train_model import load_historical_matches
@@ -117,7 +118,7 @@ def persist_production_snapshot(
     """Store the user-facing pre-match output once; never rewrite it on retries."""
     existing = db.select(
         "prediction_snapshots",
-        columns="id,source_prediction_id,match_id,snapshot_type,model_version,prob_home_win,prob_draw,prob_away_win,prob_over_2_5,prob_btts,source_predicted_at,context,captured_at",
+        columns="id,source_prediction_id,match_id,snapshot_type,model_version,prob_home_win,prob_draw,prob_away_win,prob_over_2_5,prob_btts,market_probabilities,source_predicted_at,context,captured_at",
         filters={"match_id": f"eq.{match_id}", "snapshot_type": f"eq.{SNAPSHOT_TYPE}"},
         limit=1,
     )
@@ -134,6 +135,7 @@ def persist_production_snapshot(
         "prob_away_win": float(prediction["prob_away_win"]),
         "prob_over_2_5": float(prediction["prob_over_2_5"]),
         "prob_btts": float(prediction["prob_btts"]),
+        "market_probabilities": prediction.get("market_probabilities") or {},
         "source_predicted_at": str(prediction["predicted_at"]),
         "context": {
             "notification_type": NOTIFICATION_TYPE,
@@ -148,7 +150,7 @@ def persist_production_snapshot(
         # immutable winner instead of overwriting the historical record.
         existing = db.select(
             "prediction_snapshots",
-            columns="id,source_prediction_id,match_id,snapshot_type,model_version,prob_home_win,prob_draw,prob_away_win,prob_over_2_5,prob_btts,source_predicted_at,context,captured_at",
+            columns="id,source_prediction_id,match_id,snapshot_type,model_version,prob_home_win,prob_draw,prob_away_win,prob_over_2_5,prob_btts,market_probabilities,source_predicted_at,context,captured_at",
             filters={"match_id": f"eq.{match_id}", "snapshot_type": f"eq.{SNAPSHOT_TYPE}"},
             limit=1,
         )
@@ -215,6 +217,11 @@ def pre_match_message(
         f"Üst 2.5: %{float(prediction['prob_over_2_5']) * 100:.0f} · "
         f"KG Var: %{float(prediction['prob_btts']) * 100:.0f}",
     ]
+    market_lines = format_market_summary(
+        prediction.get("market_probabilities") or {}
+    )
+    if market_lines:
+        lines.extend(("", "📊 Ek tahminler", *market_lines))
     safe_commentary = _telegram_commentary(commentary)
     if safe_commentary:
         lines.extend(("", "🧠 Maç yorumu", safe_commentary))

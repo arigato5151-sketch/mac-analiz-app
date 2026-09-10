@@ -6,6 +6,7 @@ from models.feature_engineering import (
     RESULT_ONLY_FEATURE_COLUMNS,
     availability_impact_score,
     build_training_dataset,
+    build_upcoming_poisson_predictions,
     build_upcoming_features,
     margin_of_victory_multiplier,
     regress_elo_to_league_mean,
@@ -190,3 +191,18 @@ def test_result_only_features_do_not_enter_binary_goal_models() -> None:
     assert RESULT_ONLY_FEATURE_COLUMNS
     assert RESULT_ONLY_FEATURE_COLUMNS.isdisjoint(BINARY_FEATURE_COLUMNS)
     assert set(BINARY_FEATURE_COLUMNS) | RESULT_ONLY_FEATURE_COLUMNS == set(FEATURE_COLUMNS)
+
+
+def test_upcoming_poisson_predictions_share_the_causal_history_state() -> None:
+    history = [completed_match(1, "2026-01-01T12:00:00+00:00", 2, 0)]
+    upcoming = [{
+        **completed_match(2, "2026-01-08T12:00:00+00:00", 0, 0),
+        "home_score": None,
+        "away_score": None,
+    }]
+
+    predictions = build_upcoming_poisson_predictions(history, upcoming)
+
+    assert set(predictions) == {2}
+    assert predictions[2].score_matrix.sum() == pytest.approx(1.0)
+    assert predictions[2].home_expected_goals > predictions[2].away_expected_goals

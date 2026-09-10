@@ -16,7 +16,12 @@ from db.db_client import SupabaseRestClient
 from data_pipeline.odds import attach_pre_match_odds
 from models.artifact_store import ArtifactStoreError, download_model
 from models.calibration import apply_binary_temperature, apply_multiclass_temperature
-from models.feature_engineering import FEATURE_COLUMNS, build_upcoming_features
+from models.feature_engineering import (
+    FEATURE_COLUMNS,
+    build_upcoming_features,
+    build_upcoming_poisson_predictions,
+)
+from models.market_forecast import derive_market_probabilities
 from models.train_model import load_historical_matches, normalize_multiclass_probabilities
 
 
@@ -145,6 +150,9 @@ def generate_prediction_rows(
         ordered_upcoming,
         team_form_by_id=team_form_by_id,
     )
+    poisson_by_match = build_upcoming_poisson_predictions(
+        historical_matches, ordered_upcoming
+    )
     features = all_features.loc[:, expected_columns]
     binary_columns = list(bundle.get("binary_feature_columns") or expected_columns)
     if not binary_columns or not set(binary_columns).issubset(FEATURE_COLUMNS):
@@ -200,6 +208,10 @@ def generate_prediction_rows(
     predicted_at = datetime.now(timezone.utc).isoformat()
     rows: list[dict[str, Any]] = []
     for index, match in enumerate(ordered_upcoming):
+        result_values = result_probabilities[index]
+        market_probabilities = derive_market_probabilities(
+            result_values, poisson_by_match[int(match["id"])]
+        )
         rows.append(
             {
                 "match_id": int(match["id"]),
@@ -209,6 +221,7 @@ def generate_prediction_rows(
                 "prob_away_win": float(result_probabilities[index, 2]),
                 "prob_over_2_5": float(over_probabilities[index]),
                 "prob_btts": float(btts_probabilities[index]),
+                "market_probabilities": market_probabilities,
                 "predicted_at": predicted_at,
             }
         )
