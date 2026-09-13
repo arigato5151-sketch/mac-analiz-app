@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.data import load_evaluated_predictions
+from app.components.metrics import format_accuracy, summarize_binary_accuracy
 from app.components.ui import configure_page, disclaimer, evaluated_result_display, outcome_prediction_signal
 
 
@@ -63,20 +64,54 @@ summary = st.columns(5)
 summary[0].metric("Değerlendirilen maç", len(filtered))
 if filtered.empty:
     for column, label in zip(
-        summary[1:], ["1-X-2 isabet", "Üst 2.5 isabet", "KG Var isabet", "Ortalama Brier"]
+        summary[1:],
+        [
+            "1-X-2 isabet",
+            "Üst/Alt 2.5 isabet",
+            "KG Var/Yok isabet",
+            "Ortalama Brier",
+        ],
     ):
         column.metric(label, "—")
     st.info("Bu filtrelerle eşleşen değerlendirilmiş tahmin bulunamadı.")
     st.stop()
 
-summary[1].metric("1-X-2 isabet", f"%{filtered['was_correct'].mean() * 100:.1f}")
-over_correct = filtered["over_2_5_was_correct"].dropna()
-btts_correct = filtered["btts_was_correct"].dropna()
-summary[2].metric("Üst 2.5 isabet", f"%{over_correct.astype(bool).mean() * 100:.1f}" if not over_correct.empty else "—")
-summary[3].metric("KG Var isabet", f"%{btts_correct.astype(bool).mean() * 100:.1f}" if not btts_correct.empty else "—")
-summary[4].metric("Ortalama Brier", f"{filtered['brier_score'].astype(float).mean():.3f}")
+outcome_accuracy = summarize_binary_accuracy(filtered["was_correct"])
+over_accuracy = summarize_binary_accuracy(filtered["over_2_5_was_correct"])
+btts_accuracy = summarize_binary_accuracy(filtered["btts_was_correct"])
+brier_scores = filtered["brier_score"].dropna().astype(float)
 
-st.dataframe(evaluated_result_display(filtered), hide_index=True, use_container_width=True, height=680)
+summary[1].metric(
+    "1-X-2 isabet",
+    format_accuracy(outcome_accuracy),
+    delta=f"n={outcome_accuracy.sample_size}",
+    delta_color="off",
+)
+summary[2].metric(
+    "Üst/Alt 2.5 isabet",
+    format_accuracy(over_accuracy),
+    delta=f"n={over_accuracy.sample_size}",
+    delta_color="off",
+)
+summary[3].metric(
+    "KG Var/Yok isabet",
+    format_accuracy(btts_accuracy),
+    delta=f"n={btts_accuracy.sample_size}",
+    delta_color="off",
+)
+summary[4].metric(
+    "Ortalama Brier",
+    f"{brier_scores.mean():.3f}" if not brier_scores.empty else "—",
+    delta=f"n={len(brier_scores)}",
+    delta_color="off",
+)
+
+st.dataframe(
+    evaluated_result_display(filtered),
+    hide_index=True,
+    width="stretch",
+    height=680,
+)
 st.caption(
     "1-X-2, Üst/Alt 2.5 ve KG Var/Yok sonuçları %50 sınıflandırma eşiğiyle ayrı ayrı "
     "değerlendirilir. Güven etiketi ve Brier skoru yalnızca 1-X-2 tahminine aittir."
