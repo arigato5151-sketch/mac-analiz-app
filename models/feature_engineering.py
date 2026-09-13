@@ -10,8 +10,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from models.poisson_model import PoissonPrediction, predict_score_probabilities
-from data_pipeline.odds import vig_free_market_probabilities
+from models.poisson_model import PoissonPrediction, predict_score_probabilities, estimate_league_dixon_coles_rhos
+from data_pipeline.odds import vig_free_market_probabilities, multi_bookmaker_vig_free_probabilities, MultiBookmakerOdds
 from config.leagues import home_advantage_for_league
 
 
@@ -288,7 +288,7 @@ def _result_label(home_score: int, away_score: int) -> int:
 class CausalFeatureState:
     """Mutable chronological state shared by training and live inference."""
 
-    def __init__(self) -> None:
+    def __init__(self, league_rhos: dict[int, float] | None = None) -> None:
         self.states: defaultdict[int, TeamState] = defaultdict(TeamState)
         self.h2h: defaultdict[tuple[int, int], deque[tuple[int, int]]] = defaultdict(
             lambda: deque(maxlen=5)
@@ -296,6 +296,7 @@ class CausalFeatureState:
         self.league_results: defaultdict[int, deque[int]] = defaultdict(
             lambda: deque(maxlen=200)
         )
+        self.league_rhos: dict[int, float] = league_rhos or {}
 
     def poisson_baseline(self, row: dict[str, Any]):
         """Return the causal Poisson baseline available before a target match."""
@@ -307,7 +308,9 @@ class CausalFeatureState:
         home_against = _goal_average(home, 5, scored=False, venue_home=True)
         home_lambda = float(np.clip((home_for + away_against) / 2, 0.05, 6.0))
         away_lambda = float(np.clip((away_for + home_against) / 2, 0.05, 6.0))
-        return predict_score_probabilities(home_lambda, away_lambda)
+        league_id = int(row.get("league_id", 0))
+        rho = self.league_rhos.get(league_id, 0.0)
+        return predict_score_probabilities(home_lambda, away_lambda, dixon_coles_rho=rho)
 
     def feature_row(self, row: dict[str, Any]) -> dict[str, float]:
         home_id = int(row["home_team_id"])
@@ -324,17 +327,28 @@ class CausalFeatureState:
         home_for = _goal_average(home, 5, scored=True, venue_home=True)
         away_for = _goal_average(away, 5, scored=True, venue_home=False)
         poisson = self.poisson_baseline(row)
-        market = vig_free_market_probabilities(row.get("market_odds") or {})
-        opening_market = vig_free_market_probabilities(
-            row.get("market_opening_odds") or {}
-        )
-        market_features = market or {
+        # Prefer multi-bookmaker blended odds, fallback to single bookmaker
+        market_blended = row.get("market_odds_blended")
+        if not market_blended:
+            market_raw = row.get("market_odds")
+            market_blended = vig_free_market_probabilities(market_raw) if market_raw else None
+
+        opening_blended = row.get("market_opening_odds_blended")
+        if not opening_blended:
+            opening_raw = row.get("market_opening_odds")
+            opening_blended = vig_free_market_probabilities(opening_raw) if opening_raw else None
+
+        market_features = market_blended or {
             "market_implied_home_win": poisson.prob_home_win,
             "market_implied_draw": poisson.prob_draw,
             "market_implied_away_win": poisson.prob_away_win,
             "market_implied_over_2_5": poisson.prob_over_2_5,
             "market_implied_btts": poisson.prob_btts,
         }
+
+        # Also update opening_market to use blended opening odds for market move features
+        opening_market = opening_blended
+
         home_impact_score = availability_impact_score(
             row.get("home_unavailable_players"),
             fallback_unavailable_count=row.get("home_unavailable_count"),
@@ -426,7 +440,7 @@ class CausalFeatureState:
             "poisson_btts": poisson.prob_btts,
             **market_features,
             "market_result_margin": market_margin,
-            "market_odds_available": float(market is not None),
+            "market_odds_available": float(market_blended is not None),
             "market_home_move": float(
                 market_features["market_implied_home_win"]
                 - (opening_market or market_features)["market_implied_home_win"]
@@ -493,6 +507,7 @@ class CausalFeatureState:
 
 def build_training_dataset(
     matches: list[dict[str, Any]],
+    league_rhos: dict[int, float] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return features and labels using only information before each match."""
     valid = [
@@ -506,7 +521,11 @@ def build_training_dataset(
     if not valid:
         raise ValueError("No completed matches available for feature engineering")
 
-    state = CausalFeatureState()
+    # Compute league-specific Dixon-Coles rhos if not provided
+    if league_rhos is None:
+        league_rhos = estimate_league_dixon_coles_rhos(valid)
+
+    state = CausalFeatureState(league_rhos=league_rhos)
     feature_rows: list[dict[str, float]] = []
     label_rows: list[dict[str, Any]] = []
     for row in valid:
@@ -535,6 +554,7 @@ def build_upcoming_features(
     upcoming_matches: list[dict[str, Any]],
     *,
     team_form_by_id: dict[int, dict[str, Any]] | None = None,
+    league_rhos: dict[int, float] | None = None,
 ) -> pd.DataFrame:
     """Build target features without updating state from unknown outcomes."""
     completed = [
@@ -551,7 +571,10 @@ def build_upcoming_features(
     if not completed or not targets:
         raise ValueError("Completed history and upcoming matches are required")
 
-    state = CausalFeatureState()
+    if league_rhos is None:
+        league_rhos = estimate_league_dixon_coles_rhos(completed)
+
+    state = CausalFeatureState(league_rhos=league_rhos)
     for row in completed:
         state.update(row)
     rows = [state.feature_row(row) for row in targets]
@@ -563,6 +586,8 @@ def build_upcoming_features(
 def build_upcoming_poisson_predictions(
     historical_matches: list[dict[str, Any]],
     upcoming_matches: list[dict[str, Any]],
+    *,
+    league_rhos: dict[int, float] | None = None,
 ) -> dict[int, PoissonPrediction]:
     """Return the same causal score baselines used by upcoming feature rows."""
     completed = [
@@ -579,7 +604,10 @@ def build_upcoming_poisson_predictions(
     if not completed or not targets:
         raise ValueError("Completed history and upcoming matches are required")
 
-    state = CausalFeatureState()
+    if league_rhos is None:
+        league_rhos = estimate_league_dixon_coles_rhos(completed)
+
+    state = CausalFeatureState(league_rhos=league_rhos)
     for row in completed:
         state.update(row)
     return {int(row["id"]): state.poisson_baseline(row) for row in targets}

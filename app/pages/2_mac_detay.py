@@ -284,12 +284,12 @@ try:
             # Keep provider details and credentials out of both the UI and application logs.
             LOGGER.warning("Gemini commentary unavailable: reason=%s", error.reason)
             user_messages = {
-                "configuration": "Yapay zeka yorum ayarı eksik. GEMINI_API_KEY ve google-genai kurulumu kontrol edilmelidir.",
+                "configuration": "Yapay zeka yorum ayarı eksik. GEMINI_API_KEY/NVIDIA_API_KEY ve google-genai kurulumu kontrol edilmelidir.",
                 "authentication": "Yapay zekâ yorum servisi doğrulanamadı. Uygulama yöneticisi anahtar ayarını kontrol etmelidir.",
                 "quota": "Yapay zekâ yorum kotası geçici olarak dolu. Birkaç dakika sonra tekrar deneyin.",
                 "timeout": "Yapay zekâ yorum servisi zaman aşımına uğradı. Lütfen tekrar deneyin.",
-                "model": "Gemini modeli bu API anahtarıyla kullanılamıyor. GEMINI_MODEL değerini gemini-3.5-flash yapın.",
-                "provider": "Yapay zekâ yorum servisi bu isteği işleyemedi. GEMINI_MODEL ayarını ve API erişimini kontrol edin.",
+                "model": "Gemini ve NVIDIA NIM modelleri bu API anahtarlarıyla kullanılamıyor. GEMINI_MODEL (gemini-3.5-flash) veya NVIDIA_MODEL (nvidia/nemotron-3.5-lightning-30b-a3b) ayarını kontrol edin.",
+                "provider": "Yapay zekâ yorum servisleri bu isteği işleyemedi. Model ayarını ve API erişimini kontrol edin.",
             }
             st.error(user_messages.get(error.reason, "Yorum şu anda üretilemedi. Lütfen tekrar deneyin."))
         except Exception:

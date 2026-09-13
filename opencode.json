@@ -1,0 +1,18 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "playwright": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@playwright/mcp@latest",
+        "--browser",
+        "chrome",
+        "--user-data-dir",
+        "C:\\Users\\ariga\\.config\\opencode\\playwright-profile"
+      ],
+      "enabled": true
+    }
+  }
+}

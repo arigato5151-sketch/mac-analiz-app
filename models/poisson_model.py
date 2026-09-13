@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import isfinite
+from math import isfinite, log
+from math import factorial as math_factorial
 
 import numpy as np
+import pandas as pd
 from numpy.typing import NDArray
+from scipy.optimize import minimize_scalar
 from scipy.stats import poisson
 
 
@@ -78,6 +81,124 @@ def dixon_coles_tau(
     if tau <= 0:
         raise ValueError("Dixon-Coles rho produces a non-positive score probability")
     return float(tau)
+
+
+def _dixon_coles_log_likelihood(
+    rho: float,
+    home_goals: NDArray[np.int_],
+    away_goals: NDArray[np.int_],
+    home_lambdas: NDArray[np.float64],
+    away_lambdas: NDArray[np.float64],
+) -> float:
+    """Negative log-likelihood for Dixon-Coles rho (for minimization)."""
+    total = 0.0
+    for hg, ag, hl, al in zip(home_goals, away_goals, home_lambdas, away_lambdas):
+        tau = 1.0
+        if hg == 0 and ag == 0:
+            tau = 1 - (hl * al * rho)
+        elif hg == 0 and ag == 1:
+            tau = 1 + (hl * rho)
+        elif hg == 1 and ag == 0:
+            tau = 1 + (al * rho)
+        elif hg == 1 and ag == 1:
+            tau = 1 - rho
+        if tau <= 0:
+            return 1e10
+        log_tau = log(tau)
+        from math import factorial as math_factorial
+        log_poisson_h = hg * log(hl) - hl - log(math_factorial(hg))
+        log_poisson_a = ag * log(al) - al - log(math_factorial(ag))
+        total += log_tau + log_poisson_h + log_poisson_a
+    return -total
+
+
+def estimate_dixon_coles_rho(
+    home_goals: list[int] | NDArray[np.int_],
+    away_goals: list[int] | NDArray[np.int_],
+    home_lambdas: list[float] | NDArray[np.float64],
+    away_lambdas: list[float] | NDArray[np.float64],
+) -> float:
+    """Estimate Dixon-Coles rho via MLE on historical match data.
+
+    Args:
+        home_goals: Actual home goals scored in each match.
+        away_goals: Actual away goals scored in each match.
+        home_lambdas: Expected home goals (lambda) for each match.
+        away_lambdas: Expected away goals (lambda) for each match.
+
+    Returns:
+        Estimated rho in [-0.5, 0.5]. Returns 0.0 if optimization fails
+        or data is insufficient.
+    """
+    hg_arr = np.asarray(home_goals, dtype=int)
+    ag_arr = np.asarray(away_goals, dtype=int)
+    hl_arr = np.asarray(home_lambdas, dtype=float)
+    al_arr = np.asarray(away_lambdas, dtype=float)
+
+    if len(hg_arr) < 30:
+        return 0.0
+
+    try:
+        result = minimize_scalar(
+            _dixon_coles_log_likelihood,
+            bounds=(-0.5, 0.5),
+            args=(hg_arr, ag_arr, hl_arr, al_arr),
+            method="bounded",
+        )
+        if result.success and isfinite(result.x):
+            return float(np.clip(result.x, -0.5, 0.5))
+    except Exception:
+        pass
+    return 0.0
+
+
+def estimate_league_dixon_coles_rhos(
+    matches: list[dict[str, Any]],
+) -> dict[int, float]:
+    """Estimate Dixon-Coles rho for each league from historical matches.
+
+    Args:
+        matches: List of completed match dicts with keys:
+            - league_id: int
+            - home_score: int
+            - away_score: int
+            - home_expected_goals: float (or will be estimated from 5-match form)
+            - away_expected_goals: float
+
+    Returns:
+        Dict mapping league_id -> estimated rho (clipped to [-0.5, 0.5]).
+        Leagues with insufficient data return 0.0.
+    """
+    if not matches:
+        return {}
+
+    df = pd.DataFrame(matches)
+    required_cols = {"league_id", "home_score", "away_score", "home_expected_goals", "away_expected_goals"}
+    if not required_cols.issubset(df.columns):
+        missing = required_cols - set(df.columns)
+        # If expected goals are missing, try to estimate from xG or scores
+        if {"home_xg", "away_xg"}.issubset(df.columns):
+            df["home_expected_goals"] = df["home_xg"]
+            df["away_expected_goals"] = df["away_xg"]
+        else:
+            # Fallback: use simple goal averages as proxy
+            missing = required_cols - set(df.columns)
+            if missing:
+                return {int(lid): 0.0 for lid in df["league_id"].unique()}
+
+    rhos: dict[int, float] = {}
+    for league_id, group in df.groupby("league_id"):
+        if len(group) < 30:
+            rhos[int(league_id)] = 0.0
+            continue
+        rho = estimate_dixon_coles_rho(
+            group["home_score"].tolist(),
+            group["away_score"].tolist(),
+            group["home_expected_goals"].tolist(),
+            group["away_expected_goals"].tolist(),
+        )
+        rhos[int(league_id)] = rho
+    return rhos
 
 
 def predict_score_probabilities(

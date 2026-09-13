@@ -17,6 +17,13 @@ import pandas as pd
 from sklearn.metrics import accuracy_score, log_loss
 from xgboost import XGBClassifier
 
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError:
+    shap = None
+    SHAP_AVAILABLE = False
+
 from config.settings import PROJECT_ROOT, get_settings
 from db.db_client import SupabaseRestClient
 from data_pipeline.odds import attach_pre_match_odds
@@ -367,6 +374,50 @@ def walk_forward_report(
     return report
 
 
+def _compute_shap_importance(
+    model: XGBClassifier,
+    features: pd.DataFrame,
+    feature_names: list[str],
+    max_samples: int = 2000,
+) -> list[dict[str, Any]]:
+    """Compute mean absolute SHAP values for a trained XGBoost model.
+
+    Returns a list of dicts with 'feature' and 'mean_abs_shap', sorted by importance.
+    Returns empty list if SHAP is unavailable or computation fails.
+    """
+    if not SHAP_AVAILABLE:
+        return []
+
+    try:
+        # Use a sample for efficiency
+        sample_size = min(max_samples, len(features))
+        if sample_size < len(features):
+            sample_idx = np.random.default_rng(42).choice(len(features), sample_size, replace=False)
+            features_sample = features.iloc[sample_idx]
+        else:
+            features_sample = features
+
+        explainer = shap.TreeExplainer(model)
+        shap_values = explainer.shap_values(features_sample)
+
+        # For multiclass, shap_values is list of arrays; for binary, single array
+        if isinstance(shap_values, list):
+            # Multiclass: average absolute SHAP across classes
+            mean_abs_shap = np.mean([np.abs(sv).mean(axis=0) for sv in shap_values], axis=0)
+        else:
+            # Binary
+            mean_abs_shap = np.abs(shap_values).mean(axis=0)
+
+        importance_df = pd.DataFrame({
+            "feature": feature_names,
+            "mean_abs_shap": mean_abs_shap,
+        }).sort_values("mean_abs_shap", ascending=False)
+
+        return importance_df.to_dict("records")
+    except Exception:
+        return []
+
+
 def train_models(
     features: pd.DataFrame, labels: pd.DataFrame
 ) -> tuple[dict[str, Any], EvaluationMetrics]:
@@ -530,9 +581,21 @@ def train_models(
         btts_log_loss=float(log_loss(y_btts[test_slice], btts_probabilities)),
         test_size=len(x_test),
         calibration_size=len(x_calibration),
-        test_start=test_dates.iloc[0].isoformat(),
-        test_end=test_dates.iloc[-1].isoformat(),
+test_start=test_dates.iloc[0].isoformat(),
+    test_end=test_dates.iloc[-1].isoformat(),
     )
+
+    # Compute SHAP feature importance (best effort, optional)
+    result_shap = _compute_shap_importance(
+        result_model, x_fit, list(FEATURE_COLUMNS)
+    )
+    over_shap = _compute_shap_importance(
+        over_model, x_fit.loc[:, BINARY_FEATURE_COLUMNS], list(BINARY_FEATURE_COLUMNS)
+    )
+    btts_shap = _compute_shap_importance(
+        btts_model, x_fit.loc[:, BINARY_FEATURE_COLUMNS], list(BINARY_FEATURE_COLUMNS)
+    )
+
     bundle = {
         "result_model": result_model,
         "over_2_5_model": over_model,
@@ -543,6 +606,11 @@ def train_models(
         "trained_rows": len(features),
         "training_end": labels["match_date"].iloc[-1].isoformat(),
         "metrics": asdict(metrics),
+        "shap_importance": {
+            "result": result_shap,
+            "over_2_5": over_shap,
+            "btts": btts_shap,
+        },
         "calibration": {
             "method": "guarded_chronological_temperature_scaling",
             "result_temperature": result_temperature,

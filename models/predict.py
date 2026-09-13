@@ -20,6 +20,7 @@ from models.feature_engineering import (
     FEATURE_COLUMNS,
     build_upcoming_features,
     build_upcoming_poisson_predictions,
+    estimate_league_dixon_coles_rhos,
 )
 from models.market_forecast import derive_market_probabilities
 from models.train_model import load_historical_matches, normalize_multiclass_probabilities
@@ -145,13 +146,16 @@ def generate_prediction_rows(
     ordered_upcoming = sorted(
         upcoming_matches, key=lambda row: (row["match_date"], int(row["id"]))
     )
+    # Load league-specific Dixon-Coles rhos from bundle (fallback to estimation)
+    league_rhos = bundle.get("league_rhos", {})
     all_features = build_upcoming_features(
         historical_matches,
         ordered_upcoming,
         team_form_by_id=team_form_by_id,
+        league_rhos=league_rhos,
     )
     poisson_by_match = build_upcoming_poisson_predictions(
-        historical_matches, ordered_upcoming
+        historical_matches, ordered_upcoming, league_rhos=league_rhos
     )
     features = all_features.loc[:, expected_columns]
     binary_columns = list(bundle.get("binary_feature_columns") or expected_columns)
