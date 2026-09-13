@@ -14,7 +14,7 @@ import streamlit as st
 from config.settings import PROJECT_ROOT, get_public_supabase_settings
 from db.db_client import PublicSupabaseRestClient
 from models.feature_engineering import CausalFeatureState
-from models.train_model import load_completed_matches
+from models.train_model import load_historical_matches
 
 
 LIVE_DATA_TTL_SECONDS = 300
@@ -43,8 +43,8 @@ def load_reference_catalog() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 @st.cache_data(ttl=HISTORY_TTL_SECONDS, show_spinner=False)
 def load_completed_match_history() -> list[dict[str, Any]]:
-    """Share the expensive chronological history used by all match detail pages."""
-    return load_completed_matches(get_db())
+    """Load only the public match history required by the Poisson UI state."""
+    return load_historical_matches(get_db())
 
 
 @st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)

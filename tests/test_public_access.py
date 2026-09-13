@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.components import data as data_module
 from config.settings import ConfigurationError, get_public_supabase_settings
 from db.db_client import PublicSupabaseRestClient
 
@@ -30,3 +31,23 @@ def test_public_client_cannot_mutate() -> None:
         client.update("matches", {"home_xg": 1.2}, filters={"id": "eq.1"})
     with pytest.raises(PermissionError, match="read-only"):
         client.delete("matches", filters={"id": "eq.1"})
+
+
+def test_match_detail_history_uses_public_match_loader(monkeypatch) -> None:
+    public_client = object()
+    expected = [{"id": 42, "status": "finished"}]
+    received_clients: list[object] = []
+
+    def fake_load_historical_matches(client: object) -> list[dict[str, object]]:
+        received_clients.append(client)
+        return expected
+
+    data_module.load_completed_match_history.clear()
+    monkeypatch.setattr(data_module, "get_db", lambda: public_client)
+    monkeypatch.setattr(
+        data_module, "load_historical_matches", fake_load_historical_matches
+    )
+
+    assert data_module.load_completed_match_history() == expected
+    assert received_clients == [public_client]
+    data_module.load_completed_match_history.clear()
