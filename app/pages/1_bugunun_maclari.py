@@ -12,7 +12,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.data import load_upcoming_dashboard
-from app.components.ui import configure_page, dashboard_display, disclaimer
+from app.components.ui import (
+    configure_page,
+    dashboard_display,
+    disclaimer,
+    diversified_dashboard_display,
+)
 
 
 configure_page("Bugünün Maçları")
@@ -48,7 +53,13 @@ if league:
 st.dataframe(
     dashboard_display(filtered), hide_index=True, use_container_width=True, height=680
 )
+diversified = diversified_dashboard_display(filtered)
+if not diversified.empty:
+    st.subheader("Güven eşiğini aşan ek tahminler")
+    st.dataframe(diversified, hide_index=True, use_container_width=True)
 st.caption(
     f"{len(filtered)} maç gösteriliyor. “En güçlü sinyal”, 1-X-2, Üst 2.5 ve KG Var "
-    "olasılıkları içindeki en yüksek değerdir. %60 ve üzeri güçlü, %50–59.9 orta sinyaldir; kesinlik değildir."
+    "olasılıkları içindeki en yüksek değerdir. “Ek tahminler” yalnızca güven eşiğini "
+    "aşan çifte şans, gol çizgisi, takım golü ve skor senaryolarını gösterir. "
+    "%60 ve üzeri güçlü, %50–59.9 orta sinyaldir; kesinlik değildir."
 )

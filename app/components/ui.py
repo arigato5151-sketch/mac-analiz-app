@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 import streamlit as st
+
+from models.market_forecast import format_market_summary
 
 
 OUTCOME_COLUMNS: tuple[tuple[str, str], ...] = (
@@ -69,6 +73,25 @@ def prediction_signal_text(row: pd.Series) -> str:
     if probability is None:
         return market
     return f"{market} · {probability_percent(probability)} · {confidence}"
+
+
+def diversified_prediction_text(row: pd.Series) -> str:
+    """Format persisted secondary markets for compact dashboard tables."""
+    raw_markets = row.get("market_probabilities")
+    if isinstance(raw_markets, str):
+        try:
+            raw_markets = json.loads(raw_markets)
+        except json.JSONDecodeError:
+            return "—"
+    if not isinstance(raw_markets, dict) or not raw_markets:
+        return "—"
+
+    try:
+        lines = format_market_summary(raw_markets)
+    except (KeyError, TypeError, ValueError):
+        # A malformed historical row must not break the entire dashboard.
+        return "—"
+    return " | ".join(lines) if lines else "—"
 
 
 def outcome_prediction_signal(row: pd.Series) -> tuple[str, float | None, str]:
@@ -194,3 +217,15 @@ def dashboard_display(frame: pd.DataFrame) -> pd.DataFrame:
             "En güçlü sinyal": frame.apply(prediction_signal_text, axis=1),
         }
     )
+
+
+def diversified_dashboard_display(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return a focused table so secondary markets stay visible without scrolling."""
+    rows = pd.DataFrame(
+        {
+            "Tarih": frame["match_date"].dt.strftime("%d.%m %H:%M"),
+            "Maç": frame["home_team"] + " — " + frame["away_team"],
+            "Ek tahminler": frame.apply(diversified_prediction_text, axis=1),
+        }
+    )
+    return rows.loc[rows["Ek tahminler"] != "—"].reset_index(drop=True)

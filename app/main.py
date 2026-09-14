@@ -13,7 +13,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.data import load_latest_model_metadata, load_upcoming_dashboard
-from app.components.ui import configure_page, dashboard_display, disclaimer
+from app.components.ui import (
+    configure_page,
+    dashboard_display,
+    disclaimer,
+    diversified_dashboard_display,
+)
 
 
 configure_page("Ana Sayfa")
@@ -48,6 +53,13 @@ else:
         use_container_width=True,
         height=min(700, 40 + 35 * len(filtered)),
     )
+    diversified = diversified_dashboard_display(filtered)
+    if not diversified.empty:
+        st.subheader("Güven eşiğini aşan ek tahminler")
+        st.dataframe(diversified, hide_index=True, use_container_width=True)
 
 st.caption("Detaylı analiz için sol menüden Maç Detay sayfasını açın.")
-st.caption("“En güçlü sinyal”, 1-X-2, Üst 2.5 ve KG Var piyasaları arasındaki en yüksek model olasılığını gösterir.")
+st.caption(
+    "“En güçlü sinyal”, 1-X-2, Üst 2.5 ve KG Var piyasaları arasındaki en yüksek "
+    "model olasılığını; “Ek tahminler” ise eşik üstü alternatif pazarları gösterir."
+)

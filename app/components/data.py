@@ -70,7 +70,7 @@ def load_upcoming_dashboard(horizon_days: int = 3) -> pd.DataFrame:
             "predictions",
             columns=(
                 "match_id,model_version,prob_home_win,prob_draw,prob_away_win,"
-                "prob_over_2_5,prob_btts,predicted_at"
+                "prob_over_2_5,prob_btts,market_probabilities,predicted_at"
             ),
             filters={"match_id": f"in.({match_ids})"},
             order="predicted_at.desc",
@@ -138,7 +138,8 @@ def load_prediction_performance() -> pd.DataFrame:
             "prediction_id,match_id,actual_result,was_correct,brier_score,"
             "prob_home_win,prob_draw,prob_away_win,"
             "evaluated_at,over_2_5_actual,over_2_5_was_correct,over_2_5_brier_score,"
-            "btts_actual,btts_was_correct,btts_brier_score"
+            "btts_actual,btts_was_correct,btts_brier_score,"
+            "market_probabilities,market_performance"
         ),
         order="evaluated_at.asc",
     )

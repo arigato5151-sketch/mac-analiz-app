@@ -61,6 +61,7 @@ class DashboardDb:
                 "prob_away_win": 0.2,
                 "prob_over_2_5": 0.5,
                 "prob_btts": 0.5,
+                "market_probabilities": {"double_chance": {"1X": 0.8}},
                 "predicted_at": "2026-09-02T12:00:00+00:00",
             }]
         if table == "teams":
@@ -68,6 +69,15 @@ class DashboardDb:
         if table == "leagues":
             return [{"id": 39, "name": "Lig", "country": "TR"}]
         raise AssertionError(f"Unexpected table: {table}")
+
+
+class PerformanceDb:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def select_all(self, table: str, **kwargs: Any) -> list[dict[str, Any]]:
+        self.calls.append((table, kwargs))
+        return []
 
 
 def test_evaluated_predictions_use_single_database_view(monkeypatch) -> None:
@@ -94,4 +104,20 @@ def test_upcoming_dashboard_requests_predictions_only_for_visible_fixtures(monke
 
     prediction_call = next(call for call in db.calls if call[0] == "predictions")
     assert prediction_call[1]["filters"] == {"match_id": "in.(10)"}
+    assert "market_probabilities" in prediction_call[1]["columns"]
     assert frame.loc[0, "home_team"] == "Ev"
+    assert frame.loc[0, "market_probabilities"] == {"double_chance": {"1X": 0.8}}
+
+
+def test_live_performance_requests_diversified_market_fields(monkeypatch) -> None:
+    db = PerformanceDb()
+    data.load_prediction_performance.clear()
+    monkeypatch.setattr(data, "get_db", lambda: db)
+
+    frame = data.load_prediction_performance()
+
+    assert frame.empty
+    assert len(db.calls) == 1
+    assert db.calls[0][0] == "evaluated_prediction_results"
+    assert "market_probabilities" in db.calls[0][1]["columns"]
+    assert "market_performance" in db.calls[0][1]["columns"]
