@@ -3,9 +3,10 @@ from __future__ import annotations
 import pandas as pd
 
 from app.components.ui import (
+    SECONDARY_MARKET_COLUMNS,
     dashboard_display,
     diversified_dashboard_display,
-    diversified_prediction_text,
+    diversified_prediction_cells,
     prediction_signal,
     prediction_signal_text,
 )
@@ -32,7 +33,7 @@ def test_prediction_signal_handles_missing_predictions() -> None:
     assert (market, probability, confidence) == ("Tahmin bekleniyor", None, "—")
 
 
-def test_dashboard_displays_persisted_diversified_markets() -> None:
+def test_dashboard_formats_each_diversified_market_as_a_separate_cell() -> None:
     row = pd.Series(
         {
             "market_probabilities": {
@@ -48,20 +49,27 @@ def test_dashboard_displays_persisted_diversified_markets() -> None:
         }
     )
 
-    text = diversified_prediction_text(row)
+    cells = diversified_prediction_cells(row)
 
-    assert "Çifte şans: 1X %82" in text
-    assert "Gol çizgisi: Üst 1.5 %71 · Alt 3.5 %68" in text
-    assert "Takım golü: Ev 0.5 Üst %74" in text
-    assert "Olası skorlar: 1-0 %18 · 2-0 %14 · 1-1 %12" in text
+    assert cells["Çifte şans"] == "1X · %82.0"
+    assert cells["Üst 1.5"] == "%71.0"
+    assert cells["Alt 3.5"] == "%68.0"
+    assert cells["Ev 0.5 Üst"] == "%74.0"
+    assert cells["Dep. 0.5 Üst"] == "—"
+    assert cells["Skor 1"] == "1-0 · %18.0"
+    assert cells["Skor 2"] == "2-0 · %14.0"
+    assert cells["Skor 3"] == "1-1 · %12.0"
 
 
 def test_dashboard_handles_missing_or_malformed_diversified_markets() -> None:
-    assert diversified_prediction_text(pd.Series(dtype=object)) == "—"
-    assert diversified_prediction_text(pd.Series({"market_probabilities": "not-json"})) == "—"
+    empty = {column: "—" for column in SECONDARY_MARKET_COLUMNS}
+    assert diversified_prediction_cells(pd.Series(dtype=object)) == empty
+    assert diversified_prediction_cells(
+        pd.Series({"market_probabilities": "not-json"})
+    ) == empty
 
 
-def test_diversified_dashboard_display_includes_secondary_markets() -> None:
+def test_dashboard_display_includes_each_secondary_market_next_to_match() -> None:
     frame = pd.DataFrame(
         [
             {
@@ -74,32 +82,54 @@ def test_diversified_dashboard_display_includes_secondary_markets() -> None:
                 "prob_away_win": 0.09,
                 "prob_over_2_5": 0.60,
                 "prob_btts": 0.52,
-                "market_probabilities": '{"double_chance":{"1X":0.91}}',
+                "market_probabilities": (
+                    '{"double_chance":{"1X":0.91},'
+                    '"correct_scores":[{"score":"1-0","probability":0.18}]}'
+                ),
+            }
+        ]
+    )
+
+    display = dashboard_display(frame)
+
+    assert display.loc[0, "Çifte şans"] == "1X · %91.0"
+    assert display.loc[0, "Skor 1"] == "1-0 · %18.0"
+    assert list(display.columns[3:13]) == list(SECONDARY_MARKET_COLUMNS)
+
+
+def test_dashboard_marks_each_missing_secondary_market() -> None:
+    frame = pd.DataFrame(
+        [
+            {
+                "match_date": pd.Timestamp("2026-09-14T19:30:00+03:00"),
+                "league_name": "Serie A",
+                "home_team": "Como",
+                "away_team": "Parma",
+                "prob_home_win": 0.75,
+                "prob_draw": 0.16,
+                "prob_away_win": 0.09,
+                "prob_over_2_5": 0.60,
+                "prob_btts": 0.52,
+            }
+        ]
+    )
+
+    display = dashboard_display(frame)
+    assert all(display.loc[0, column] == "—" for column in SECONDARY_MARKET_COLUMNS)
+
+
+def test_legacy_diversified_dashboard_import_remains_compatible() -> None:
+    frame = pd.DataFrame(
+        [
+            {
+                "match_date": pd.Timestamp("2026-09-14T19:30:00+03:00"),
+                "home_team": "Como",
+                "away_team": "Parma",
+                "market_probabilities": {"double_chance": {"1X": 0.91}},
             }
         ]
     )
 
     display = diversified_dashboard_display(frame)
 
-    assert display.loc[0, "Ek tahminler"] == "Çifte şans: 1X %91"
-    assert list(display.columns) == ["Tarih", "Maç", "Ek tahminler"]
-
-
-def test_primary_dashboard_stays_compact() -> None:
-    frame = pd.DataFrame(
-        [
-            {
-                "match_date": pd.Timestamp("2026-09-14T19:30:00+03:00"),
-                "league_name": "Serie A",
-                "home_team": "Como",
-                "away_team": "Parma",
-                "prob_home_win": 0.75,
-                "prob_draw": 0.16,
-                "prob_away_win": 0.09,
-                "prob_over_2_5": 0.60,
-                "prob_btts": 0.52,
-            }
-        ]
-    )
-
-    assert "Ek tahminler" not in dashboard_display(frame).columns
+    assert display.loc[0, "Çifte şans"] == "1X · %91.0"

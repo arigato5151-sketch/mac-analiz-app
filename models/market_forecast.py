@@ -135,6 +135,55 @@ def format_market_summary(markets: dict[str, Any]) -> list[str]:
     return lines
 
 
+def format_telegram_market_lines(markets: dict[str, Any]) -> list[str]:
+    """Return one Telegram line per confident secondary prediction type."""
+    lines: list[str] = []
+    double_chance = markets.get("double_chance") or {}
+    candidates: list[tuple[str, float]] = []
+    for label in ("1X", "X2", "12"):
+        try:
+            probability = _probability(
+                double_chance[label], label=f"double chance {label}"
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        candidates.append((label, probability))
+    if candidates:
+        label, probability = max(candidates, key=lambda item: item[1])
+        if probability >= MINIMUM_DOUBLE_CHANCE_CONFIDENCE:
+            lines.append(f"Çifte şans: {label} %{probability * 100:.0f}")
+
+    for group, key, label in (
+        ("total_goals", "over_1_5", "Üst 1.5"),
+        ("total_goals", "under_3_5", "Alt 3.5"),
+        ("team_goals", "home_over_0_5", "Ev 0.5 Üst"),
+        ("team_goals", "away_over_0_5", "Dep. 0.5 Üst"),
+        ("team_goals", "home_over_1_5", "Ev 1.5 Üst"),
+        ("team_goals", "away_over_1_5", "Dep. 1.5 Üst"),
+    ):
+        try:
+            probability = _probability(
+                (markets.get(group) or {})[key], label=label
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        if probability >= MINIMUM_GOAL_MARKET_CONFIDENCE:
+            lines.append(f"{label}: %{probability * 100:.0f}")
+
+    score_rank = 0
+    for item in (markets.get("correct_scores") or [])[:3]:
+        try:
+            score = str(item["score"]).strip()
+            probability = _probability(item["probability"], label="correct score")
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not score:
+            continue
+        score_rank += 1
+        lines.append(f"Skor {score_rank}: {score} %{probability * 100:.0f}")
+    return lines
+
+
 def evaluate_market_probabilities(
     markets: dict[str, Any], *, home_score: int, away_score: int
 ) -> dict[str, Any]:

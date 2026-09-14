@@ -7,7 +7,10 @@ import json
 import pandas as pd
 import streamlit as st
 
-from models.market_forecast import format_market_summary
+from models.market_forecast import (
+    MINIMUM_DOUBLE_CHANCE_CONFIDENCE,
+    MINIMUM_GOAL_MARKET_CONFIDENCE,
+)
 
 
 OUTCOME_COLUMNS: tuple[tuple[str, str], ...] = (
@@ -75,23 +78,62 @@ def prediction_signal_text(row: pd.Series) -> str:
     return f"{market} · {probability_percent(probability)} · {confidence}"
 
 
-def diversified_prediction_text(row: pd.Series) -> str:
-    """Format persisted secondary markets for compact dashboard tables."""
+SECONDARY_MARKET_COLUMNS: tuple[str, ...] = (
+    "Çifte şans",
+    "Üst 1.5",
+    "Alt 3.5",
+    "Ev 0.5 Üst",
+    "Dep. 0.5 Üst",
+    "Ev 1.5 Üst",
+    "Dep. 1.5 Üst",
+    "Skor 1",
+    "Skor 2",
+    "Skor 3",
+)
+
+
+def diversified_prediction_cells(row: pd.Series) -> dict[str, str]:
+    """Return one dashboard cell per published secondary prediction."""
+    cells = {column: "—" for column in SECONDARY_MARKET_COLUMNS}
     raw_markets = row.get("market_probabilities")
     if isinstance(raw_markets, str):
         try:
             raw_markets = json.loads(raw_markets)
         except json.JSONDecodeError:
-            return "—"
+            return cells
     if not isinstance(raw_markets, dict) or not raw_markets:
-        return "—"
+        return cells
 
     try:
-        lines = format_market_summary(raw_markets)
+        double_chance = raw_markets.get("double_chance") or {}
+        if double_chance:
+            label, probability = max(
+                ((str(key), float(value)) for key, value in double_chance.items()),
+                key=lambda item: item[1],
+            )
+            if probability >= MINIMUM_DOUBLE_CHANCE_CONFIDENCE:
+                cells["Çifte şans"] = f"{label} · {probability_percent(probability)}"
+
+        for group, key, column in (
+            ("total_goals", "over_1_5", "Üst 1.5"),
+            ("total_goals", "under_3_5", "Alt 3.5"),
+            ("team_goals", "home_over_0_5", "Ev 0.5 Üst"),
+            ("team_goals", "away_over_0_5", "Dep. 0.5 Üst"),
+            ("team_goals", "home_over_1_5", "Ev 1.5 Üst"),
+            ("team_goals", "away_over_1_5", "Dep. 1.5 Üst"),
+        ):
+            probability = float((raw_markets.get(group) or {}).get(key, 0.0))
+            if probability >= MINIMUM_GOAL_MARKET_CONFIDENCE:
+                cells[column] = probability_percent(probability)
+
+        for index, score in enumerate((raw_markets.get("correct_scores") or [])[:3], 1):
+            cells[f"Skor {index}"] = (
+                f"{str(score['score'])} · {probability_percent(float(score['probability']))}"
+            )
     except (KeyError, TypeError, ValueError):
         # A malformed historical row must not break the entire dashboard.
-        return "—"
-    return " | ".join(lines) if lines else "—"
+        return {column: "—" for column in SECONDARY_MARKET_COLUMNS}
+    return cells
 
 
 def outcome_prediction_signal(row: pd.Series) -> tuple[str, float | None, str]:
@@ -194,11 +236,18 @@ def evaluated_result_display(frame: pd.DataFrame) -> pd.DataFrame:
     ].rename(columns={"league_name": "Lig"})
 
 def dashboard_display(frame: pd.DataFrame) -> pd.DataFrame:
+    secondary_rows = [
+        diversified_prediction_cells(row) for _, row in frame.iterrows()
+    ]
     return pd.DataFrame(
         {
             "Tarih": frame["match_date"].dt.strftime("%d.%m %H:%M"),
             "Lig": frame["league_name"],
             "Maç": frame["home_team"] + " — " + frame["away_team"],
+            **{
+                column: [cells[column] for cells in secondary_rows]
+                for column in SECONDARY_MARKET_COLUMNS
+            },
             "1": frame.get("prob_home_win", pd.Series(index=frame.index)).map(
                 probability_percent
             ),
@@ -220,12 +269,21 @@ def dashboard_display(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def diversified_dashboard_display(frame: pd.DataFrame) -> pd.DataFrame:
-    """Return a focused table so secondary markets stay visible without scrolling."""
+    """Keep older deployed entry points compatible during rolling updates."""
+    secondary_rows = [
+        diversified_prediction_cells(row) for _, row in frame.iterrows()
+    ]
     rows = pd.DataFrame(
         {
             "Tarih": frame["match_date"].dt.strftime("%d.%m %H:%M"),
             "Maç": frame["home_team"] + " — " + frame["away_team"],
-            "Ek tahminler": frame.apply(diversified_prediction_text, axis=1),
+            **{
+                column: [cells[column] for cells in secondary_rows]
+                for column in SECONDARY_MARKET_COLUMNS
+            },
         }
     )
-    return rows.loc[rows["Ek tahminler"] != "—"].reset_index(drop=True)
+    if rows.empty:
+        return rows
+    has_prediction = rows[list(SECONDARY_MARKET_COLUMNS)].ne("—").any(axis=1)
+    return rows.loc[has_prediction].reset_index(drop=True)

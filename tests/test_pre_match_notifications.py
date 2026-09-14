@@ -73,12 +73,38 @@ def test_pre_match_message_adds_only_confident_diversified_markets() -> None:
         league_name="Lig",
     )
 
-    assert "📊 Ek tahminler" in message
+    assert "📊 Yeni tahminler" in message
     assert "Çifte şans: 1X %80" in message
-    assert "Gol çizgisi: Üst 1.5 %75 · Alt 3.5 %70" in message
-    assert "Takım golü: Ev 0.5 Üst %80" in message
+    assert "Üst 1.5: %75" in message
+    assert "Alt 3.5: %70" in message
+    assert "Ev 0.5 Üst: %80" in message
     assert "Dep. 0.5 Üst" not in message
-    assert "Olası skorlar: 1-0 %16 · 1-1 %14 · 2-0 %12" in message
+    assert "Skor 1: 1-0 %16" in message
+    assert "Skor 2: 1-1 %14" in message
+    assert "Skor 3: 2-0 %12" in message
+
+
+def test_pre_match_message_ignores_malformed_diversified_markets() -> None:
+    message = pre_match_message(
+        {"match_date": "2026-08-29T16:00:00+00:00"},
+        {
+            "prob_home_win": 0.6,
+            "prob_draw": 0.2,
+            "prob_away_win": 0.2,
+            "prob_over_2_5": 0.55,
+            "prob_btts": 0.45,
+            "market_probabilities": {
+                "double_chance": {"1X": "geçersiz"},
+                "total_goals": {"over_1_5": 1.5},
+                "correct_scores": [{"score": "1-0"}],
+            },
+        },
+        home_team="Ev",
+        away_team="Deplasman",
+        league_name="Lig",
+    )
+
+    assert "📊 Yeni tahminler" not in message
 
 
 def test_pre_match_message_adds_a_bounded_ai_commentary_section() -> None:

@@ -24,7 +24,7 @@ from data_pipeline.refresh_context import current_elo_ratings
 from db.db_client import DatabaseError, SupabaseRestClient
 from models.feature_engineering import CausalFeatureState
 from models.decision_policy import MINIMUM_ACTIONABLE_1X2_CONFIDENCE, select_1x2
-from models.market_forecast import format_market_summary
+from models.market_forecast import format_telegram_market_lines
 from models.predict import generate_prediction_rows, load_latest_team_forms, persist_predictions, resolve_model_path
 from models.shadow import run_shadow_predictions
 from models.train_model import load_historical_matches
@@ -217,11 +217,11 @@ def pre_match_message(
         f"Üst 2.5: %{float(prediction['prob_over_2_5']) * 100:.0f} · "
         f"KG Var: %{float(prediction['prob_btts']) * 100:.0f}",
     ]
-    market_lines = format_market_summary(
+    market_lines = format_telegram_market_lines(
         prediction.get("market_probabilities") or {}
     )
     if market_lines:
-        lines.extend(("", "📊 Ek tahminler", *market_lines))
+        lines.extend(("", "📊 Yeni tahminler", *market_lines))
     safe_commentary = _telegram_commentary(commentary)
     if safe_commentary:
         lines.extend(("", "🧠 Maç yorumu", safe_commentary))
