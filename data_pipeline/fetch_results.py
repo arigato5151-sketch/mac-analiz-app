@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from config.settings import get_settings
 from data_pipeline.api_client import ApiFootballClient
-from data_pipeline.fetch_fixtures import SyncSummary, sync_fixtures
+from data_pipeline.fetch_fixtures import SyncSummary, sync_fixtures, transform_fixtures
 from db.db_client import SupabaseRestClient
 from monitoring.operational_events import record_api_diagnostics, record_exception
 
@@ -19,6 +19,8 @@ EXPECTED_GOALS_STAT_TYPES = frozenset({"expected_goals", "xg"})
 EXPECTED_ASSISTS_STAT_TYPES = frozenset(
     {"expected_assists", "expected_assist", "xa", "x_a"}
 )
+STALE_ACTIVE_GRACE = timedelta(hours=4)
+MAX_STALE_ACTIVE_RECONCILIATIONS = 20
 
 
 def _statistic_key(value: object) -> str:
@@ -52,6 +54,7 @@ def sync_recent_results(
     """Reconcile recent days so a missed run cannot strand stale fixtures."""
     if lookback_days < 0 or lookback_days > 14:
         raise ValueError("lookback_days must be between 0 and 14")
+    reconcile_stale_active_fixtures(api, db)
     summary = sync_fixtures(
         api,
         db,
@@ -60,6 +63,62 @@ def sync_recent_results(
     )
     sync_recent_expected_metrics(api, db, today=today, lookback_days=lookback_days)
     return summary
+
+
+def reconcile_stale_active_fixtures(
+    api: ApiFootballClient,
+    db: SupabaseRestClient,
+    *,
+    now: datetime | None = None,
+) -> int:
+    """Refresh stale active fixtures by ID so date changes cannot strand them."""
+    reference_time = now or datetime.now(timezone.utc)
+    if reference_time.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+
+    stale_matches = db.select_all(
+        "matches",
+        columns="id",
+        filters={
+            "status": "in.(scheduled,live)",
+            "match_date": f"lte.{(reference_time - STALE_ACTIVE_GRACE).isoformat()}",
+        },
+        order="match_date.asc",
+    )
+    reconciled = 0
+    for stale_match in stale_matches[:MAX_STALE_ACTIVE_RECONCILIATIONS]:
+        fixture_id = int(stale_match["id"])
+        try:
+            payload = api.get("fixtures", {"id": fixture_id})
+            _, matches = transform_fixtures(payload)
+            current = next(
+                (match for match in matches if int(match["id"]) == fixture_id), None
+            )
+            if current is None:
+                continue
+
+            # Patch only mutable match state; teams and league already exist.
+            db.update(
+                "matches",
+                {
+                    "match_date": current["match_date"],
+                    "status": current["status"],
+                    "home_score": current["home_score"],
+                    "away_score": current["away_score"],
+                },
+                filters={"id": f"eq.{fixture_id}"},
+            )
+            reconciled += 1
+        except Exception as error:
+            # A single provider anomaly must not block the normal date-based sweep.
+            record_exception(
+                db,
+                component="fetch_results",
+                operation="stale fixture reconciliation",
+                error=error,
+                context={"fixture_id": fixture_id},
+            )
+    return reconciled
 
 
 def extract_expected_goals(

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import isfinite, log
 from math import factorial as math_factorial
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -105,7 +106,6 @@ def _dixon_coles_log_likelihood(
         if tau <= 0:
             return 1e10
         log_tau = log(tau)
-        from math import factorial as math_factorial
         log_poisson_h = hg * log(hl) - hl - log(math_factorial(hg))
         log_poisson_a = ag * log(al) - al - log(math_factorial(ag))
         total += log_tau + log_poisson_h + log_poisson_a

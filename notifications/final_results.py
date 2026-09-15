@@ -142,6 +142,8 @@ def run_final_result_notifications() -> dict[str, int | str]:
             filters={"id": f"in.({prediction_ids})"},
         )
     }
+    from notifications.pre_match import SNAPSHOT_TYPE, LEGACY_SNAPSHOT_TYPES
+
     snapshots = {
         int(row["match_id"]): row
         for row in db.select_all(
@@ -150,7 +152,10 @@ def run_final_result_notifications() -> dict[str, int | str]:
                 "match_id,model_version,prob_home_win,prob_draw,prob_away_win,"
                 "prob_over_2_5,prob_btts,captured_at"
             ),
-            filters={"match_id": f"in.({match_ids})", "snapshot_type": "eq.pre_match_60m"},
+            filters={
+                "match_id": f"in.({match_ids})",
+                "or": f"(snapshot_type.eq.{SNAPSHOT_TYPE},snapshot_type.eq.{LEGACY_SNAPSHOT_TYPES[0]})",
+            },
         )
     }
     team_ids = {int(team_id) for match in matches.values() for team_id in (match["home_team_id"], match["away_team_id"])}

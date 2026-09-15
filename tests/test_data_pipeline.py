@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 import pytest
@@ -17,6 +17,7 @@ from data_pipeline.fetch_team_stats import build_team_form
 from data_pipeline.fetch_results import (
     extract_expected_goals,
     extract_expected_metrics,
+    reconcile_stale_active_fixtures,
     sync_recent_results,
 )
 from data_pipeline.backfill import backfill_history
@@ -126,6 +127,59 @@ def test_sync_recent_results_reconciles_the_configured_lookback() -> None:
         ("fixtures", {"date": "2026-08-29", "timezone": "Europe/Istanbul"}),
         ("fixtures", {"date": "2026-08-30", "timezone": "Europe/Istanbul"}),
     ]
+
+
+def test_reconcile_stale_active_fixture_refreshes_rescheduled_date() -> None:
+    api = FakeApi(
+        [
+            {
+                **fixture(100),
+                "fixture": {
+                    "id": 100,
+                    "date": "2026-10-29T06:00:00+03:00",
+                    "status": {"short": "NS"},
+                },
+            }
+        ]
+    )
+    db = FakeDb()
+    db.select_all = lambda *_args, **_kwargs: [{"id": 100}]
+
+    reconciled = reconcile_stale_active_fixtures(
+        api,
+        db,
+        now=datetime(2026, 9, 15, 6, tzinfo=timezone.utc),
+    )
+
+    assert reconciled == 1
+    assert api.calls == [("fixtures", {"id": 100})]
+    assert db.updates == [
+        (
+            "matches",
+            {
+                "match_date": "2026-10-29T06:00:00+03:00",
+                "status": "scheduled",
+                "home_score": None,
+                "away_score": None,
+            },
+            {"id": "eq.100"},
+        )
+    ]
+
+
+def test_reconcile_stale_active_fixture_ignores_empty_provider_response() -> None:
+    api = FakeApi([])
+    db = FakeDb()
+    db.select_all = lambda *_args, **_kwargs: [{"id": 100}]
+
+    reconciled = reconcile_stale_active_fixtures(
+        api,
+        db,
+        now=datetime(2026, 9, 15, 6, tzinfo=timezone.utc),
+    )
+
+    assert reconciled == 0
+    assert db.updates == []
 
 
 def test_extract_expected_goals_accepts_provider_statistic() -> None:

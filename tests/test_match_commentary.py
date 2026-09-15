@@ -189,7 +189,104 @@ def test_generation_continues_after_model_error() -> None:
         model_name="obsolete-model",
         client_factory=lambda _: client,
     ) == "Tam yorum."
-    assert client.models.models == ["obsolete-model", "gemini-3.5-flash"]
+    assert client.models.models == ["obsolete-model", "gemini-1.5-flash"]
+
+
+def test_generation_falls_back_on_404_model_not_found() -> None:
+    """Test that fallback chain triggers on 404/NOT_FOUND model error."""
+    class ModelError(Exception):
+        code = 404
+
+    class FakeModels:
+        def __init__(self) -> None:
+            self.models: list[str] = []
+
+        def generate_content(
+            self, *, model: str, contents: str, config: dict[str, object]
+        ) -> object:
+            self.models.append(model)
+            if len(self.models) == 1:
+                raise ModelError("model not found")
+            return type("Response", (), {"text": "Tam yorum."})()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.models = FakeModels()
+
+    client = FakeClient()
+    assert generate_match_commentary(
+        **_arguments(),  # type: ignore[arg-type]
+        api_key="private-key",
+        model_name="obsolete-model",
+        client_factory=lambda _: client,
+    ) == "Tam yorum."
+    assert client.models.models == ["obsolete-model", "gemini-1.5-flash"]
+
+
+def test_generation_falls_back_on_404_from_any_attempt() -> None:
+    """Test that 404 on any attempt triggers fallback (not just first)."""
+    class ModelError(Exception):
+        code = 404
+
+    class FakeModels:
+        def __init__(self) -> None:
+            self.models: list[str] = []
+
+        def generate_content(
+            self, *, model: str, contents: str, config: dict[str, object]
+        ) -> object:
+            self.models.append(model)
+            if len(self.models) <= 2:  # Fail first two attempts
+                raise ModelError("model not found")
+            return type("Response", (), {"text": "Tam yorum."})()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.models = FakeModels()
+
+    client = FakeClient()
+    assert generate_match_commentary(
+        **_arguments(),  # type: ignore[arg-type]
+        api_key="private-key",
+        model_name="obsolete-model",
+        client_factory=lambda _: client,
+    ) == "Tam yorum."
+    # Should try: obsolete-model, gemini-1.5-flash, gemini-1.5-flash-002
+    assert len(client.models.models) == 3
+    assert client.models.models[0] == "obsolete-model"
+    assert "gemini-1.5" in client.models.models[1]
+
+
+def test_generation_does_not_immediately_reraise_non_404_errors() -> None:
+    """Test that non-404/429/401/403 errors don't immediately re-raise but allow fallback."""
+    class ModelError(Exception):
+        code = 500  # Server error, not model not found
+
+    class FakeModels:
+        def __init__(self) -> None:
+            self.models: list[str] = []
+
+        def generate_content(
+            self, *, model: str, contents: str, config: dict[str, object]
+        ) -> object:
+            self.models.append(model)
+            if len(self.models) == 1:
+                raise ModelError("internal server error")
+            return type("Response", (), {"text": "Tam yorum."})()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.models = FakeModels()
+
+    client = FakeClient()
+    assert generate_match_commentary(
+        **_arguments(),  # type: ignore[arg-type]
+        api_key="private-key",
+        model_name="obsolete-model",
+        client_factory=lambda _: client,
+    ) == "Tam yorum."
+    # 500 error should allow fallback to next model (not immediately re-raise)
+    assert "gemini-1.5" in client.models.models[1]
 
 
 def test_generation_retries_complete_response_when_first_ends_unfinished() -> None:

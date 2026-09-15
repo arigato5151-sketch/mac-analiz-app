@@ -1,4 +1,9 @@
-"""Refresh context and send one Telegram message about 20 minutes before kickoff."""
+"""Refresh context and send one Telegram message about 20 minutes before kickoff.
+
+Notification and snapshot type constants are versioned (pre_match_v1, pre_match_snapshot_v1)
+for forward compatibility. Legacy values (pre_match_20m, pre_match_60m) are still accepted
+when reading existing records for backward compatibility.
+"""
 
 from __future__ import annotations
 
@@ -31,8 +36,11 @@ from models.train_model import load_historical_matches
 from notifications.telegram import send_telegram_message
 
 
-NOTIFICATION_TYPE = "pre_match_20m"
-SNAPSHOT_TYPE = "pre_match_60m"
+NOTIFICATION_TYPE = "pre_match_v1"
+SNAPSHOT_TYPE = "pre_match_snapshot_v1"
+# Legacy values for backward compatibility with existing prod records.
+LEGACY_NOTIFICATION_TYPES = ("pre_match_20m", "pre_match_60m")
+LEGACY_SNAPSHOT_TYPES = ("pre_match_60m",)
 WINDOW_START_MINUTES = 0
 WINDOW_END_MINUTES = 25
 LINEUP_LOOKAHEAD_MINUTES = 90
@@ -211,6 +219,7 @@ def pre_match_message(
     )
     lines = [
         f"⚽ {home_team} — {away_team}",
+        f"🏆 {league_name}",
         f"⏰ {kickoff.astimezone(ZoneInfo('Europe/Istanbul')).strftime('%d.%m · %H:%M')}",
         "",
         result_line,
@@ -248,7 +257,7 @@ def _pending_matches(db: SupabaseRestClient, *, now: datetime) -> list[dict[str,
         columns="match_id",
         filters={
             "match_id": f"in.({match_ids})",
-            "or": "(notification_type.eq.pre_match_20m,notification_type.eq.pre_match_60m)",
+            "or": f"(notification_type.eq.{NOTIFICATION_TYPE},notification_type.eq.{LEGACY_NOTIFICATION_TYPES[0]},notification_type.eq.{LEGACY_NOTIFICATION_TYPES[1]})",
         },
     )
     sent_ids = {int(row["match_id"]) for row in sent}
@@ -302,29 +311,39 @@ def sync_soon_lineups(api: ApiFootballClient, db: SupabaseRestClient, *, now: da
 
 def sync_soon_odds(
     api: ApiFootballClient, db: SupabaseRestClient, *, now: datetime
-) -> tuple[int, dict[int, MatchOdds]]:
+) -> tuple[int, dict[int, MatchOdds], set[int]]:
     """Capture meaningful market moves and return freshly fetched quotes by fixture.
 
     The due-match loop reuses these quotes instead of issuing a second API request
     for the same fixture in the same scheduled run.
+
+    Returns:
+        tuple of (written_count, odds_by_fixture, failed_match_ids)
+        - odds_by_fixture: fixtures that have odds (MatchOdds) or explicitly no odds (None)
+        - failed_match_ids: fixtures where API call failed and should be retried later
     """
     soon = db.select_all(
         "matches", columns="id",
         filters={"status": "eq.scheduled", "and": f"(match_date.gte.{now.isoformat()},match_date.lte.{(now + timedelta(minutes=LINEUP_LOOKAHEAD_MINUTES)).isoformat()})"},
     )
     written = 0
-    odds_by_fixture: dict[int, MatchOdds] = {}
+    odds_by_fixture: dict[int, MatchOdds | None] = {}
+    failed_match_ids: set[int] = set()
     for match in soon:
         match_id = int(match["id"])
         try:
             odds = fetch_match_odds(api, fixture_id=match_id)
             if odds is not None:
                 odds_by_fixture[match_id] = odds
+            else:
+                # Explicitly mark as "no odds available" to avoid retry
+                odds_by_fixture[match_id] = None
             if odds and record_odds_quote(db, match_id=match_id, odds=odds, captured_at=now.isoformat()):
                 written += 1
         except Exception as error:
             print(f"Odds history unavailable for fixture {match_id}: {type(error).__name__}")
-    return written, odds_by_fixture
+            failed_match_ids.add(match_id)
+    return written, odds_by_fixture, failed_match_ids
 
 
 def _refresh_and_predict(
@@ -334,7 +353,11 @@ def _refresh_and_predict(
 ) -> tuple[
     list[dict[str, Any]], str, list[dict[str, Any]], dict[int, dict[str, Any]]
 ]:
-    """Refresh only the affected teams, then regenerate their probabilities."""
+    """Refresh only the affected teams, then regenerate their probabilities.
+
+    Each team's form/injury sync is isolated so a single API failure
+    does not block the entire batch.
+    """
     historical = load_historical_matches(db)
     team_ids = {
         int(team_id)
@@ -350,11 +373,33 @@ def _refresh_and_predict(
         teams_by_league.setdefault(league_id, set()).update(
             (int(match["home_team_id"]), int(match["away_team_id"]))
         )
+    # Track teams that failed sync so their matches can be skipped
+    failed_team_ids: set[int] = set()
     for league_id, affected_teams in teams_by_league.items():
         season = LEAGUES_BY_ID[league_id].season
         for team_id in sorted(affected_teams):
-            sync_team_form(api, db, team_id=team_id, season=season, elo_rating=elo_by_team[team_id])
-        sync_injuries(api, db, league_id=league_id, team_ids=affected_teams)
+            try:
+                sync_team_form(api, db, team_id=team_id, season=season, elo_rating=elo_by_team[team_id])
+            except Exception as error:
+                print(f"Team form sync failed for team {team_id}: {type(error).__name__}")
+                failed_team_ids.add(team_id)
+        try:
+            sync_injuries(api, db, league_id=league_id, team_ids=affected_teams)
+        except Exception as error:
+            print(f"Injuries sync failed for league {league_id}: {type(error).__name__}")
+            # On injuries sync failure, mark all teams in this league as failed
+            failed_team_ids.update(affected_teams)
+
+    # Filter out matches involving failed teams
+    valid_matches = [
+        match
+        for match in matches
+        if int(match["home_team_id"]) not in failed_team_ids
+        and int(match["away_team_id"]) not in failed_team_ids
+    ]
+    if len(valid_matches) != len(matches):
+        skipped = len(matches) - len(valid_matches)
+        print(f"Skipped {skipped} matches due to team sync failures")
 
     model_path = resolve_model_path()
     bundle = joblib.load(model_path)
@@ -363,7 +408,7 @@ def _refresh_and_predict(
     rows = generate_prediction_rows(
         bundle,
         historical,
-        matches,
+        valid_matches,
         model_version=model_version,
         team_form_by_id=team_forms,
     )
@@ -371,7 +416,7 @@ def _refresh_and_predict(
     try:
         run_shadow_predictions(
             db,
-            matches=matches,
+            matches=valid_matches,
             historical_matches=historical,
             team_form_by_id=team_forms,
         )
@@ -394,7 +439,7 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
 
     api = ApiFootballClient(settings.api_football_key)
     lineup_rows = sync_soon_lineups(api, db, now=now)
-    odds_history_written, odds_by_fixture = sync_soon_odds(api, db, now=now)
+    odds_history_written, odds_by_fixture, failed_match_ids = sync_soon_odds(api, db, now=now)
     if not matches:
         return {"due_matches": 0, "sent": 0, "lineup_rows": lineup_rows, "odds_history_rows": odds_history_written, "api": api.diagnostics()}
     predictions, model_version, historical, team_forms = _refresh_and_predict(api, db, matches)
@@ -433,7 +478,12 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
             captured_at=now.isoformat(),
         )
         try:
-            odds = odds_by_fixture.get(match_id) or fetch_match_odds(api, fixture_id=match_id)
+            # Only retry fetching if the fixture previously failed; if odds were explicitly None,
+            # that means "no odds available" and we should not retry.
+            if match_id in failed_match_ids:
+                odds = fetch_match_odds(api, fixture_id=match_id)
+            else:
+                odds = odds_by_fixture.get(match_id)
         except Exception as error:  # Odds are optional; never suppress a prediction alert.
             print(f"Odds unavailable for fixture {match_id}: {type(error).__name__}")
             odds = None

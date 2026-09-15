@@ -218,6 +218,8 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
         ),
         match_ids=pending_match_ids,
     )
+    from notifications.pre_match import SNAPSHOT_TYPE, LEGACY_SNAPSHOT_TYPES
+
     snapshots = _select_rows_for_match_ids(
         db,
         "prediction_snapshots",
@@ -226,7 +228,9 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
             "prob_away_win,prob_over_2_5,prob_btts,market_probabilities,captured_at"
         ),
         match_ids=pending_match_ids,
-        filters={"snapshot_type": "eq.pre_match_60m"},
+        filters={
+            "or": f"(snapshot_type.eq.{SNAPSHOT_TYPE},snapshot_type.eq.{LEGACY_SNAPSHOT_TYPES[0]})",
+        },
     )
     snapshots_by_match = {
         int(snapshot["match_id"]): {
