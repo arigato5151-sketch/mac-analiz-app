@@ -1,4 +1,4 @@
-"""Refresh context and send one Telegram message about 20 minutes before kickoff.
+"""Refresh context and send one Telegram message about 25 minutes before kickoff.
 
 Notification and snapshot type constants are versioned (pre_match_v1, pre_match_snapshot_v1)
 for forward compatibility. Legacy values (pre_match_20m, pre_match_60m) are still accepted
@@ -311,7 +311,7 @@ def sync_soon_lineups(api: ApiFootballClient, db: SupabaseRestClient, *, now: da
 
 def sync_soon_odds(
     api: ApiFootballClient, db: SupabaseRestClient, *, now: datetime
-) -> tuple[int, dict[int, MatchOdds], set[int]]:
+) -> tuple[int, dict[int, MatchOdds | None], set[int]]:
     """Capture meaningful market moves and return freshly fetched quotes by fixture.
 
     The due-match loop reuses these quotes instead of issuing a second API request

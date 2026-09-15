@@ -71,7 +71,40 @@ def reconcile_stale_active_fixtures(
     *,
     now: datetime | None = None,
 ) -> int:
-    """Refresh stale active fixtures by ID so date changes cannot strand them."""
+    """Reconcile stale active fixtures by ID to prevent date changes from stranding them.
+
+    Problem: Some matches remain stuck in `scheduled` or `live` status long after
+    their scheduled kickoff time (e.g., postponed, cancelled, or API-Football
+    date corrections). The standard date-based sweep only looks forward, so
+    these stale fixtures are never re-fetched and their status/scores never
+    update.
+
+    This function:
+    1. Finds matches with status `scheduled` or `live` whose `match_date`
+       is older than `now - STALE_ACTIVE_GRACE` (default 4 hours).
+    2. Re-fetches each fixture by ID from API-Football.
+    3. Updates only the mutable match state fields (`match_date`, `status`,
+       `home_score`, `away_score`) — teams and league are immutable once created.
+    4. Limits reconciliation to `MAX_STALE_ACTIVE_RECONCILIATIONS` fixtures per
+       run (default 20) to bound API quota usage.
+
+    Args:
+        api: API-Football client.
+        db: Supabase REST client with service-role write access.
+        now: Reference time (timezone-aware). Defaults to `datetime.now(timezone.utc)`.
+
+    Returns:
+        Number of fixtures successfully reconciled.
+
+    Notes:
+        - Single provider anomalies are logged but do not halt the batch.
+        - Fixtures that 404 or disappear from the API are skipped silently.
+        - The 4-hour grace window (`STALE_ACTIVE_GRACE`) balances between
+          catching genuine date changes and avoiding premature re-fetching of
+          matches that are merely delayed.
+        - The 20-fixture cap (`MAX_STALE_ACTIVE_RECONCILIATIONS`) bounds
+          API quota consumption per workflow run.
+    """
     reference_time = now or datetime.now(timezone.utc)
     if reference_time.tzinfo is None:
         raise ValueError("now must be timezone-aware")

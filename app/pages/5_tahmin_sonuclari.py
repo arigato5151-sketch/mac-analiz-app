@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import streamlit as st
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -106,13 +107,29 @@ summary[4].metric(
     delta_color="off",
 )
 
-st.dataframe(
-    evaluated_result_display(filtered),
-    hide_index=True,
-    width="stretch",
-    height=680,
-)
-st.caption(
-    "1-X-2, Üst/Alt 2.5 ve KG Var/Yok sonuçları %50 sınıflandırma eşiğiyle ayrı ayrı "
-    "değerlendirilir. Güven etiketi ve Brier skoru yalnızca 1-X-2 tahminine aittir."
-)
+display_df = evaluated_result_display(filtered)
+
+    # Configure AgGrid
+    gb = GridOptionsBuilder.from_dataframe(display_df)
+    gb.configure_pagination(paginationAutoPageSize=True)
+    gb.configure_side_bar()
+    gb.configure_default_column(
+        filterable=True,
+        sortable=True,
+        resizable=True,
+        wrapHeaderText=True,
+        autoHeaderHeight=True,
+    )
+    gb.configure_selection(selection_mode="multiple", use_checkbox=True)
+    grid_options = gb.build()
+
+    AgGrid(
+        display_df,
+        gridOptions=grid_options,
+        data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+        update_mode=GridUpdateMode.MODEL_CHANGED,
+        fit_columns_on_grid_load=True,
+        theme="streamlit",
+        enable_enterprise_modules=False,
+        height=680,
+    )

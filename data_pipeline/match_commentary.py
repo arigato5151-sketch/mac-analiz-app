@@ -13,11 +13,12 @@ from config.settings import PROJECT_ROOT, _load_env_file
 
 
 # Gemini API authorization (AQ) keys are supported by the current 1.5/1.0 models.
-# Current model versions as of 2024: 1.5-flash, 1.5-pro, 1.0-pro.
+# Current model versions as of 2025: 1.5-flash, 1.5-pro, 1.5-flash-8b.
+# Free tier (Google AI Studio) supports: gemini-1.5-flash, gemini-1.5-flash-002, gemini-1.5-pro, gemini-1.5-flash-8b.
 DEFAULT_MODEL = "gemini-1.5-flash"
-FALLBACK_MODELS = ("gemini-1.5-flash-002", "gemini-1.5-pro", "gemini-1.0-pro")
+FALLBACK_MODELS = ("gemini-1.5-flash-002", "gemini-1.5-pro", "gemini-1.5-flash-8b")
 MAX_CONTEXT_ITEMS = 12
-# Gemini 3.x may spend part of the generation budget on internal reasoning.
+# Gemini 1.5/2.x models may spend part of the generation budget on internal reasoning.
 # A 700-token cap cut user-visible Turkish text mid-sentence in production.
 COMMENTARY_OUTPUT_BUDGETS = (3_072, 4_096)
 MAX_PROVIDER_ATTEMPTS = 3

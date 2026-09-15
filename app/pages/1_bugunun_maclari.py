@@ -6,6 +6,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import streamlit as st
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -49,12 +50,33 @@ filtered = matches[matches["match_date"].dt.date.isin(days)]
 if league:
     filtered = filtered[filtered["league_name"].isin(league)]
 
-st.dataframe(
-    dashboard_display(filtered),
-    hide_index=True,
-    use_container_width=True,
+display_df = dashboard_display(filtered)
+
+# Configure AgGrid
+gb = GridOptionsBuilder.from_dataframe(display_df)
+gb.configure_pagination(paginationAutoPageSize=True)
+gb.configure_side_bar()
+gb.configure_default_column(
+    filterable=True,
+    sortable=True,
+    resizable=True,
+    wrapHeaderText=True,
+    autoHeaderHeight=True,
+)
+gb.configure_selection(selection_mode="multiple", use_checkbox=True)
+grid_options = gb.build()
+
+AgGrid(
+    display_df,
+    gridOptions=grid_options,
+    data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+    update_mode=GridUpdateMode.MODEL_CHANGED,
+    fit_columns_on_grid_load=True,
+    theme="streamlit",
+    enable_enterprise_modules=False,
     height=680,
 )
+
 st.caption(
     f"{len(filtered)} maç gösteriliyor. “En güçlü sinyal”, 1-X-2, Üst 2.5 ve KG Var "
     "olasılıkları içindeki en yüksek değerdir. Alternatif pazar sütunları yalnızca "

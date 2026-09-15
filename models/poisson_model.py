@@ -251,6 +251,106 @@ def predict_score_probabilities(
     )
 
 
+def kelly_criterion(
+    probability: float,
+    decimal_odds: float,
+    *,
+    kelly_fraction: float = 1.0,
+) -> float:
+    """Calculate optimal Kelly stake fraction.
+
+    Args:
+        probability: Estimated probability of the outcome (0.0 to 1.0).
+        decimal_odds: Decimal odds offered by the bookmaker.
+        kelly_fraction: Fraction of full Kelly to apply (0.0 to 1.0).
+                        1.0 = Full Kelly, 0.5 = Half Kelly, etc.
+
+    Returns:
+        Optimal fraction of bankroll to stake (0.0 to 1.0).
+        Returns 0.0 if the bet has no edge (negative expected value).
+
+    Note:
+        Full Kelly maximizes long-term growth but has high variance.
+        Half Kelly (0.5) is commonly used for risk management.
+    """
+    if not 0.0 <= probability <= 1.0:
+        raise ValueError("Probability must be between 0.0 and 1.0")
+    if decimal_odds <= 1.0:
+        raise ValueError("Decimal odds must be greater than 1.0")
+    if not 0.0 <= kelly_fraction <= 1.0:
+        raise ValueError("Kelly fraction must be between 0.0 and 1.0")
+
+    # Kelly formula: f* = (bp - q) / b
+    # where b = decimal_odds - 1, p = probability, q = 1 - p
+    b = decimal_odds - 1.0
+    p = probability
+    q = 1.0 - probability
+
+    edge = b * p - q
+    if edge <= 0:
+        return 0.0
+
+    full_kelly = edge / b
+    return float(np.clip(full_kelly * kelly_fraction, 0.0, 1.0))
+
+
+def kelly_stake(
+    bankroll: float,
+    probability: float,
+    decimal_odds: float,
+    *,
+    kelly_fraction: float = 1.0,
+) -> float:
+    """Calculate absolute stake amount using Kelly criterion.
+
+    Args:
+        bankroll: Current bankroll amount.
+        probability: Estimated probability of the outcome.
+        decimal_odds: Decimal odds offered by the bookmaker.
+        kelly_fraction: Fraction of full Kelly to apply.
+
+    Returns:
+        Recommended stake amount in currency units.
+    """
+    if bankroll <= 0:
+        raise ValueError("Bankroll must be positive")
+    fraction = kelly_criterion(probability, decimal_odds, kelly_fraction=kelly_fraction)
+    return bankroll * fraction
+
+
+def expected_value(
+    probability: float,
+    decimal_odds: float,
+) -> float:
+    """Calculate expected value of a bet.
+
+    Returns the expected profit per unit stake.
+    EV > 0 indicates a value bet.
+    """
+    return probability * (decimal_odds - 1.0) - (1.0 - probability)
+
+
+def implied_probability(decimal_odds: float) -> float:
+    """Convert decimal odds to implied probability (removing overround)."""
+    if decimal_odds <= 1.0:
+        raise ValueError("Decimal odds must be greater than 1.0")
+    return 1.0 / decimal_odds
+
+
+def remove_overround(
+    home_odds: float,
+    draw_odds: float,
+    away_odds: float,
+) -> tuple[float, float, float]:
+    """Remove bookmaker overround to get fair probabilities.
+
+    Uses the proportional method to normalize implied probabilities.
+    """
+    probs = [1.0 / o for o in (home_odds, draw_odds, away_odds)]
+    total = sum(probs)
+    return tuple(p / total for p in probs)
+
+
 def estimate_expected_goals(
     *,
     home_avg_scored: float,

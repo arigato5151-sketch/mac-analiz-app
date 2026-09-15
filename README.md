@@ -12,6 +12,8 @@ Poisson ve XGBoost modelleriyle olasılık üreten kişisel Streamlit uygulamas�
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+# Not: `numpy`, `scipy`, `pandas` tam sürüme (==) pinlenmiştir; .joblib model
+# artefaktlarının train/serve ortamları arasında sessizce bozulmaması için.
 Copy-Item .env.example .env
 streamlit run app/main.py
 ```
