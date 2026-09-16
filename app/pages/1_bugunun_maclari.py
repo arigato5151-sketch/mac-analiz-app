@@ -6,13 +6,14 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import streamlit as st
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
+from st_aggrid import AgGrid
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.data import load_upcoming_dashboard
+from app.components.grid import build_read_only_grid_options
 from app.components.ui import (
     configure_page,
     dashboard_display,
@@ -51,26 +52,11 @@ if league:
     filtered = filtered[filtered["league_name"].isin(league)]
 
 display_df = dashboard_display(filtered)
-
-# Configure AgGrid
-gb = GridOptionsBuilder.from_dataframe(display_df)
-gb.configure_pagination(paginationAutoPageSize=True)
-gb.configure_side_bar()
-gb.configure_default_column(
-    filterable=True,
-    sortable=True,
-    resizable=True,
-    wrapHeaderText=True,
-    autoHeaderHeight=True,
-)
-gb.configure_selection(selection_mode="multiple", use_checkbox=True)
-grid_options = gb.build()
+grid_options = build_read_only_grid_options(display_df)
 
 AgGrid(
     display_df,
     gridOptions=grid_options,
-    data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-    update_mode=GridUpdateMode.MODEL_CHANGED,
     fit_columns_on_grid_load=True,
     theme="streamlit",
     enable_enterprise_modules=False,

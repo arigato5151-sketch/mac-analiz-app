@@ -75,7 +75,7 @@ if metadata:
             )
             .sort_values("Log Loss"),
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
         )
 
     confidence_rows = metadata.get("confidence_coverage", [])
@@ -95,7 +95,7 @@ if metadata:
             confidence_frame[["Güven eşiği", "matches", "Kapsama", "Doğruluk"]]
             .rename(columns={"matches": "Maç"}),
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
         )
         st.caption(
             "Daha yüksek eşik daha az maça tahmin verir. Eşik seçimi yalnızca "
@@ -127,7 +127,7 @@ try:
             line_dash="dash",
             annotation_text=f"Ortalama %{mean_accuracy * 100:.1f}",
         )
-        st.plotly_chart(histogram, use_container_width=True)
+        st.plotly_chart(histogram, width="stretch")
         st.caption(
             f"Önümüzdeki üç gündeki {len(simulation_input)} maç için 10.000 senaryo. "
             f"Merkez %80 aralığı: %{lower * 100:.1f} – %{upper * 100:.1f}. "
@@ -217,7 +217,7 @@ else:
         lambda value: f"{value:.3f}" if pd.notna(value) else "—"
     )
     st.subheader("Pazar bazlı canlı performans")
-    st.dataframe(market_frame, hide_index=True, use_container_width=True)
+    st.dataframe(market_frame, hide_index=True, width="stretch")
 
     if summary.status == "Yetersiz örneklem":
         st.info(
@@ -250,7 +250,7 @@ else:
     )
     st.plotly_chart(
         px.line(chart_data, x="evaluated_at", y="Değer", color="Metrik"),
-        use_container_width=True,
+        width="stretch",
     )
     last_30 = performance.tail(30)
     st.caption(

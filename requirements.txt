@@ -6,6 +6,12 @@ scikit-learn==1.9.0
 xgboost==3.4.1
 joblib==1.5.3
 streamlit>=1.45,<2
+streamlit-aggrid>=1.2,<2
 plotly>=6.0,<7
 google-genai>=2.22,<3
 shap>=0.44,<1
+SQLAlchemy>=2.0,<3
+alembic>=1.16,<2
+psycopg[binary]>=3.2,<4
+APScheduler>=3.11,<4
+python-telegram-bot[webhooks]>=22,<23

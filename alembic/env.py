@@ -17,6 +17,11 @@ from db.models_db import Base
 # access to the values within the .ini file in use.
 config = context.config
 
+# Deployment environments provide the real PostgreSQL connection string.
+database_url = os.getenv("DATABASE_URL", "").strip()
+if database_url:
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
 if config.config_file_name is not None:

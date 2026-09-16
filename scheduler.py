@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
-import os
-from datetime import datetime, timezone
+import subprocess
+import sys
+from pathlib import Path
+from threading import Event
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from config.settings import get_settings
+
+PROJECT_ROOT = Path(__file__).resolve().parent
 
 
 def create_scheduler() -> BackgroundScheduler:
     """Create and configure the background scheduler."""
     scheduler = BackgroundScheduler(timezone="UTC")
-    
-    settings = get_settings()
     
     # Add jobs
     # Morning data update - 03:00 UTC (06:00 Turkey time)
@@ -96,44 +96,48 @@ def create_scheduler() -> BackgroundScheduler:
     return scheduler
 
 
-# Job functions (imported lazily to avoid circular imports)
+def _run_module(module: str, *arguments: str) -> dict[str, Any]:
+    """Run a CLI module in an isolated process and return its captured output."""
+    completed = subprocess.run(
+        [sys.executable, "-m", module, *arguments],
+        check=True,
+        capture_output=True,
+        cwd=PROJECT_ROOT,
+        text=True,
+    )
+    return {
+        "returncode": completed.returncode,
+        "stdout": completed.stdout.strip(),
+        "stderr": completed.stderr.strip(),
+    }
+
+
+# Job functions use subprocesses for CLI tasks so concurrent jobs never mutate sys.argv.
 def run_morning_update() -> dict[str, Any]:
     """Morning data update - fetch fixtures, refresh context, generate predictions."""
-    from data_pipeline.fetch_fixtures import main as fetch_fixtures_main
-    from data_pipeline.refresh_context import main as refresh_context_main
-    from models.predict import main as predict_main
-    from data_pipeline.data_quality import main as data_quality_main
-    
-    results = {}
-    results["fixtures"] = fetch_fixtures_main(["--days", "3"])
-    results["refresh_context"] = refresh_context_main(["--days", "3"])
-    results["predictions"] = predict_main(["--days", "3"])
-    results["quality"] = data_quality_main(["--days", "3"])
-    return results
+    return {
+        "fixtures": _run_module("data_pipeline.fetch_fixtures", "--days", "3"),
+        "refresh_context": _run_module("data_pipeline.refresh_context", "--days", "3"),
+        "predictions": _run_module("models.predict", "--days", "3"),
+        "quality": _run_module("data_pipeline.data_quality", "--days", "3"),
+    }
 
 
 def run_evening_update() -> dict[str, Any]:
     """Evening data update - fetch results, evaluate predictions."""
-    from data_pipeline.fetch_results import main as fetch_results_main
-    from evaluation.track_performance import main as track_performance_main
-    
-    results = {}
-    results["results"] = fetch_results_main(["--lookback-days", "7"])
-    results["performance"] = track_performance_main()
-    return results
+    return {
+        "results": _run_module("data_pipeline.fetch_results", "--lookback-days", "7"),
+        "performance": _run_module("evaluation.track_performance"),
+    }
 
 
 def run_night_update() -> dict[str, Any]:
     """Night update - send daily summary, evaluate shadow models."""
-    from notifications.daily_summary import main as daily_summary_main
-    from evaluation.track_performance import main as track_performance_main
-    from models.shadow import main as shadow_main
-    
-    results = {}
-    results["summary"] = daily_summary_main(["--mode", "night"])
-    results["performance"] = track_performance_main()
-    results["shadow"] = shadow_main()
-    return results
+    return {
+        "summary": _run_module("notifications.daily_summary", "--mode", "night"),
+        "performance": _run_module("evaluation.track_performance"),
+        "shadow": _run_module("models.shadow"),
+    }
 
 
 def run_pre_match_notifications() -> dict[str, Any]:
@@ -144,36 +148,33 @@ def run_pre_match_notifications() -> dict[str, Any]:
 
 def run_result_notifications() -> dict[str, Any]:
     """Send result notifications."""
-    from notifications.final_results import run_result_notifications
-    return run_result_notifications()
+    from notifications.final_results import run_final_result_notifications
+
+    return run_final_result_notifications()
 
 
 def run_daily_summary() -> dict[str, Any]:
     """Send daily summary to Telegram."""
-    from notifications.daily_summary import main as daily_summary_main
-    return daily_summary_main(["--mode", "night"])
+    return _run_module("notifications.daily_summary", "--mode", "morning")
 
 
 def run_weekly_retrain() -> dict[str, Any]:
     """Weekly model retraining."""
-    from models.train_model import main as train_model_main
-    from models.artifact_store import main as artifact_store_main
-    from models.shadow import main as shadow_main
-    
-    results = {}
-    results["training"] = train_model_main(["--publish-latest"])
-    results["artifact_store"] = artifact_store_main(["--push", "models/saved_models"])
-    results["shadow"] = shadow_main()
-    return results
+    return {
+        "training": _run_module("models.train_model", "--publish-latest"),
+        "artifact_store": _run_module(
+            "models.artifact_store", "--push", "models/saved_models"
+        ),
+        "shadow": _run_module("models.shadow", "--register-newest"),
+    }
 
 
 def run_operational_alerts() -> dict[str, Any]:
     """Check operational health and send alerts if needed."""
-    from notifications.operational_alerts import run_operational_alerts
-    return run_operational_alerts()
+    return _run_module("notifications.operational_alerts", "--notify")
 
 
-def start_scheduler() -> None:
+def start_scheduler() -> BackgroundScheduler:
     """Start the background scheduler."""
     scheduler = create_scheduler()
     scheduler.start()
@@ -189,21 +190,18 @@ def shutdown_scheduler(scheduler: Any) -> None:
 
 if __name__ == "__main__":
     import signal
-    import sys
-    
+
     scheduler = start_scheduler()
-    
-    def signal_handler(sig, frame):
-        print("Shutting down scheduler...")
-        shutdown_scheduler(scheduler)
-        sys.exit(0)
-    
+    stop_event = Event()
+
+    def signal_handler(_signal_number: int, _frame: Any) -> None:
+        stop_event.set()
+
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    
+
     print("Scheduler running. Press Ctrl+C to stop.")
     try:
-        while True:
-            pass
-    except KeyboardInterrupt:
+        stop_event.wait()
+    finally:
         shutdown_scheduler(scheduler)

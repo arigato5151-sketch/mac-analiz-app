@@ -4,13 +4,14 @@ import sys
 from pathlib import Path
 
 import streamlit as st
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
+from st_aggrid import AgGrid
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.data import load_evaluated_predictions
+from app.components.grid import build_read_only_grid_options
 from app.components.metrics import format_accuracy, summarize_binary_accuracy
 from app.components.ui import configure_page, disclaimer, evaluated_result_display, outcome_prediction_signal
 
@@ -108,28 +109,17 @@ summary[4].metric(
 )
 
 display_df = evaluated_result_display(filtered)
+grid_options = build_read_only_grid_options(display_df)
 
-    # Configure AgGrid
-    gb = GridOptionsBuilder.from_dataframe(display_df)
-    gb.configure_pagination(paginationAutoPageSize=True)
-    gb.configure_side_bar()
-    gb.configure_default_column(
-        filterable=True,
-        sortable=True,
-        resizable=True,
-        wrapHeaderText=True,
-        autoHeaderHeight=True,
-    )
-    gb.configure_selection(selection_mode="multiple", use_checkbox=True)
-    grid_options = gb.build()
-
-    AgGrid(
-        display_df,
-        gridOptions=grid_options,
-        data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-        update_mode=GridUpdateMode.MODEL_CHANGED,
-        fit_columns_on_grid_load=True,
-        theme="streamlit",
-        enable_enterprise_modules=False,
-        height=680,
-    )
+AgGrid(
+    display_df,
+    gridOptions=grid_options,
+    fit_columns_on_grid_load=True,
+    theme="streamlit",
+    enable_enterprise_modules=False,
+    height=680,
+)
+st.caption(
+    "1-X-2, Üst/Alt 2.5 ve KG Var/Yok sonuçları %50 sınıflandırma eşiğiyle ayrı ayrı "
+    "değerlendirilir. Güven etiketi ve Brier skoru yalnızca 1-X-2 tahminine aittir."
+)

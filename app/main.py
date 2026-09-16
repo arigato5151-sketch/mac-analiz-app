@@ -49,7 +49,7 @@ else:
     st.dataframe(
         dashboard_display(filtered),
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         height=min(700, 40 + 35 * len(filtered)),
     )
 

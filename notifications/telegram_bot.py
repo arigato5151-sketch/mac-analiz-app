@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import asyncio
-from typing import Optional
+import os
 
 from telegram import Update
 from telegram.ext import (
@@ -14,13 +13,6 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-
-from notifications.pre_match import run_pre_match_notifications
-from notifications.final_results import run_result_notifications
-from notifications.daily_summary import run_daily_summary
-from notifications.operational_alerts import run_operational_alerts
-from config.settings import get_settings
-
 
 # Command handlers
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -86,10 +78,6 @@ async def unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 def create_bot_application() -> Application:
     """Create and configure the Telegram bot application."""
-    settings = get_settings()
-    bot_token = settings.api_football_key  # Reuse or add TELEGRAM_BOT_TOKEN to settings
-    
-    # For now, use environment variable directly
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not bot_token:
         raise ValueError("TELEGRAM_BOT_TOKEN environment variable is required")

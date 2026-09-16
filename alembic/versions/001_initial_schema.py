@@ -304,57 +304,6 @@ def upgrade() -> None:
     )
     op.create_index('ix_shadow_perf_shadow_pred', 'shadow_prediction_performance', ['shadow_prediction_id'])
 
-    # model_artifacts table
-    op.create_table(
-        'model_artifacts',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('model_version', sa.String(100), nullable=False, unique=True),
-        sa.Column('model_type', sa.String(50), nullable=False),
-        sa.Column('training_rows', sa.Integer(), nullable=False),
-        sa.Column('metrics', sa.Text(), nullable=False),
-        sa.Column('hyperparameters', sa.Text(), nullable=True),
-        sa.Column('training_end', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('status', sa.String(50), server_default='trained', nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.PrimaryKeyConstraint('id')
-    )
-
-    # shadow_predictions table
-    op.create_table(
-        'shadow_predictions',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('model_version', sa.String(100), nullable=False),
-        sa.Column('match_id', sa.Integer(), nullable=False),
-        sa.Column('prob_home_win', sa.Float(), nullable=False),
-        sa.Column('prob_draw', sa.Float(), nullable=False),
-        sa.Column('prob_away_win', sa.Float(), nullable=False),
-        sa.Column('prob_over_2_5', sa.Float(), nullable=False),
-        sa.Column('prob_btts', sa.Float(), nullable=False),
-        sa.Column('market_probabilities', sa.Text(), nullable=True),
-        sa.Column('predicted_at', sa.DateTime(timezone=True), nullable=False),
-        sa.PrimaryKeyConstraint('id'),
-        sa.ForeignKeyConstraint(['match_id'], ['matches.id']),
-        sa.UniqueConstraint('model_version', 'match_id', name='uq_shadow_prediction')
-    )
-    op.create_index('ix_shadow_predictions_model_match', 'shadow_predictions', ['model_version', 'match_id'])
-
-    # shadow_prediction_performance table
-    op.create_table(
-        'shadow_prediction_performance',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('shadow_prediction_id', sa.Integer(), nullable=False),
-        sa.Column('was_correct', sa.Boolean(), nullable=False),
-        sa.Column('over_2_5_was_correct', sa.Boolean(), nullable=True),
-        sa.Column('btts_was_correct', sa.Boolean(), nullable=True),
-        sa.Column('brier_score', sa.Float(), nullable=False),
-        sa.Column('log_loss', sa.Float(), nullable=False),
-        sa.Column('evaluated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.PrimaryKeyConstraint('id'),
-        sa.ForeignKeyConstraint(['shadow_prediction_id'], ['shadow_predictions.id']),
-        sa.UniqueConstraint('shadow_prediction_id', name='uq_shadow_perf_shadow')
-    )
-    op.create_index('ix_shadow_perf_shadow_pred', 'shadow_prediction_performance', ['shadow_prediction_id'])
-
     # operational_events table
     op.create_table(
         'operational_events',
@@ -370,74 +319,6 @@ def upgrade() -> None:
     )
     op.create_index('ix_operational_events_component_time', 'operational_events', ['component', 'created_at'])
     op.create_index('ix_operational_events_severity', 'operational_events', ['severity'])
-
-    # model_artifacts table
-    op.create_table(
-        'model_artifacts',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('model_version', sa.String(100), nullable=False, unique=True),
-        sa.Column('model_type', sa.String(50), nullable=False),
-        sa.Column('training_rows', sa.Integer(), nullable=False),
-        sa.Column('metrics', sa.Text(), nullable=False),
-        sa.Column('hyperparameters', sa.Text(), nullable=True),
-        sa.Column('training_end', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('status', sa.String(50), server_default='trained', nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.PrimaryKeyConstraint('id')
-    )
-
-    # shadow_predictions table
-    op.create_table(
-        'shadow_predictions',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('model_version', sa.String(100), nullable=False),
-        sa.Column('match_id', sa.Integer(), nullable=False),
-        sa.Column('prob_home_win', sa.Float(), nullable=False),
-        sa.Column('prob_draw', sa.Float(), nullable=False),
-        sa.Column('prob_away_win', sa.Float(), nullable=False),
-        sa.Column('prob_over_2_5', sa.Float(), nullable=False),
-        sa.Column('prob_btts', sa.Float(), nullable=False),
-        sa.Column('market_probabilities', sa.Text(), nullable=True),
-        sa.Column('predicted_at', sa.DateTime(timezone=True), nullable=False),
-        sa.PrimaryKeyConstraint('id'),
-        sa.ForeignKeyConstraint(['match_id'], ['matches.id']),
-        sa.UniqueConstraint('model_version', 'match_id', name='uq_shadow_prediction')
-    )
-    op.create_index('ix_shadow_predictions_model_match', 'shadow_predictions', ['model_version', 'match_id'])
-
-    # shadow_prediction_performance table
-    op.create_table(
-        'shadow_prediction_performance',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('shadow_prediction_id', sa.Integer(), nullable=False),
-        sa.Column('was_correct', sa.Boolean(), nullable=False),
-        sa.Column('over_2_5_was_correct', sa.Boolean(), nullable=True),
-        sa.Column('btts_was_correct', sa.Boolean(), nullable=True),
-        sa.Column('brier_score', sa.Float(), nullable=False),
-        sa.Column('log_loss', sa.Float(), nullable=False),
-        sa.Column('evaluated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.PrimaryKeyConstraint('id'),
-        sa.ForeignKeyConstraint(['shadow_prediction_id'], ['shadow_predictions.id']),
-        sa.UniqueConstraint('shadow_prediction_id', name='uq_shadow_perf_shadow')
-    )
-    op.create_index('ix_shadow_perf_shadow_pred', 'shadow_prediction_performance', ['shadow_prediction_id'])
-
-    # operational_events table
-    op.create_table(
-        'operational_events',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('component', sa.String(100), nullable=False),
-        sa.Column('severity', sa.String(20), nullable=False),
-        sa.Column('event_type', sa.String(50), nullable=False),
-        sa.Column('message', sa.Text(), nullable=False),
-        sa.Column('context', sa.Text(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column('resolved_at', sa.DateTime(timezone=True), nullable=True),
-        sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index('ix_operational_events_component_time', 'operational_events', ['component', 'created_at'])
-    op.create_index('ix_operational_events_severity', 'operational_events', ['severity'])
-
 
 def downgrade() -> None:
     op.drop_table('operational_events')

@@ -99,7 +99,7 @@ st.plotly_chart(
         text_auto=".1%",
         color="Sonuç",
     ).update_layout(showlegend=False),
-    use_container_width=True,
+    width="stretch",
 )
 
 st.subheader("Kadro durumu")
@@ -149,7 +149,7 @@ try:
                 columns={"player_name": "Oyuncu"}
             ),
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
         )
     st.caption(
         "Kadro verisi doğrulanmış güncellik bağlamıdır; tarihsel oyuncu erişilebilirliği olmadığı için "
@@ -177,7 +177,7 @@ try:
             column.dataframe(
                 pd.DataFrame(starters)[["name", "pos"]].rename(columns={"name": "Oyuncu", "pos": "Pozisyon"}),
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
             )
         st.caption("Bu alan yalnızca API’nin onaylı ilk 11 kaydı geldiğinde görünür. Mevcut model, tarihsel ilk-11 verisi henüz olmadığı için olasılıkları sonradan yapay olarak değiştirmez.")
 except Exception as exc:
@@ -195,7 +195,13 @@ try:
         odds_rows["1"] = odds_rows["odds"].map(lambda item: (item or {}).get("home_win", "—"))
         odds_rows["X"] = odds_rows["odds"].map(lambda item: (item or {}).get("draw", "—"))
         odds_rows["2"] = odds_rows["odds"].map(lambda item: (item or {}).get("away_win", "—"))
-        st.dataframe(odds_rows[["Zaman", "bookmaker", "1", "X", "2", "Referans"]].rename(columns={"bookmaker": "Sağlayıcı"}), hide_index=True, use_container_width=True)
+        st.dataframe(
+            odds_rows[["Zaman", "bookmaker", "1", "X", "2", "Referans"]].rename(
+                columns={"bookmaker": "Sağlayıcı"}
+            ),
+            hide_index=True,
+            width="stretch",
+        )
         st.caption("Kapanış oranı, maç başlangıcından önce yakalanabilen son sağlayıcı kotasyonudur. Veri yoksa CLV hesaplanmaz.")
 except Exception as exc:
     st.warning(f"Oran geçmişi şu anda yüklenemedi: {exc}")
@@ -242,7 +248,7 @@ try:
         aspect="auto",
         color_continuous_scale="YlGnBu",
     )
-    st.plotly_chart(heatmap, use_container_width=True)
+    st.plotly_chart(heatmap, width="stretch")
     home_state = detail["home_state"]
     away_state = detail["away_state"]
 
@@ -340,8 +346,8 @@ try:
         legend={"orientation": "h", "y": -0.2},
     )
     comparison_columns = st.columns(2)
-    comparison_columns[0].plotly_chart(radar_figure, use_container_width=True)
-    comparison_columns[1].plotly_chart(form_figure, use_container_width=True)
+    comparison_columns[0].plotly_chart(radar_figure, width="stretch")
+    comparison_columns[1].plotly_chart(form_figure, width="stretch")
     st.caption("Radar 0–100 ölçeğinde normalize edilmiştir; form grafiği son beş maçın gerçek 0/1/3 puanlarını gösterir.")
 
     elo_cols = st.columns(3)
