@@ -173,3 +173,37 @@ güncellemesini durdurmaz.
 - Anahtarlar kaynak kodda, commit geçmişinde veya uygulama ekranlarında
   tutulmaz/gösterilmez. Bir anahtar sızarsa ilgili sağlayıcıdan hemen
   yenileyin.
+
+## Açık Kaynak Kütüphane Lisansları ve Kaynaklar
+
+Bu proje aşağıdaki açık kaynak kütüphanelerden yararlanmaktadır:
+
+| Kütüphane | Lisans | Kullanım |
+|-----------|--------|---------|
+| [Optuna](https://github.com/optuna/optuna) | MIT | XGBoost hiperparametre optimizasyonu |
+| [mplsoccer](https://github.com/andrewRowlinson/mplsoccer) | MIT | Taktiksel saha görselleştirmeleri (şut haritası, pas ağı, ısı haritası) |
+| [socceraction](https://github.com/ML-KULeuven/socceraction) | MIT | SPADL event dönüşümü, xT hesaplama |
+| [soccerdata](https://github.com/probberechts/soccerdata) | MIT | FBref fikstür ve istatistik scraping |
+| [statsbombpy](https://github.com/statsbomb/statsbombpy) | MIT | StatsBomb Open Data API |
+
+### StatsBomb Open Data Lisans Bildirimi
+
+Bu uygulama, StatsBomb Open Data setlerini **yalnızca araştırma ve geliştirme
+amacıyla** kullanmaktadır.  StatsBomb Open Data **Creative Commons
+Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)** lisansı altında
+dağıtılmaktadır.
+
+> StatsBomb Open Data is provided under a [Creative Commons
+> Attribution-NonCommercial 4.0 International License](https://creativecommons.org/licenses/by-nc/4.0/).
+> Please visit [statsbomb.com/open-data](https://statsbomb.com/open-data/)
+> for the full terms.
+
+Bu veri:
+- Ticari amaçla **kullanılamaz**.
+- Yeniden dağıtılırken StatsBomb'a **atıf yapılmalıdır**.
+- Üretim tahmin modellerini beslemek için değil; görselleştirme
+  ve analiz demosu için kullanılmaktadır.
+
+StatsBomb Open Data yoksa (`statsbombpy` kurulu değilse veya eşleşen maç
+bulunamazsa) uygulama sessizce devre dışı kalır ve gerçek API Football
+verisiyle çalışmaya devam eder.

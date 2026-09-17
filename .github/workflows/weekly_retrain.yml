@@ -44,6 +44,9 @@ jobs:
       - run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
       - name: Run unit tests
         run: python -m pytest -q
+      - name: Drift check — abort on critical data drift
+        run: python -m evaluation.drift_check --fail-on-critical
+        continue-on-error: false
       - name: Train and validate models
         run: python -m models.train_model
       - name: Register newest model as a shadow candidate

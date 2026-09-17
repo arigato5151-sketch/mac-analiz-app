@@ -18,6 +18,7 @@ from app.components.monte_carlo import simulate_top_pick_accuracy
 from app.components.ui import configure_page, disclaimer
 from config.leagues import LEAGUES_BY_ID
 from models.decision_policy import MINIMUM_ACTIONABLE_1X2_CONFIDENCE
+from monitoring.drift_service import DriftMonitoringService
 
 
 configure_page("Model Performansı")
@@ -103,6 +104,66 @@ if metadata:
         )
 else:
     st.warning("Kaydedilmiş model değerlendirme metadatası bulunamadı.")
+
+st.subheader("Model ve Veri Sapma Analizi (Drift & Kalite)")
+try:
+    drift_service = DriftMonitoringService()
+    upcoming_data = load_upcoming_dashboard(7)
+    perf_data = load_prediction_performance()
+
+    from models.feature_engineering import FEATURE_COLUMNS
+    feature_cols = list(FEATURE_COLUMNS)
+
+    if upcoming_data.empty and perf_data.empty:
+        st.info("Drift analizi için yeterli tahmin veya değerlendirme verisi bulunmuyor.")
+    else:
+        ref_metrics = metadata.get("metrics") if metadata else None
+        drift_report = drift_service.generate_report(
+            reference_features=pd.DataFrame(columns=feature_cols),
+            current_features=pd.DataFrame(columns=feature_cols),
+            feature_columns=feature_cols,
+            reference_predictions=perf_data if not perf_data.empty else None,
+            current_predictions=upcoming_data if not upcoming_data.empty else None,
+            performance_evaluations=perf_data if not perf_data.empty else None,
+            reference_metrics=ref_metrics,
+        )
+
+        status_colors = {
+            "OK": ("green", "✅ Normal (Sapma Yok)"),
+            "WARNING": ("orange", "⚠️ Dikkat (Hafif Sapma)"),
+            "CRITICAL": ("red", "🚨 Kritik Sapma"),
+        }
+        color, status_text = status_colors.get(drift_report.status, ("gray", drift_report.status))
+        st.markdown(f"**Drift Durumu:** :{color}[{status_text}]")
+
+        drift_cols = st.columns(4)
+        drift_cols[0].metric(
+            "Sapan Özellik Oranı",
+            f"%{drift_report.drifted_features_share * 100:.1f}",
+            f"{drift_report.drifted_features_count}/{drift_report.total_features_count} özellik",
+        )
+        conf_mean = drift_report.confidence_summary.get("mean_confidence")
+        drift_cols[1].metric(
+            "Ortalama Güven",
+            f"%{conf_mean * 100:.1f}" if conf_mean is not None else "—",
+        )
+        low_conf = drift_report.confidence_summary.get("low_confidence_share")
+        drift_cols[2].metric(
+            "Düşük Güven Payı (<%40)",
+            f"%{low_conf * 100:.1f}" if low_conf is not None else "—",
+        )
+        cur_dist = drift_report.class_distribution_shift.get("current", {})
+        if cur_dist:
+            dist_str = f"Ev %{cur_dist.get('home_win', 0)*100:.0f} | B %{cur_dist.get('draw', 0)*100:.0f} | Dep %{cur_dist.get('away_win', 0)*100:.0f}"
+        else:
+            dist_str = "—"
+        drift_cols[3].metric("Tahmin Dağılımı", dist_str)
+
+        if drift_report.critical_alerts:
+            for alert in drift_report.critical_alerts:
+                st.error(f"🚨 {alert}")
+except Exception as drift_exc:
+    st.info(f"Drift analizi şu anda yüklenemedi: {drift_exc}")
 
 st.subheader("Monte Carlo tahmin belirsizliği")
 try:

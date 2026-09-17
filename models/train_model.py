@@ -39,6 +39,7 @@ from models.feature_engineering import (
     FEATURE_COLUMNS,
     build_training_dataset,
 )
+from models.optimizer import optimize_xgb_hyperparameters
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,8 +301,11 @@ def _fit_best_model(
     fit_weights: np.ndarray,
     x_validation: pd.DataFrame,
     y_validation: np.ndarray,
+    optimize_hyperparams: bool = False,
+    optuna_trials: int = 25,
+    seed: int = 42,
 ) -> tuple[XGBClassifier, str, float]:
-    """Select a small, bounded preset search on a future validation slice."""
+    """Select best model using preset search or Optuna chronological optimization."""
     best: tuple[XGBClassifier, str, float] | None = None
     presets = BINARY_MODEL_PRESETS if binary else RESULT_MODEL_PRESETS
     for preset in presets:
@@ -325,6 +329,28 @@ def _fit_best_model(
             best = model, preset, loss
     if best is None:  # Defensive: preset dictionaries are module constants.
         raise RuntimeError("No model candidate was evaluated")
+
+    if optimize_hyperparams:
+        baseline_model, baseline_preset, baseline_loss = best
+        opt_result = optimize_xgb_hyperparameters(
+            binary=binary,
+            x_fit=x_fit,
+            y_fit=y_fit,
+            fit_weights=fit_weights,
+            x_validation=x_validation,
+            y_validation=y_validation,
+            baseline_model=baseline_model,
+            n_trials=optuna_trials,
+            seed=seed,
+        )
+        chosen_model = opt_result.best_model
+        setattr(chosen_model, "optuna_report", opt_result.to_dict())
+        return (
+            chosen_model,
+            opt_result.selected_strategy,
+            opt_result.best_metrics.get("log_loss", baseline_loss),
+        )
+
     return best
 
 
@@ -419,7 +445,12 @@ def _compute_shap_importance(
 
 
 def train_models(
-    features: pd.DataFrame, labels: pd.DataFrame
+    features: pd.DataFrame,
+    labels: pd.DataFrame,
+    *,
+    optimize_hyperparams: bool = False,
+    optuna_trials: int = 25,
+    seed: int = 42,
 ) -> tuple[dict[str, Any], EvaluationMetrics]:
     if tuple(features.columns) != FEATURE_COLUMNS:
         raise ValueError("Feature columns do not match the model contract")
@@ -446,6 +477,9 @@ def train_models(
         fit_weights=fit_weights,
         x_validation=x_validation,
         y_validation=y_result[validation_slice],
+        optimize_hyperparams=optimize_hyperparams,
+        optuna_trials=optuna_trials,
+        seed=seed,
     )
     over_model, over_preset, over_validation_loss = _fit_best_model(
         binary=True,
@@ -454,6 +488,9 @@ def train_models(
         fit_weights=fit_weights,
         x_validation=x_validation.loc[:, BINARY_FEATURE_COLUMNS],
         y_validation=y_over[validation_slice],
+        optimize_hyperparams=optimize_hyperparams,
+        optuna_trials=optuna_trials,
+        seed=seed,
     )
     btts_model, btts_preset, btts_validation_loss = _fit_best_model(
         binary=True,
@@ -462,6 +499,9 @@ def train_models(
         fit_weights=fit_weights,
         x_validation=x_validation.loc[:, BINARY_FEATURE_COLUMNS],
         y_validation=y_btts[validation_slice],
+        optimize_hyperparams=optimize_hyperparams,
+        optuna_trials=optuna_trials,
+        seed=seed,
     )
 
     validation_result_anchor = x_validation[
@@ -619,18 +659,25 @@ test_start=test_dates.iloc[0].isoformat(),
             "training_half_life_days": 365.0,
         },
         "model_selection": {
-            "method": "bounded_chronological_preset_search",
+            "method": (
+                "optuna_chronological_search"
+                if optimize_hyperparams
+                else "bounded_chronological_preset_search"
+            ),
             "result": {
                 "preset": result_preset,
                 "validation_log_loss": result_validation_loss,
+                "optuna_report": getattr(result_model, "optuna_report", None),
             },
             "over_2_5": {
                 "preset": over_preset,
                 "validation_log_loss": over_validation_loss,
+                "optuna_report": getattr(over_model, "optuna_report", None),
             },
             "btts": {
                 "preset": btts_preset,
                 "validation_log_loss": btts_validation_loss,
+                "optuna_report": getattr(btts_model, "optuna_report", None),
             },
         },
         "blend": {
@@ -791,12 +838,28 @@ def main() -> None:
     )
     parser.add_argument("--publish-latest", action="store_true")
     parser.add_argument("--report-walk-forward", action="store_true")
+    parser.add_argument(
+        "--optimize",
+        action="store_true",
+        help="Optimize XGBoost hyperparameters using Optuna on chronological validation",
+    )
+    parser.add_argument(
+        "--optuna-trials",
+        type=int,
+        default=25,
+        help="Number of Optuna trials per model if --optimize is set",
+    )
     args = parser.parse_args()
     settings = get_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     matches = load_completed_matches(db)
     features, labels = build_training_dataset(matches)
-    bundle, metrics = train_models(features, labels)
+    bundle, metrics = train_models(
+        features,
+        labels,
+        optimize_hyperparams=args.optimize,
+        optuna_trials=args.optuna_trials,
+    )
     walk_forward = walk_forward_report(features, labels) if args.report_walk_forward else []
     model_path, metadata_path = save_model_bundle(
         bundle, args.output_dir, publish_latest=args.publish_latest
