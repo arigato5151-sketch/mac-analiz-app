@@ -1,10 +1,9 @@
-"""Unit tests for StatsBomb adapter and mplsoccer pitch visuals."""
+"""Unit tests for StatsBomb adapter with dependency injection and mplsoccer visuals."""
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -20,37 +19,144 @@ from app.components.pitch_visuals import (
 from data_pipeline.statsbomb_adapter import StatsBombAdapter
 
 
-def test_statsbomb_adapter_graceful_fallback_on_network_error(tmp_path):
+class FakeStatsBombProvider:
+    """Mock StatsBomb provider to avoid real network calls and test DI."""
+
+    def __init__(
+        self,
+        comps: pd.DataFrame | None = None,
+        matches: pd.DataFrame | None = None,
+        events: pd.DataFrame | None = None,
+        raise_on_comps: bool = False,
+        raise_on_events: bool = False,
+    ) -> None:
+        self._comps = (
+            comps
+            if comps is not None
+            else pd.DataFrame([
+                {
+                    "competition_id": 43,
+                    "season_id": 106,
+                    "competition_name": "FIFA World Cup",
+                    "season_name": "2022",
+                }
+            ])
+        )
+        self._matches = (
+            matches
+            if matches is not None
+            else pd.DataFrame([
+                {
+                    "match_id": 3869685,
+                    "match_date": "2022-12-18",
+                    "home_team": "Argentina",
+                    "away_team": "France",
+                }
+            ])
+        )
+        self._events = (
+            events
+            if events is not None
+            else pd.DataFrame([
+                {
+                    "type": "Shot",
+                    "team": "Argentina",
+                    "location": [105.0, 40.0],
+                    "shot_statsbomb_xg": 0.45,
+                    "shot_outcome": "Goal",
+                }
+            ])
+        )
+        self.raise_on_comps = raise_on_comps
+        self.raise_on_events = raise_on_events
+
+    def competitions(self) -> pd.DataFrame:
+        if self.raise_on_comps:
+            raise ConnectionError("Simulated network error on competitions")
+        return self._comps
+
+    def matches(self, competition_id: int, season_id: int) -> pd.DataFrame:
+        return self._matches
+
+    def events(self, match_id: int) -> pd.DataFrame:
+        if self.raise_on_events:
+            raise ConnectionError("Simulated network error on events")
+        return self._events
+
+
+def test_statsbomb_adapter_package_not_installed(tmp_path: Path):
+    """When no provider is given and statsbombpy is not available, returns empty results gracefully."""
     adapter = StatsBombAdapter(cache_dir=tmp_path)
-    with patch("data_pipeline.statsbomb_adapter.sb.competitions", side_effect=Exception("Network error")):
-        df = adapter.get_competitions()
-        assert isinstance(df, pd.DataFrame)
-        assert df.empty
+    adapter._provider = None
+    adapter._available = False
+
+    assert adapter.is_available is False
+    assert adapter.get_competitions().empty
+    assert adapter.get_matches(43, 106).empty
+    assert adapter.get_events(12345).empty
+    assert adapter.find_match_by_teams("Argentina", "France") is None
 
 
-def test_statsbomb_adapter_caching(tmp_path):
-    adapter = StatsBombAdapter(cache_dir=tmp_path)
-    mock_comps = pd.DataFrame([
-        {"competition_id": 43, "season_id": 106, "competition_name": "FIFA World Cup"}
-    ])
-    with patch("data_pipeline.statsbomb_adapter.sb.competitions", return_value=mock_comps):
-        df1 = adapter.get_competitions()
-        assert len(df1) == 1
-        assert (tmp_path / "competitions.parquet").exists()
+def test_statsbomb_adapter_network_error_fallback(tmp_path: Path):
+    """When the provider raises a network error, empty DataFrame is returned without crashing."""
+    failing_provider = FakeStatsBombProvider(raise_on_comps=True)
+    adapter = StatsBombAdapter(cache_dir=tmp_path, provider=failing_provider)
 
-    # Second read from cache without hitting sb.competitions
-    with patch("data_pipeline.statsbomb_adapter.sb.competitions", side_effect=RuntimeError("Must not call")):
-        df2 = adapter.get_competitions()
-        assert len(df2) == 1
-        assert df2.iloc[0]["competition_name"] == "FIFA World Cup"
+    df = adapter.get_competitions()
+    assert isinstance(df, pd.DataFrame)
+    assert df.empty
 
 
-def test_statsbomb_missing_match_returns_none(tmp_path):
-    adapter = StatsBombAdapter(cache_dir=tmp_path)
-    with patch("data_pipeline.statsbomb_adapter.sb.competitions", return_value=pd.DataFrame()):
-        result = adapter.find_match_by_teams("NonExistent FC", "Fake United")
-        assert result is None
+def test_statsbomb_adapter_cache_miss_then_hit(tmp_path: Path):
+    """Cache miss fetches from provider; subsequent call reads from disk cache even if provider fails."""
+    provider = FakeStatsBombProvider()
+    adapter = StatsBombAdapter(cache_dir=tmp_path, provider=provider)
 
+    # Cache miss -> reads from provider, writes parquet
+    df1 = adapter.get_competitions()
+    assert len(df1) == 1
+    assert (tmp_path / "competitions.parquet").exists()
+
+    # Cache hit -> now provider fails, but adapter reads from parquet
+    failing_provider = FakeStatsBombProvider(raise_on_comps=True)
+    adapter_cached = StatsBombAdapter(cache_dir=tmp_path, provider=failing_provider)
+    df2 = adapter_cached.get_competitions()
+    assert len(df2) == 1
+    assert df2.iloc[0]["competition_name"] == "FIFA World Cup"
+
+
+def test_statsbomb_adapter_match_found_with_normalization(tmp_path: Path):
+    """Fuzzy / token-based matching correctly matches names with different casing or accents."""
+    provider = FakeStatsBombProvider()
+    adapter = StatsBombAdapter(cache_dir=tmp_path, provider=provider)
+
+    match = adapter.find_match_by_teams("argentina", "FRANCE", year=2022)
+    assert match is not None
+    assert int(match["match_id"]) == 3869685
+
+
+def test_statsbomb_adapter_match_not_found(tmp_path: Path):
+    """Non-existent team returns None without error."""
+    provider = FakeStatsBombProvider()
+    adapter = StatsBombAdapter(cache_dir=tmp_path, provider=provider)
+
+    result = adapter.find_match_by_teams("Arsenal FC", "Chelsea FC")
+    assert result is None
+
+
+def test_statsbomb_adapter_empty_events(tmp_path: Path):
+    """Empty events returned gracefully."""
+    empty_provider = FakeStatsBombProvider(events=pd.DataFrame())
+    adapter = StatsBombAdapter(cache_dir=tmp_path, provider=empty_provider)
+
+    events = adapter.get_events(3869685)
+    assert isinstance(events, pd.DataFrame)
+    assert events.empty
+
+
+# ---------------------------------------------------------------------------
+# Visuals tests (mplsoccer)
+# ---------------------------------------------------------------------------
 
 def test_render_shot_map_with_synthetic_events():
     events = pd.DataFrame([
@@ -74,7 +180,6 @@ def test_render_shot_map_with_synthetic_events():
     assert isinstance(fig, plt.Figure)
     plt.close(fig)
 
-    # Empty events returns None gracefully
     assert render_shot_map(pd.DataFrame()) is None
 
 
@@ -96,7 +201,6 @@ def test_render_pass_network_with_synthetic_events():
     assert isinstance(fig, plt.Figure)
     plt.close(fig)
 
-    # Insufficient events returns None gracefully
     assert render_pass_network(pd.DataFrame(), team_name="Team A") is None
 
 
@@ -124,6 +228,4 @@ def test_render_player_radar():
     assert isinstance(fig, plt.Figure)
     plt.close(fig)
 
-    # Mismatched params and values returns None gracefully
     assert render_player_radar(params, values[:3]) is None
-

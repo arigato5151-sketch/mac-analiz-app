@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import warnings
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -10,6 +13,7 @@ from xgboost import XGBClassifier
 from models.optimizer import (
     OPTUNA_AVAILABLE,
     OptimizationResult,
+    _clean_probabilities,
     binary_brier_score,
     build_candidate_xgb,
     compute_composite_score,
@@ -84,19 +88,59 @@ def test_compute_composite_score_includes_all_metrics():
     )
 
 
+def test_clean_probabilities_sanitizes_unnormalized_and_corrupt_inputs():
+    """Verify _clean_probabilities handles NaN, inf, negatives, and normalizes rows."""
+    # Matrix with negative, NaN, inf, and unnormalized rows
+    dirty_probs = np.array([
+        [0.7, 0.2, 0.3],     # sums to 1.2
+        [-0.1, 0.5, 0.5],    # negative value
+        [np.nan, 0.5, 0.5],  # NaN value
+        [0.0, 0.0, 0.0],     # all zeros
+    ])
+    clean = _clean_probabilities(dirty_probs, binary=False)
+    assert clean.shape == (4, 3)
+    assert np.all(clean >= 0.0)
+    assert np.all(np.isfinite(clean))
+    # Every row must sum to exactly 1.0
+    assert np.allclose(clean.sum(axis=1), 1.0)
+
+
+def test_probability_normalization_eliminates_sklearn_warning():
+    """Verify compute_composite_score produces NO 'y_prob values do not sum to one' warning."""
+    y_true = np.array([0, 1, 2])
+    # Floating point variations that normally trigger sklearn's UserWarning
+    unnormalized_probs = np.array([
+        [0.70000005, 0.19999995, 0.10000005],
+        [0.10000001, 0.79999999, 0.10000005],
+        [0.20000002, 0.20000002, 0.60000002],
+    ])
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        score, metrics = compute_composite_score(y_true, unnormalized_probs, binary=False)
+        assert score > 0
+
+    sum_to_one_warnings = [
+        w for w in recorded
+        if "y_prob values do not sum to one" in str(w.message)
+    ]
+    assert len(sum_to_one_warnings) == 0, f"Unexpected warning: {sum_to_one_warnings}"
+
+
 def test_chronological_split_and_no_data_leakage():
     df, y, dates = _synthetic_dataset(n_samples=500, binary=False)
-    # Split chronologically
     fit_idx = slice(0, 350)
     val_idx = slice(350, 450)
+    test_idx = slice(450, 500)
 
     fit_dates = dates.iloc[fit_idx]
     val_dates = dates.iloc[val_idx]
+    test_dates = dates.iloc[test_idx]
 
-    # Verification: Validation strictly after fit in time
+    # Verification: Chronological isolation
     assert fit_dates.max() < val_dates.min()
+    assert val_dates.max() < test_dates.min()
 
-    # Fit a quick baseline
     baseline = XGBClassifier(
         objective="multi:softprob",
         num_class=3,
@@ -112,6 +156,7 @@ def test_chronological_split_and_no_data_leakage():
         verbose=False,
     )
 
+    # Optuna runs only on fit and validation slices; test slice is unseen!
     result = optimize_xgb_hyperparameters(
         binary=False,
         x_fit=df.iloc[fit_idx],
@@ -126,7 +171,6 @@ def test_chronological_split_and_no_data_leakage():
     )
     assert isinstance(result, OptimizationResult)
     assert result.trials_count >= 1
-    # Check that trial report records duration, metrics and params
     for trial in result.trials_report:
         assert trial["duration_seconds"] > 0
         assert "log_loss" in trial
@@ -139,7 +183,6 @@ def test_promotion_guard_retains_baseline_when_candidate_is_worse():
     fit_idx = slice(0, 200)
     val_idx = slice(200, 300)
 
-    # Create a baseline model
     baseline = XGBClassifier(
         objective="binary:logistic",
         n_estimators=30,
@@ -154,7 +197,6 @@ def test_promotion_guard_retains_baseline_when_candidate_is_worse():
         verbose=False,
     )
 
-    # When n_trials is 0, baseline must be retained without modification
     result = optimize_xgb_hyperparameters(
         binary=True,
         x_fit=df.iloc[fit_idx],
@@ -169,6 +211,45 @@ def test_promotion_guard_retains_baseline_when_candidate_is_worse():
     assert result.improved is False
     assert result.selected_strategy == "baseline_preset"
     assert result.best_model == baseline
+
+
+def test_optuna_mock_unavailable_fallback():
+    """When OPTUNA_AVAILABLE is False, gracefully returns baseline model."""
+    df, y, _ = _synthetic_dataset(n_samples=200, binary=False)
+    fit_idx = slice(0, 150)
+    val_idx = slice(150, 200)
+
+    baseline = XGBClassifier(
+        objective="multi:softprob",
+        num_class=3,
+        n_estimators=10,
+        max_depth=2,
+        eval_metric="mlogloss",
+        random_state=42,
+    )
+    baseline.fit(
+        df.iloc[fit_idx],
+        y[fit_idx],
+        eval_set=[(df.iloc[val_idx], y[val_idx])],
+        verbose=False,
+    )
+
+    with patch("models.optimizer.OPTUNA_AVAILABLE", False):
+        result = optimize_xgb_hyperparameters(
+            binary=False,
+            x_fit=df.iloc[fit_idx],
+            y_fit=y[fit_idx],
+            fit_weights=None,
+            x_validation=df.iloc[val_idx],
+            y_validation=y[val_idx],
+            baseline_model=baseline,
+            n_trials=5,
+            seed=42,
+        )
+    assert result.improved is False
+    assert result.selected_strategy == "baseline_preset"
+    assert result.best_model == baseline
+    assert result.trials_count == 0
 
 
 def test_reproducibility_with_seed():
@@ -218,4 +299,3 @@ def test_reproducibility_with_seed():
     )
     assert run1.best_params == run2.best_params
     assert run1.best_composite_score == pytest.approx(run2.best_composite_score)
-

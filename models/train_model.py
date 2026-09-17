@@ -40,6 +40,11 @@ from models.feature_engineering import (
     build_training_dataset,
 )
 from models.optimizer import optimize_xgb_hyperparameters
+from monitoring.feature_snapshot import (
+    CURRENT_SNAPSHOT_NAME,
+    REFERENCE_SNAPSHOT_NAME,
+    save_feature_snapshot,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -318,10 +323,15 @@ def _fit_best_model(
             verbose=False,
         )
         probabilities = model.predict_proba(x_validation)
+        if binary:
+            prob_target = probabilities[:, 1]
+        else:
+            prob_sums = probabilities.sum(axis=1, keepdims=True)
+            prob_target = probabilities / np.where(prob_sums == 0, 1.0, prob_sums)
         loss = float(
             log_loss(
                 y_validation,
-                probabilities[:, 1] if binary else probabilities,
+                prob_target,
                 labels=[0, 1] if binary else [0, 1, 2],
             )
         )
@@ -696,6 +706,8 @@ test_start=test_dates.iloc[0].isoformat(),
         "confidence_coverage": confidence_coverage_report(
             evaluated_labels, result_probabilities
         ),
+        "_x_fit_snapshot": x_fit,
+        "_x_val_snapshot": x_validation,
     }
     return bundle, metrics
 
@@ -707,7 +719,17 @@ def save_model_bundle(
     version = datetime.now(timezone.utc).strftime("v%Y%m%dT%H%M%SZ")
     model_path = output_dir / f"model_{version}.joblib"
     metadata_path = output_dir / f"model_{version}.json"
-    versioned_bundle = {**bundle, "model_version": model_path.stem}
+
+    # Persist feature snapshots for drift monitoring without storing bulky DataFrames in .joblib
+    bundle_copy = dict(bundle)
+    ref_snap = bundle_copy.pop("_x_fit_snapshot", None)
+    val_snap = bundle_copy.pop("_x_val_snapshot", None)
+    if ref_snap is not None:
+        save_feature_snapshot(ref_snap, output_dir / REFERENCE_SNAPSHOT_NAME)
+    if val_snap is not None:
+        save_feature_snapshot(val_snap, output_dir / CURRENT_SNAPSHOT_NAME)
+
+    versioned_bundle = {**bundle_copy, "model_version": model_path.stem}
     temporary_path = model_path.with_suffix(".tmp")
     joblib.dump(versioned_bundle, temporary_path, compress=3)
     os.replace(temporary_path, model_path)

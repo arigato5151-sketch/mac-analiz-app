@@ -107,25 +107,47 @@ else:
 
 st.subheader("Model ve Veri Sapma Analizi (Drift & Kalite)")
 try:
-    drift_service = DriftMonitoringService()
+    from monitoring.feature_snapshot import (
+        CURRENT_SNAPSHOT_NAME,
+        REFERENCE_SNAPSHOT_NAME,
+        extract_snapshot_metadata,
+        load_feature_snapshot,
+        snapshot_feature_columns,
+    )
+
+    models_dir = PROJECT_ROOT / "models" / "saved_models"
+    ref_snapshot = load_feature_snapshot(models_dir / REFERENCE_SNAPSHOT_NAME)
+    cur_snapshot = load_feature_snapshot(models_dir / CURRENT_SNAPSHOT_NAME)
+    ref_meta = extract_snapshot_metadata(ref_snapshot)
+    cur_meta = extract_snapshot_metadata(cur_snapshot)
+
     upcoming_data = load_upcoming_dashboard(7)
     perf_data = load_prediction_performance()
 
-    from models.feature_engineering import FEATURE_COLUMNS
-    feature_cols = list(FEATURE_COLUMNS)
-
-    if upcoming_data.empty and perf_data.empty:
-        st.info("Drift analizi için yeterli tahmin veya değerlendirme verisi bulunmuyor.")
+    if not ref_meta["available"] or not cur_meta["available"]:
+        st.warning(
+            "⚠️ **Drift hesaplanamadı — feature snapshot bulunamadı.** "
+            "Model eğitimi sırasında kronolojik feature snapshot'ları kaydedildiğinde "
+            "özellik sapma analizi burada görünecektir."
+        )
+        if not perf_data.empty:
+            st.caption(f"Canlı değerlendirme verisi mevcut ({len(perf_data)} maç), ancak özellik referansı eksik.")
     else:
+        feature_cols = snapshot_feature_columns(ref_snapshot)
+        drift_service = DriftMonitoringService()
         ref_metrics = metadata.get("metrics") if metadata else None
+
         drift_report = drift_service.generate_report(
-            reference_features=pd.DataFrame(columns=feature_cols),
-            current_features=pd.DataFrame(columns=feature_cols),
+            reference_features=ref_snapshot,
+            current_features=cur_snapshot,
             feature_columns=feature_cols,
             reference_predictions=perf_data if not perf_data.empty else None,
             current_predictions=upcoming_data if not upcoming_data.empty else None,
             performance_evaluations=perf_data if not perf_data.empty else None,
             reference_metrics=ref_metrics,
+            data_source="parquet_snapshots",
+            reference_period=ref_meta.get("saved_at", "")[:19] if ref_meta.get("saved_at") else "",
+            current_period=cur_meta.get("saved_at", "")[:19] if cur_meta.get("saved_at") else "",
         )
 
         status_colors = {
@@ -135,6 +157,10 @@ try:
         }
         color, status_text = status_colors.get(drift_report.status, ("gray", drift_report.status))
         st.markdown(f"**Drift Durumu:** :{color}[{status_text}]")
+
+        prov_col1, prov_col2 = st.columns(2)
+        prov_col1.caption(f"**Referans Dönem:** {ref_meta['rows']:,} satır · {ref_meta.get('saved_at', 'Bilinmiyor')[:19]}")
+        prov_col2.caption(f"**Güncel Dönem:** {cur_meta['rows']:,} satır · {cur_meta.get('saved_at', 'Bilinmiyor')[:19]}")
 
         drift_cols = st.columns(4)
         drift_cols[0].metric(
@@ -147,11 +173,16 @@ try:
             "Ortalama Güven",
             f"%{conf_mean * 100:.1f}" if conf_mean is not None else "—",
         )
-        low_conf = drift_report.confidence_summary.get("low_confidence_share")
+
+        # Performance drift metrics (calculated safely without KeyError on log_loss)
+        p_drift = drift_report.performance_drift
+        ll_val = p_drift.get("log_loss")
         drift_cols[2].metric(
-            "Düşük Güven Payı (<%40)",
-            f"%{low_conf * 100:.1f}" if low_conf is not None else "—",
+            "Canlı Log Loss",
+            f"{ll_val:.3f}" if ll_val is not None else "Hesaplanamadı",
+            help="actual_result ve olasılıklardan hesaplanır. Yetersiz örneklemde 'Hesaplanamadı' gösterilir.",
         )
+
         cur_dist = drift_report.class_distribution_shift.get("current", {})
         if cur_dist:
             dist_str = f"Ev %{cur_dist.get('home_win', 0)*100:.0f} | B %{cur_dist.get('draw', 0)*100:.0f} | Dep %{cur_dist.get('away_win', 0)*100:.0f}"

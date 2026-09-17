@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -65,15 +65,52 @@ class OptimizationResult:
         }
 
 
+def _clean_probabilities(probabilities: np.ndarray, *, binary: bool) -> np.ndarray:
+    """Clean, sanitize and row-wise normalize probabilities.
+
+    Eliminates scikit-learn 'y_prob values do not sum to one' warnings by ensuring:
+    - No NaNs or infinities (replaced with uniform values).
+    - No negative numbers (clipped to zero).
+    - Every row strictly sums to 1.0.
+    """
+    prob = np.array(probabilities, dtype=float)
+    prob = np.where(np.isfinite(prob), prob, 0.0)
+    prob = np.maximum(prob, 0.0)
+
+    if binary:
+        if prob.ndim == 1:
+            return np.clip(prob, 0.0, 1.0)
+        # 2D binary matrix (N, 2)
+        row_sums = prob.sum(axis=1, keepdims=True)
+        zero_rows = (row_sums == 0).flatten()
+        prob[zero_rows] = 0.5
+        row_sums = prob.sum(axis=1, keepdims=True)
+        return prob / row_sums
+    else:
+        # Multiclass matrix (N, C)
+        n_classes = prob.shape[1] if prob.ndim > 1 else 3
+        if prob.ndim == 1:
+            prob = np.eye(n_classes)[prob.astype(int)]
+        row_sums = prob.sum(axis=1, keepdims=True)
+        zero_rows = (row_sums == 0).flatten()
+        prob[zero_rows] = 1.0 / n_classes
+        row_sums = prob.sum(axis=1, keepdims=True)
+        return prob / row_sums
+
+
 def multiclass_brier_score(y_true: np.ndarray, probabilities: np.ndarray) -> float:
     """Compute multiclass Brier score sum((p - y)^2)."""
-    one_hot = np.eye(probabilities.shape[1], dtype=float)[y_true]
-    return float(np.mean(np.sum((probabilities - one_hot) ** 2, axis=1)))
+    clean_p = _clean_probabilities(probabilities, binary=False)
+    one_hot = np.eye(clean_p.shape[1], dtype=float)[y_true]
+    return float(np.mean(np.sum((clean_p - one_hot) ** 2, axis=1)))
 
 
 def binary_brier_score(y_true: np.ndarray, probabilities: np.ndarray) -> float:
     """Compute binary Brier score mean((p - y)^2)."""
-    return float(np.mean((probabilities - y_true) ** 2))
+    clean_p = _clean_probabilities(probabilities, binary=True)
+    if clean_p.ndim == 2:
+        clean_p = clean_p[:, 1]
+    return float(np.mean((clean_p - y_true) ** 2))
 
 
 def compute_composite_score(
@@ -87,23 +124,24 @@ def compute_composite_score(
 ) -> tuple[float, dict[str, float]]:
     """Compute multi-metric objective: Log Loss + Brier Score + 0.5 * ECE."""
     y_arr = np.asarray(y_true, dtype=int)
-    prob_arr = np.asarray(probabilities, dtype=float)
+    clean_prob = _clean_probabilities(probabilities, binary=binary)
 
     if binary:
-        prob_1 = prob_arr[:, 1] if prob_arr.ndim == 2 else prob_arr
-        loss = float(log_loss(y_arr, prob_1, labels=[0, 1]))
+        prob_1 = clean_prob[:, 1] if clean_prob.ndim == 2 else clean_prob
+        prob_1_loss = np.clip(prob_1, 1e-15, 1.0 - 1e-15)
+        loss = float(log_loss(y_arr, prob_1_loss, labels=[0, 1]))
         brier = binary_brier_score(y_arr, prob_1)
-        # Expected calibration error for binary
         pred_label = (prob_1 >= 0.5).astype(int)
         acc = float(accuracy_score(y_arr, pred_label))
-        # 2D probabilities for ECE computation
-        prob_2d = np.column_stack([1.0 - prob_1, prob_1]) if prob_arr.ndim == 1 else prob_arr
+        prob_2d = np.column_stack([1.0 - prob_1, prob_1]) if clean_prob.ndim == 1 else clean_prob
         ece = float(expected_calibration_error(y_arr, prob_2d))
     else:
-        loss = float(log_loss(y_arr, prob_arr, labels=[0, 1, 2]))
-        brier = multiclass_brier_score(y_arr, prob_arr)
-        acc = float(accuracy_score(y_arr, prob_arr.argmax(axis=1)))
-        ece = float(expected_calibration_error(y_arr, prob_arr))
+        loss_prob = np.clip(clean_prob, 1e-15, 1.0)
+        loss_prob /= loss_prob.sum(axis=1, keepdims=True)
+        loss = float(log_loss(y_arr, loss_prob, labels=[0, 1, 2]))
+        brier = multiclass_brier_score(y_arr, clean_prob)
+        acc = float(accuracy_score(y_arr, clean_prob.argmax(axis=1)))
+        ece = float(expected_calibration_error(y_arr, clean_prob))
 
     composite = (
         weight_log_loss * loss
@@ -171,15 +209,15 @@ def optimize_xgb_hyperparameters(
     seed: int = 42,
 ) -> OptimizationResult:
     """Optimize XGBoost hyperparameters with Optuna using strict chronological validation.
-    
+
     Guarantees:
     - Never uses future data in fit slice.
     - Evaluates strictly on chronological future validation slice.
     - Uses multi-metric objective: Log Loss + Brier score + 0.5 * ECE.
     - Preserves baseline model if candidate trials do not improve performance.
     """
-    # 1. Evaluate baseline model on validation set
-    baseline_probabilities = baseline_model.predict_proba(x_validation)
+    baseline_raw_probs = baseline_model.predict_proba(x_validation)
+    baseline_probabilities = _clean_probabilities(baseline_raw_probs, binary=binary)
     baseline_composite, baseline_metrics = compute_composite_score(
         y_validation, baseline_probabilities, binary=binary
     )
@@ -227,7 +265,8 @@ def optimize_xgb_hyperparameters(
             eval_set=[(x_validation, y_validation)],
             verbose=False,
         )
-        probabilities = model.predict_proba(x_validation)
+        raw_probabilities = model.predict_proba(x_validation)
+        probabilities = _clean_probabilities(raw_probabilities, binary=binary)
         composite_score, metrics = compute_composite_score(
             y_validation, probabilities, binary=binary
         )
@@ -274,7 +313,6 @@ def optimize_xgb_hyperparameters(
     best_score = float(best_trial.value)
     best_trial_params = best_trial.params
 
-    # Find metrics of best trial
     best_trial_record = next(
         (t for t in trials_report if t["trial_number"] == best_trial.number), None
     )
@@ -286,9 +324,6 @@ def optimize_xgb_hyperparameters(
         "composite_score": best_score,
     }
 
-    # Model promotion guard:
-    # Only select candidate if it strictly improves over baseline on composite loss.
-    # If candidate is equal or worse, keep the baseline model!
     if best_score < baseline_composite - 1e-5:
         LOGGER.info(
             "Optuna found superior model: composite %.4f vs baseline %.4f (improvement: %.4f)",
@@ -326,4 +361,3 @@ def optimize_xgb_hyperparameters(
         baseline_metrics=baseline_metrics,
         trials_report=trials_report,
     )
-

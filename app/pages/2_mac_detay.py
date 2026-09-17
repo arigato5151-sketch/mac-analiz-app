@@ -370,78 +370,82 @@ try:
 except Exception as exc:
     st.warning(f"Poisson detayları şu anda hazırlanamadı: {exc}")
 
-st.subheader("Taktiksel Saha Görselleri & Etkinlik Analizi (mplsoccer & StatsBomb)")
-statsbomb_adapter = StatsBombAdapter()
-sb_match = statsbomb_adapter.find_match_by_teams(
-    str(selected["home_team"]), str(selected["away_team"])
-)
+st.subheader("Taktiksel Saha Görselleri (StatsBomb & mplsoccer)")
+try:
+    from data_pipeline.statsbomb_adapter import STATSBOMB_AVAILABLE, StatsBombAdapter
 
-if sb_match is None:
-    st.info(
-        "ℹ️ Bu maç için StatsBomb etkinlik verisi bulunmuyor. StatsBomb Open Data canlı tahmin "
-        "kaynağı olmayıp, yalnızca belirli tarihi turnuvalar ve araştırma analizleri için mevcuttur."
-    )
-    with st.expander("Örnek StatsBomb araştırma verisini incele (Klasik Maçlar & Taktik Görseller)"):
-        st.caption("Aşağıdaki saha grafikleri mplsoccer kullanılarak StatsBomb açık veri setinden üretilir.")
-        demo_match_id = 3869685  # World Cup 2022 Final: Argentina vs France
-        demo_events = statsbomb_adapter.get_events(demo_match_id)
-        if not demo_events.empty:
-            tab_shot, tab_pass, tab_heat, tab_radar = st.tabs([
-                "Şut Haritası",
-                "Pas Ağı",
-                "Aksiyon Yoğunluğu",
-                "Oyuncu Radarı",
-            ])
-            with tab_shot:
-                shot_fig = render_shot_map(demo_events, team_name="Argentina")
-                if shot_fig:
-                    st.pyplot(shot_fig)
-            with tab_pass:
-                pass_fig = render_pass_network(demo_events, team_name="Argentina")
-                if pass_fig:
-                    st.pyplot(pass_fig)
-            with tab_heat:
-                heat_fig = render_action_heatmap(demo_events, team_name="Argentina")
-                if heat_fig:
-                    st.pyplot(heat_fig)
-            with tab_radar:
-                radar_fig = render_player_radar(
-                    ["Şut", "Pas", "Top Kapma", "Dribbling", "Beklenen Gol", "Vizyon"],
-                    [88.0, 92.0, 45.0, 90.0, 85.0, 95.0],
-                    player_name="Lionel Messi (Örnek Radar)",
-                )
-                if radar_fig:
-                    st.pyplot(radar_fig)
-        else:
-            st.caption("Örnek veri seti şu an çevrimdışı veya önbellekte bulunmuyor.")
-else:
-    match_id = int(sb_match["match_id"])
-    events = statsbomb_adapter.get_events(match_id)
-    if not events.empty:
-        tab_shot, tab_pass, tab_heat, tab_radar = st.tabs([
-            "Şut Haritası",
-            "Pas Ağı",
-            "Aksiyon Yoğunluğu",
-            "Oyuncu Radarı",
-        ])
-        with tab_shot:
-            shot_fig = render_shot_map(events, team_name=str(selected["home_team"]))
-            if shot_fig:
-                st.pyplot(shot_fig)
-        with tab_pass:
-            pass_fig = render_pass_network(events, team_name=str(selected["home_team"]))
-            if pass_fig:
-                st.pyplot(pass_fig)
-        with tab_heat:
-            heat_fig = render_action_heatmap(events, team_name=str(selected["home_team"]))
-            if heat_fig:
-                st.pyplot(heat_fig)
-        with tab_radar:
-            radar_fig = render_player_radar(
-                ["Form", "Hücum", "Savunma", "Pas", "Tempo", "Pres"],
-                [80.0, 75.0, 65.0, 82.0, 78.0, 70.0],
-                player_name=f"{selected['home_team']} Taktik Radarı",
+    statsbomb_adapter = StatsBombAdapter()
+
+    if not statsbomb_adapter.is_available:
+        st.info(
+            "ℹ️ **StatsBomb araştırma modülü bu ortamda etkin değil.** "
+            "StatsBomb Open Data ve taktiksel saha analizleri, `requirements-research.txt` "
+            "kullanılarak ayrı bir araştırma ortamında etkinleştirilebilir."
+        )
+    else:
+        load_sb_key = f"load_statsbomb_{selected_id}"
+        if load_sb_key not in st.session_state:
+            st.session_state[load_sb_key] = False
+
+        if not st.session_state[load_sb_key]:
+            st.caption(
+                "StatsBomb açık veri setinde bu maça ait taktiksel etkinlik verisi (şut, pas, aksiyon haritaları) "
+                "taramak için aşağıdaki butona basın."
             )
-            if radar_fig:
-                st.pyplot(radar_fig)
+            if st.button("StatsBomb analizini yükle", key=f"btn_sb_{selected_id}"):
+                st.session_state[load_sb_key] = True
+                st.rerun()
+        else:
+            with st.spinner("StatsBomb açık veri seti taranıyor..."):
+                match_year = (
+                    selected["match_date"].year
+                    if hasattr(selected.get("match_date"), "year")
+                    else None
+                )
+                sb_match = statsbomb_adapter.find_match_by_teams(
+                    str(selected["home_team"]),
+                    str(selected["away_team"]),
+                    year=match_year,
+                )
+
+            if sb_match is None:
+                st.info(
+                    "ℹ️ Bu maç için StatsBomb açık veri setinde eşleşen kayıt bulunamadı. "
+                    "StatsBomb Open Data canlı tahmin kaynağı olmayıp, yalnızca belirli tarihi turnuvalar için mevcuttur."
+                )
+            else:
+                match_id = int(sb_match["match_id"])
+                events = statsbomb_adapter.get_events(match_id)
+                if events.empty:
+                    st.info("ℹ️ Maç kaydı bulundu ancak etkinlik verisi boş.")
+                else:
+                    tab_shot, tab_pass, tab_heat, tab_radar = st.tabs([
+                        "Şut Haritası",
+                        "Pas Ağı",
+                        "Aksiyon Yoğunluğu",
+                        "Oyuncu Radarı",
+                    ])
+                    with tab_shot:
+                        shot_fig = render_shot_map(events, team_name=str(selected["home_team"]))
+                        if shot_fig:
+                            st.pyplot(shot_fig)
+                    with tab_pass:
+                        pass_fig = render_pass_network(events, team_name=str(selected["home_team"]))
+                        if pass_fig:
+                            st.pyplot(pass_fig)
+                    with tab_heat:
+                        heat_fig = render_action_heatmap(events, team_name=str(selected["home_team"]))
+                        if heat_fig:
+                            st.pyplot(heat_fig)
+                    with tab_radar:
+                        radar_fig = render_player_radar(
+                            ["Form", "Hücum", "Savunma", "Pas", "Tempo", "Pres"],
+                            [80.0, 75.0, 65.0, 82.0, 78.0, 70.0],
+                            player_name=f"{selected['home_team']} Taktik Radarı",
+                        )
+                        if radar_fig:
+                            st.pyplot(radar_fig)
+except Exception as sb_exc:
+    LOGGER.warning("StatsBomb visual load error: %s", sb_exc)
+    st.info("StatsBomb taktiksel analizleri şu anda hazırlanamadı.")
 
