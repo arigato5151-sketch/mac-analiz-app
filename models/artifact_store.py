@@ -141,21 +141,85 @@ def list_models(prefix: str = DEFAULT_PREFIX) -> list[str]:
     ]
 
 
+import logging
+
+LOGGER = logging.getLogger(__name__)
+
+
 def push_local_models(*, dest_dir: Path | str) -> list[str]:
     """Upload every local versioned artifact plus latest; return object names."""
+    """Upload every local versioned artifact, metadata JSONs, and parquet snapshots; return object names."""
     directory = Path(dest_dir)
     uploads: list[str] = []
+    # 1. Joblib models and sibling JSON metadata
     for path in sorted(directory.glob("*.joblib")):
         uploads.append(upload_model(path, name=path.name))
         sibling = path.with_suffix(".json")
         if sibling.is_file():
             uploads.append(upload_model(sibling, name=sibling.name))
+
+    # 2. Parquet snapshots and their companion JSON metadata
+    for path in sorted(directory.glob("feature_snapshot_*.parquet")):
+        uploads.append(upload_model(path, name=path.name))
+        sibling = path.with_suffix(".json")
+        if sibling.is_file():
+            uploads.append(upload_model(sibling, name=sibling.name))
+
     return uploads
+
+
+def download_model_artifacts(
+    model_version: str = "latest",
+    *,
+    dest_dir: Path | str,
+) -> dict[str, Path]:
+    """Download model joblib, json metadata, and associated parquet snapshots from storage.
+
+    Returns a dict mapping artifact kind ('model', 'metadata', 'ref_snapshot', 'current_snapshot')
+    to local Path for artifacts successfully downloaded.
+    If storage is unreachable, logs an actionable warning and raises ArtifactStoreError so caller
+    can gracefully fall back to local copies.
+    """
+    directory = Path(dest_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    downloaded: dict[str, Path] = {}
+
+    clean_version = model_version.strip()
+    base_name = "latest" if clean_version in ("", "latest") else clean_version
+    joblib_name = f"{base_name}.joblib"
+    json_name = f"{base_name}.json"
+
+    try:
+        downloaded["model"] = download_model(joblib_name, dest_dir=directory)
+    except ArtifactStoreError as exc:
+        LOGGER.warning(
+            "Remote storage unreachable or artifact '%s' missing: %s. Falling back to local files.",
+            joblib_name,
+            exc,
+        )
+        raise
+
+    # Companion files are best-effort downloads
+    candidates = [
+        (json_name, "metadata"),
+        (f"feature_snapshot_ref_{base_name}.parquet" if base_name != "latest" else "feature_snapshot_ref.parquet", "ref_snapshot"),
+        (f"feature_snapshot_ref_{base_name}.json" if base_name != "latest" else "feature_snapshot_ref.json", "ref_metadata"),
+        (f"feature_snapshot_current_{base_name}.parquet" if base_name != "latest" else "feature_snapshot_current.parquet", "current_snapshot"),
+        (f"feature_snapshot_current_{base_name}.json" if base_name != "latest" else "feature_snapshot_current.json", "current_metadata"),
+    ]
+    for candidate_name, key in candidates:
+        try:
+            downloaded[key] = download_model(candidate_name, dest_dir=directory)
+        except ArtifactStoreError:
+            pass
+
+    return downloaded
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--push", type=Path, help="Upload all *.joblib in this directory")
+    parser.add_argument("--push", type=Path, help="Upload all artifacts in this directory")
     parser.add_argument("--pull", help="Download a stored artifact to the current directory")
     parser.add_argument("--list", action="store_true", help="List stored artifact names")
     args = parser.parse_args()

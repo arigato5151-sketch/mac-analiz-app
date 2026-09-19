@@ -14,7 +14,7 @@ import numpy as np
 from config.settings import PROJECT_ROOT, get_settings
 from db.db_client import SupabaseRestClient
 from data_pipeline.odds import attach_pre_match_odds
-from models.artifact_store import ArtifactStoreError, download_model
+from models.artifact_store import ArtifactStoreError, download_model_artifacts
 from models.calibration import apply_binary_temperature, apply_multiclass_temperature
 from models.feature_engineering import (
     FEATURE_COLUMNS,
@@ -24,6 +24,11 @@ from models.feature_engineering import (
 )
 from models.market_forecast import derive_market_probabilities
 from models.train_model import load_historical_matches, normalize_multiclass_probabilities
+from monitoring.feature_snapshot import (
+    CURRENT_SNAPSHOT_NAME,
+    save_feature_snapshot,
+    snapshot_filename,
+)
 
 
 def newest_versioned_model(model_dir: Path) -> Path | None:
@@ -64,7 +69,9 @@ def resolve_model_path(model_path: Path | None = None) -> Path:
     # pre-match cards after a promotion. Local files only become the fallback when
     # Storage is unreachable (e.g. the read-only UI client).
     try:
-        return download_model("latest.joblib", dest_dir=model_dir)
+        downloaded = download_model_artifacts("latest", dest_dir=model_dir)
+        if "model" in downloaded and downloaded["model"].is_file():
+            return downloaded["model"]
     except ArtifactStoreError:
         pass
     latest_path = model_dir / "latest.joblib"
@@ -129,6 +136,48 @@ def load_upcoming_matches(
     return enriched
 
 
+def record_inference_feature_snapshot(
+    features: pd.DataFrame,
+    upcoming_matches: list[dict[str, Any]],
+    *,
+    model_version: str,
+    output_dir: Path | None = None,
+) -> Path | None:
+    """Save time-windowed numeric features used during live inference for production drift monitoring."""
+    if features.empty or not upcoming_matches:
+        return None
+    dest_dir = output_dir or (PROJECT_ROOT / "models" / "saved_models")
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    dates = [
+        m["match_date"] for m in upcoming_matches
+        if "match_date" in m and m["match_date"] is not None
+    ]
+    period_start = ""
+    period_end = ""
+    if dates:
+        parsed_dates = [
+            d if isinstance(d, datetime) else datetime.fromisoformat(str(d))
+            for d in dates
+        ]
+        period_start = min(parsed_dates).isoformat()
+        period_end = max(parsed_dates).isoformat()
+
+    meta = {
+        "model_version": model_version,
+        "period_start": period_start,
+        "period_end": period_end,
+        "row_count": len(features),
+        "source": "production_inference",
+        "feature_schema_version": "1.0",
+    }
+    versioned_path = dest_dir / snapshot_filename("current", model_version)
+    save_feature_snapshot(features, versioned_path, metadata=meta)
+    alias_path = dest_dir / CURRENT_SNAPSHOT_NAME
+    save_feature_snapshot(features, alias_path, metadata=meta)
+    return alias_path
+
+
 def generate_prediction_rows(
     bundle: dict[str, Any],
     historical_matches: list[dict[str, Any]],
@@ -136,6 +185,8 @@ def generate_prediction_rows(
     *,
     model_version: str,
     team_form_by_id: dict[int, dict[str, Any]] | None = None,
+    record_features_snapshot: bool = True,
+    output_dir: Path | None = None,
 ) -> list[dict[str, Any]]:
     expected_columns = list(bundle.get("feature_columns") or [])
     if not expected_columns or not set(expected_columns).issubset(FEATURE_COLUMNS):
@@ -158,6 +209,17 @@ def generate_prediction_rows(
         historical_matches, ordered_upcoming, league_rhos=league_rhos
     )
     features = all_features.loc[:, expected_columns]
+    if record_features_snapshot and not features.empty:
+        try:
+            record_inference_feature_snapshot(
+                features,
+                ordered_upcoming,
+                model_version=model_version,
+                output_dir=output_dir,
+            )
+        except Exception:
+            pass  # Non-blocking: never fail live predictions due to telemetry write
+
     binary_columns = list(bundle.get("binary_feature_columns") or expected_columns)
     if not binary_columns or not set(binary_columns).issubset(FEATURE_COLUMNS):
         raise ValueError("Saved binary model feature contract is incompatible")

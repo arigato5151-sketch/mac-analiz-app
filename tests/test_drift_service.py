@@ -216,3 +216,47 @@ def test_ci_drift_check_fails_on_critical_with_real_snapshots(tmp_path: Path):
         allow_skip=False,
     )
     assert code == 1
+
+
+# ---------------------------------------------------------------------------
+# Probability normalization edge-case tests
+# ---------------------------------------------------------------------------
+
+def test_normalize_proba_rows_handles_negatives_and_nan():
+    """_normalize_proba_rows must clip negatives and guarantee row sums == 1.0."""
+    from monitoring.drift_service import _normalize_proba_rows
+
+    dirty = np.array([
+        [-0.5, 1.0, 0.5],   # negative value
+        [np.nan, 0.5, 0.5], # NaN
+        [np.inf, 0.1, 0.1], # inf
+        [0.0, 0.0, 0.0],    # all zeros → uniform
+    ])
+    result = _normalize_proba_rows(dirty)
+    assert result.shape == (4, 3)
+    assert np.all(result >= 0), "All values must be non-negative"
+    assert np.allclose(result.sum(axis=1), 1.0), "Each row must sum to 1.0"
+
+
+def test_allow_drift_skip_env_false_fails_without_snapshots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """ALLOW_DRIFT_SKIP=false → exit code 1 when snapshots are missing and allow_skip=None reads env."""
+    monkeypatch.setenv("ALLOW_DRIFT_SKIP", "false")
+    code = run_drift_check(
+        fail_on_critical=True,
+        reference_snapshot_path=tmp_path / "no_ref.parquet",
+        current_snapshot_path=tmp_path / "no_cur.parquet",
+        allow_skip=None,  # will read env → False
+    )
+    assert code == 1, "Should return exit code 1 when snapshots missing and ALLOW_DRIFT_SKIP=false"
+
+
+def test_allow_drift_skip_env_true_skips_without_snapshots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """ALLOW_DRIFT_SKIP=true → exit code 0 (skip allowed) even when snapshots missing."""
+    monkeypatch.setenv("ALLOW_DRIFT_SKIP", "true")
+    code = run_drift_check(
+        fail_on_critical=True,
+        reference_snapshot_path=tmp_path / "no_ref.parquet",
+        current_snapshot_path=tmp_path / "no_cur.parquet",
+        allow_skip=None,  # will read env → True
+    )
+    assert code == 0, "Should return exit code 0 when snapshots missing and ALLOW_DRIFT_SKIP=true"

@@ -41,9 +41,9 @@ from models.feature_engineering import (
 )
 from models.optimizer import optimize_xgb_hyperparameters
 from monitoring.feature_snapshot import (
-    CURRENT_SNAPSHOT_NAME,
     REFERENCE_SNAPSHOT_NAME,
     save_feature_snapshot,
+    snapshot_filename,
 )
 
 
@@ -708,6 +708,11 @@ test_start=test_dates.iloc[0].isoformat(),
         ),
         "_x_fit_snapshot": x_fit,
         "_x_val_snapshot": x_validation,
+        "_x_fit_snapshot_meta": {
+            "period_start": labels.iloc[fit_slice]["match_date"].iloc[0].isoformat(),
+            "period_end": labels.iloc[fit_slice]["match_date"].iloc[-1].isoformat(),
+            "source": "training_reference",
+        },
     }
     return bundle, metrics
 
@@ -719,17 +724,22 @@ def save_model_bundle(
     version = datetime.now(timezone.utc).strftime("v%Y%m%dT%H%M%SZ")
     model_path = output_dir / f"model_{version}.joblib"
     metadata_path = output_dir / f"model_{version}.json"
+    model_version = model_path.stem
 
     # Persist feature snapshots for drift monitoring without storing bulky DataFrames in .joblib
     bundle_copy = dict(bundle)
     ref_snap = bundle_copy.pop("_x_fit_snapshot", None)
-    val_snap = bundle_copy.pop("_x_val_snapshot", None)
-    if ref_snap is not None:
-        save_feature_snapshot(ref_snap, output_dir / REFERENCE_SNAPSHOT_NAME)
-    if val_snap is not None:
-        save_feature_snapshot(val_snap, output_dir / CURRENT_SNAPSHOT_NAME)
+    bundle_copy.pop("_x_val_snapshot", None)  # Never use validation split as production data
+    ref_meta = bundle_copy.pop("_x_fit_snapshot_meta", {})
 
-    versioned_bundle = {**bundle_copy, "model_version": model_path.stem}
+    versioned_bundle = {**bundle_copy, "model_version": model_version}
+
+    if ref_snap is not None:
+        snap_meta = {**ref_meta, "model_version": model_version}
+        versioned_snap_path = output_dir / snapshot_filename("ref", model_version)
+        save_feature_snapshot(ref_snap, versioned_snap_path, metadata=snap_meta)
+        save_feature_snapshot(ref_snap, output_dir / REFERENCE_SNAPSHOT_NAME, metadata=snap_meta)
+        versioned_bundle["reference_snapshot"] = versioned_snap_path.name
     temporary_path = model_path.with_suffix(".tmp")
     joblib.dump(versioned_bundle, temporary_path, compress=3)
     os.replace(temporary_path, model_path)

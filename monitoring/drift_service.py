@@ -144,18 +144,41 @@ def calculate_feature_drift(
 def _normalize_proba_rows(proba: np.ndarray, epsilon: float = 1e-7) -> np.ndarray:
     """Row-wise normalize a probability matrix and clip to [epsilon, 1-epsilon].
 
-    Handles NaN, inf, zero-sum rows gracefully.
+    Handles NaN, inf, negative values, invalid class count, and zero-sum rows gracefully.
+    Guarantees every output row strictly sums to 1.0.
     """
     proba = np.array(proba, dtype=float)
-    # Replace inf/nan with 0
+    if proba.size == 0:
+        return proba
+
+    if proba.ndim == 1:
+        proba = proba.reshape(1, -1)
+
+    n_classes = proba.shape[1]
+    if n_classes < 1:
+        return proba
+
+    # 1. Replace inf/nan with 0.0
     proba = np.where(np.isfinite(proba), proba, 0.0)
+
+    # 2. Clip negative probability values to 0.0 before normalizing
+    proba = np.maximum(proba, 0.0)
+
+    # 3. Handle rows that sum to 0 -> uniform distribution
     row_sums = proba.sum(axis=1, keepdims=True)
-    # Rows that sum to 0 get uniform distribution
     zero_rows = (row_sums == 0).flatten()
-    proba[zero_rows] = 1.0 / proba.shape[1]
+    proba[zero_rows] = 1.0 / n_classes
     row_sums = proba.sum(axis=1, keepdims=True)
-    proba = proba / row_sums
-    return np.clip(proba, epsilon, 1.0 - epsilon)
+
+    # 4. Normalize
+    proba = proba / np.where(row_sums == 0, 1.0, row_sums)
+
+    # 5. Clip to [epsilon, 1.0 - epsilon] and re-normalize to ensure exact 1.0 sum
+    if epsilon > 0 and n_classes > 1:
+        proba = np.clip(proba, epsilon, 1.0 - epsilon)
+        proba = proba / proba.sum(axis=1, keepdims=True)
+
+    return proba
 
 
 def compute_performance_log_loss(

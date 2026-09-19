@@ -229,3 +229,41 @@ def test_render_player_radar():
     plt.close(fig)
 
     assert render_player_radar(params, values[:3]) is None
+
+
+# ---------------------------------------------------------------------------
+# StatsBomb timeout non-blocking regression test
+# ---------------------------------------------------------------------------
+
+def test_call_with_timeout_does_not_block_ui_thread(tmp_path: Path):
+    """Timeout must not block the calling thread beyond timeout_seconds + small margin.
+
+    The test simulates a hung network call (sleep 60 s) and verifies that the
+    adapter returns within 2 seconds — proving the UI / Streamlit thread is
+    never held waiting for the background executor to terminate.
+    """
+    import time
+
+    class SlowProvider:
+        def competitions(self) -> pd.DataFrame:
+            time.sleep(60)  # simulates a completely hung network call
+            time.sleep(5.0)  # simulates a slow network call
+            return pd.DataFrame()
+
+    adapter = StatsBombAdapter(
+        cache_dir=tmp_path,
+        provider=SlowProvider(),
+        timeout_seconds=0.5,
+    )
+    start = time.perf_counter()
+    result = adapter.get_competitions()
+    elapsed = time.perf_counter() - start
+
+    assert isinstance(result, pd.DataFrame)
+    assert result.empty, "Should return empty DataFrame on timeout"
+    assert elapsed < 2.0, (
+        f"UI thread was blocked for {elapsed:.2f}s, expected < 2.0s. "
+    assert elapsed < 2.5, (
+        f"UI thread was blocked for {elapsed:.2f}s, expected < 2.5s. "
+        "Check that executor.shutdown(wait=False) is used on timeout/error paths."
+    )

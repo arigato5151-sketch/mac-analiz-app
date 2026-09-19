@@ -7,6 +7,7 @@ Never used directly for live API-Football pre-match predictions.
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import logging
 import re
 import unicodedata
@@ -100,6 +101,11 @@ class StatsBombAdapter:
 
     def _call_with_timeout(self, func: Any, *args: Any, **kwargs: Any) -> Any:
         """Call a provider function with a timeout to prevent hanging UI."""
+        """Call a provider function with a timeout to prevent hanging UI.
+
+        Explicitly manages ThreadPoolExecutor so that when a timeout occurs,
+        the UI thread returns immediately without waiting for the blocked worker.
+        """
         if not self.is_available:
             return None
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -112,6 +118,27 @@ class StatsBombAdapter:
             except Exception as exc:
                 LOGGER.warning("StatsBomb call failed: %s", exc)
                 return None
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(func, *args, **kwargs)
+        try:
+            return future.result(timeout=self.timeout_seconds)
+            res = future.result(timeout=self.timeout_seconds)
+            executor.shutdown(wait=False, cancel_futures=True)
+            return res
+        except concurrent.futures.TimeoutError:
+            LOGGER.warning(
+                "StatsBomb call %s timed out after %.1fs",
+                getattr(func, "__name__", "call"),
+                self.timeout_seconds,
+            )
+            executor.shutdown(wait=False, cancel_futures=True)
+            return None
+        except Exception as exc:
+            LOGGER.warning("StatsBomb call failed: %s", exc)
+            executor.shutdown(wait=False, cancel_futures=True)
+            return None
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     def get_competitions(self) -> pd.DataFrame:
         """Fetch available open competitions with disk caching."""
@@ -210,6 +237,17 @@ class StatsBombAdapter:
         if not self.is_available:
             return None
 
+        # Check lookup cache with normalized names and year
+        norm_h = _normalize_name(home_team).replace(" ", "_")
+        norm_a = _normalize_name(away_team).replace(" ", "_")
+        lookup_cache_file = self.cache_dir / f"match_lookup_{norm_h}_{norm_a}_{year or 'all'}.json"
+        if lookup_cache_file.exists():
+            try:
+                cached_data = json.loads(lookup_cache_file.read_text(encoding="utf-8"))
+                return cached_data.get("match")
+            except Exception:
+                pass
+
         comps = self.get_competitions()
         if comps.empty:
             return None
@@ -221,6 +259,7 @@ class StatsBombAdapter:
             if not year_filtered.empty:
                 comps = year_filtered
 
+        found_match: dict[str, Any] | None = None
         for _, comp_row in comps.iterrows():
             comp_id = int(comp_row["competition_id"])
             season_id = int(comp_row["season_id"])
@@ -239,5 +278,20 @@ class StatsBombAdapter:
                 m_away = str(match.get("away_team", ""))
                 if _team_names_match(home_team, m_home) and _team_names_match(away_team, m_away):
                     return match.to_dict()
+                    found_match = match.to_dict()
+                    break
 
         return None
+            if found_match is not None:
+                break
+
+        # Persist lookup cache
+        try:
+            lookup_cache_file.write_text(
+                json.dumps({"match": found_match}, ensure_ascii=False, default=str),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+        return found_match

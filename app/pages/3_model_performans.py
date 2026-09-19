@@ -112,30 +112,62 @@ try:
         REFERENCE_SNAPSHOT_NAME,
         extract_snapshot_metadata,
         load_feature_snapshot,
+        resolve_snapshot_path,
         snapshot_feature_columns,
     )
+
+    def _display_period(meta: dict[str, Any]) -> str:
+        p_start = meta.get("period_start", "")
+        p_end = meta.get("period_end", "")
+        if p_start and p_end:
+            return f"{p_start[:10]} .. {p_end[:10]}"
+        if p_start:
+            return f"from {p_start[:10]}"
+        return meta.get("saved_at", "Bilinmiyor")[:19] if meta.get("saved_at") else "Bilinmiyor"
 
     models_dir = PROJECT_ROOT / "models" / "saved_models"
     ref_snapshot = load_feature_snapshot(models_dir / REFERENCE_SNAPSHOT_NAME)
     cur_snapshot = load_feature_snapshot(models_dir / CURRENT_SNAPSHOT_NAME)
     ref_meta = extract_snapshot_metadata(ref_snapshot)
     cur_meta = extract_snapshot_metadata(cur_snapshot)
+    active_version = metadata.get("model_version") if metadata else None
+    ref_path = resolve_snapshot_path(models_dir, kind="ref", model_version=active_version)
+    cur_path = resolve_snapshot_path(models_dir, kind="current", model_version=active_version)
+
+    ref_snapshot = load_feature_snapshot(ref_path)
+    cur_snapshot = load_feature_snapshot(cur_path)
+    ref_meta = extract_snapshot_metadata(ref_snapshot, path=ref_path)
+    cur_meta = extract_snapshot_metadata(cur_snapshot, path=cur_path)
 
     upcoming_data = load_upcoming_dashboard(7)
     perf_data = load_prediction_performance()
 
     if not ref_meta["available"] or not cur_meta["available"]:
+    if not ref_meta["available"]:
         st.warning(
             "⚠️ **Drift hesaplanamadı — feature snapshot bulunamadı.** "
             "Model eğitimi sırasında kronolojik feature snapshot'ları kaydedildiğinde "
+            "⚠️ **Drift hesaplanamadı — referans özellik snapshot'ı bulunamadı.** "
+            "Model eğitimi sırasında kronolojik özellik snapshot'ları kaydedildiğinde "
             "özellik sapma analizi burada görünecektir."
         )
         if not perf_data.empty:
             st.caption(f"Canlı değerlendirme verisi mevcut ({len(perf_data)} maç), ancak özellik referansı eksik.")
+            st.caption(f"Canlı değerlendirme verisi mevcut ({len(perf_data)} maç), ancak model referans özellikleri eksik.")
+    elif not cur_meta["available"] or cur_meta["rows"] < 5:
+        st.warning(
+            "⚠️ **Drift hesaplanamadı — yeterli canlı feature verisi bulunamadı.** "
+            "Canlı tahminler üretildikçe zaman pencereli üretim snapshot'ı kaydedilecek "
+            "ve referans veri ile karşılaştırmalı sapma analizi burada gösterilecektir."
+        )
+        st.caption(f"Referans model: {ref_meta['rows']:,} satır ({_display_period(ref_meta)}).")
     else:
         feature_cols = snapshot_feature_columns(ref_snapshot)
         drift_service = DriftMonitoringService()
         ref_metrics = metadata.get("metrics") if metadata else None
+
+        ref_period_str = _display_period(ref_meta)
+        cur_period_str = _display_period(cur_meta)
 
         drift_report = drift_service.generate_report(
             reference_features=ref_snapshot,
@@ -148,6 +180,8 @@ try:
             data_source="parquet_snapshots",
             reference_period=ref_meta.get("saved_at", "")[:19] if ref_meta.get("saved_at") else "",
             current_period=cur_meta.get("saved_at", "")[:19] if cur_meta.get("saved_at") else "",
+            reference_period=ref_period_str,
+            current_period=cur_period_str,
         )
 
         status_colors = {
@@ -161,6 +195,8 @@ try:
         prov_col1, prov_col2 = st.columns(2)
         prov_col1.caption(f"**Referans Dönem:** {ref_meta['rows']:,} satır · {ref_meta.get('saved_at', 'Bilinmiyor')[:19]}")
         prov_col2.caption(f"**Güncel Dönem:** {cur_meta['rows']:,} satır · {cur_meta.get('saved_at', 'Bilinmiyor')[:19]}")
+        prov_col1.caption(f"**Referans Dönem (Eğitim):** {ref_meta['rows']:,} satır · {ref_period_str}")
+        prov_col2.caption(f"**Güncel Dönem (Canlı Tahmin):** {cur_meta['rows']:,} satır · {cur_period_str}")
 
         drift_cols = st.columns(4)
         drift_cols[0].metric(
