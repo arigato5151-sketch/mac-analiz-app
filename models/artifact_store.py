@@ -14,6 +14,7 @@ artifacts without any repository write permission.
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ import requests
 from config.settings import get_settings
 
 
+LOGGER = logging.getLogger(__name__)
 STORAGE_BUCKET = "models"
 DEFAULT_PREFIX = "model_artifacts"
 
@@ -141,14 +143,8 @@ def list_models(prefix: str = DEFAULT_PREFIX) -> list[str]:
     ]
 
 
-import logging
-
-LOGGER = logging.getLogger(__name__)
-
-
 def push_local_models(*, dest_dir: Path | str) -> list[str]:
-    """Upload every local versioned artifact plus latest; return object names."""
-    """Upload every local versioned artifact, metadata JSONs, and parquet snapshots; return object names."""
+    """Upload model artifacts, metadata, and feature snapshots from this directory."""
     directory = Path(dest_dir)
     uploads: list[str] = []
     # 1. Joblib models and sibling JSON metadata
@@ -218,8 +214,11 @@ def download_model_artifacts(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--push", type=Path, help="Upload all *.joblib in this directory")
-    parser.add_argument("--push", type=Path, help="Upload all artifacts in this directory")
+    parser.add_argument(
+        "--push",
+        type=Path,
+        help="Upload model artifacts, metadata, and feature snapshots from this directory",
+    )
     parser.add_argument("--pull", help="Download a stored artifact to the current directory")
     parser.add_argument("--list", action="store_true", help="List stored artifact names")
     args = parser.parse_args()

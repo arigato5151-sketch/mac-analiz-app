@@ -98,7 +98,6 @@ def test_record_inference_feature_snapshot(tmp_path: Path):
     meta = extract_snapshot_metadata(load_feature_snapshot(versioned_path), path=versioned_path)
     assert meta["source"] == "production_inference"
     assert meta["model_version"] == model_version
-    assert meta["row_count"] == 20
     assert meta["rows"] == 20
     assert "2026-09-20" in meta["period_start"]
     assert "2026-09-22" in meta["period_end"]
@@ -155,4 +154,3 @@ def test_download_model_artifacts_storage_unreachable_fallback(tmp_path: Path):
     with patch("models.artifact_store.download_model", side_effect=ArtifactStoreError("Network down")):
         with pytest.raises(ArtifactStoreError):
             download_model_artifacts("latest", dest_dir=tmp_path)
-

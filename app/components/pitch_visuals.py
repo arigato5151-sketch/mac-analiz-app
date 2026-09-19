@@ -5,6 +5,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import matplotlib
+
+# Streamlit and CI render figures without a desktop display server. Select a
+# non-interactive backend before importing pyplot to avoid Tk initialization.
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd

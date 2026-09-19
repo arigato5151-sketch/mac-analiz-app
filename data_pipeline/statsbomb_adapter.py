@@ -100,7 +100,6 @@ class StatsBombAdapter:
         return self._available and self._provider is not None
 
     def _call_with_timeout(self, func: Any, *args: Any, **kwargs: Any) -> Any:
-        """Call a provider function with a timeout to prevent hanging UI."""
         """Call a provider function with a timeout to prevent hanging UI.
 
         Explicitly manages ThreadPoolExecutor so that when a timeout occurs,
@@ -108,20 +107,9 @@ class StatsBombAdapter:
         """
         if not self.is_available:
             return None
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(func, *args, **kwargs)
-            try:
-                return future.result(timeout=self.timeout_seconds)
-            except concurrent.futures.TimeoutError:
-                LOGGER.warning("StatsBomb call %s timed out after %.1fs", getattr(func, "__name__", "call"), self.timeout_seconds)
-                return None
-            except Exception as exc:
-                LOGGER.warning("StatsBomb call failed: %s", exc)
-                return None
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         future = executor.submit(func, *args, **kwargs)
         try:
-            return future.result(timeout=self.timeout_seconds)
             res = future.result(timeout=self.timeout_seconds)
             executor.shutdown(wait=False, cancel_futures=True)
             return res
@@ -137,8 +125,6 @@ class StatsBombAdapter:
             LOGGER.warning("StatsBomb call failed: %s", exc)
             executor.shutdown(wait=False, cancel_futures=True)
             return None
-        finally:
-            executor.shutdown(wait=False, cancel_futures=True)
 
     def get_competitions(self) -> pd.DataFrame:
         """Fetch available open competitions with disk caching."""
@@ -277,11 +263,9 @@ class StatsBombAdapter:
                 m_home = str(match.get("home_team", ""))
                 m_away = str(match.get("away_team", ""))
                 if _team_names_match(home_team, m_home) and _team_names_match(away_team, m_away):
-                    return match.to_dict()
                     found_match = match.to_dict()
                     break
 
-        return None
             if found_match is not None:
                 break
 

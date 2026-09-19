@@ -246,7 +246,6 @@ def test_call_with_timeout_does_not_block_ui_thread(tmp_path: Path):
 
     class SlowProvider:
         def competitions(self) -> pd.DataFrame:
-            time.sleep(60)  # simulates a completely hung network call
             time.sleep(5.0)  # simulates a slow network call
             return pd.DataFrame()
 
@@ -261,8 +260,6 @@ def test_call_with_timeout_does_not_block_ui_thread(tmp_path: Path):
 
     assert isinstance(result, pd.DataFrame)
     assert result.empty, "Should return empty DataFrame on timeout"
-    assert elapsed < 2.0, (
-        f"UI thread was blocked for {elapsed:.2f}s, expected < 2.0s. "
     assert elapsed < 2.5, (
         f"UI thread was blocked for {elapsed:.2f}s, expected < 2.5s. "
         "Check that executor.shutdown(wait=False) is used on timeout/error paths."

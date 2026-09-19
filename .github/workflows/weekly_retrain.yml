@@ -45,7 +45,6 @@ jobs:
       - name: Run unit tests
         run: python -m pytest -q
       - name: Drift check — abort on critical data drift
-        run: python -m evaluation.drift_check --fail-on-critical
         run: python -m evaluation.drift_check --fail-on-critical --strict
         env:
           ALLOW_DRIFT_SKIP: ${{ vars.ALLOW_DRIFT_SKIP || 'false' }}

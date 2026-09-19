@@ -301,7 +301,7 @@ try:
                 "authentication": "Yapay zekâ yorum servisi doğrulanamadı. Uygulama yöneticisi anahtar ayarını kontrol etmelidir.",
                 "quota": "Yapay zekâ yorum kotası geçici olarak dolu. Birkaç dakika sonra tekrar deneyin.",
                 "timeout": "Yapay zekâ yorum servisi zaman aşımına uğradı. Lütfen tekrar deneyin.",
-                "model": "Gemini ve NVIDIA NIM modelleri bu API anahtarlarıyla kullanılamıyor. GEMINI_MODEL (gemini-3.5-flash) veya NVIDIA_MODEL (nvidia/nemotron-3.5-lightning-30b-a3b) ayarını kontrol edin.",
+                "model": "Gemini ve NVIDIA NIM modelleri bu API anahtarlarıyla kullanılamıyor. GEMINI_MODEL (gemini-2.5-flash / gemini-1.5-flash) veya NVIDIA_MODEL ayarını kontrol edin.",
                 "provider": "Yapay zekâ yorum servisleri bu isteği işleyemedi. Model ayarını ve API erişimini kontrol edin.",
             }
             st.error(user_messages.get(error.reason, "Yorum şu anda üretilemedi. Lütfen tekrar deneyin."))

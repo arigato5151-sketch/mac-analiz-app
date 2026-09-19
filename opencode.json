@@ -13,6 +13,15 @@
         "C:\\Users\\ariga\\.config\\opencode\\playwright-profile"
       ],
       "enabled": true
+    },
+    "bash": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-bash"
+      ],
+      "enabled": true
     }
   }
 }
