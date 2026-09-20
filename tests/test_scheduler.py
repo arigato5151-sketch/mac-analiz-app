@@ -58,3 +58,18 @@ def test_result_job_calls_existing_notification_entrypoint(monkeypatch) -> None:
 
     assert scheduler.run_result_notifications() == {"pending": 1, "sent": 1}
     notify.assert_called_once_with()
+
+
+def test_weekly_retrain_does_not_publish_before_shadow_promotion(monkeypatch) -> None:
+    run_module = MagicMock(return_value={"returncode": 0})
+    monkeypatch.setattr(scheduler, "_run_module", run_module)
+
+    scheduler.run_weekly_retrain()
+
+    assert run_module.call_args_list[0].args == (
+        "models.train_model",
+        "--optimize",
+        "--optuna-trials",
+        "25",
+    )
+    assert all("--publish-latest" not in call.args for call in run_module.call_args_list)

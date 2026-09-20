@@ -27,6 +27,8 @@ from models.train_model import load_historical_matches
 
 MINIMUM_PROMOTION_SAMPLE = 100
 MINIMUM_BRIER_IMPROVEMENT = 0.005
+MINIMUM_PROMOTION_ACCURACY = 0.50
+MAXIMUM_PROMOTION_BRIER = 0.62
 
 
 def candidate_path(model_version: str) -> Path:
@@ -194,6 +196,16 @@ def promotion_decision(
     """Use a conservative two-metric gate; no sample means no promotion."""
     if sample_size < MINIMUM_PROMOTION_SAMPLE:
         return False, f"Gölge örneklemi yetersiz: {sample_size}/{MINIMUM_PROMOTION_SAMPLE}"
+    if candidate_accuracy < MINIMUM_PROMOTION_ACCURACY:
+        return False, (
+            "Aday model mutlak isabet tabanını karşılamıyor: "
+            f"{candidate_accuracy:.1%} < {MINIMUM_PROMOTION_ACCURACY:.1%}"
+        )
+    if candidate_brier > MAXIMUM_PROMOTION_BRIER:
+        return False, (
+            "Aday model mutlak Brier kalite tabanını karşılamıyor: "
+            f"{candidate_brier:.3f} > {MAXIMUM_PROMOTION_BRIER:.3f}"
+        )
     if candidate_brier > production_brier - MINIMUM_BRIER_IMPROVEMENT:
         return False, (
             "Aday modelin Brier iyileşmesi promotion eşiğini karşılamıyor"

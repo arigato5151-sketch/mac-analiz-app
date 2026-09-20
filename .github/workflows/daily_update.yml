@@ -53,6 +53,8 @@ jobs:
         run: python -m data_pipeline.refresh_context --days 3
       - name: Generate upcoming predictions
         run: python -m models.predict --days 3
+      - name: Collect daily shadow-candidate predictions
+        run: python -m models.shadow --days 3
       - name: Validate data quality
         run: python -m data_pipeline.data_quality --days 3 | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Sync today's final scores

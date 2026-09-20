@@ -85,7 +85,11 @@ def test_legacy_model_contract_remains_usable_after_feature_expansion() -> None:
     }]
 
     row = generate_prediction_rows(
-        bundle, history, upcoming, model_version="legacy-v1"
+        bundle,
+        history,
+        upcoming,
+        model_version="legacy-v1",
+        record_features_snapshot=False,
     )[0]
 
     assert row["prob_home_win"] == pytest.approx(0.6)

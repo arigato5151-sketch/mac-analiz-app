@@ -159,9 +159,11 @@ def run_daily_summary() -> dict[str, Any]:
 
 
 def run_weekly_retrain() -> dict[str, Any]:
-    """Weekly model retraining."""
+    """Train a shadow candidate without bypassing the production promotion gate."""
     return {
-        "training": _run_module("models.train_model", "--publish-latest"),
+        "training": _run_module(
+            "models.train_model", "--optimize", "--optuna-trials", "25"
+        ),
         "artifact_store": _run_module(
             "models.artifact_store", "--push", "models/saved_models"
         ),

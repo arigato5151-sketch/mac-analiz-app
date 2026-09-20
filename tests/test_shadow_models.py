@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from models.shadow import (
+    MAXIMUM_PROMOTION_BRIER,
+    MINIMUM_PROMOTION_ACCURACY,
     MINIMUM_PROMOTION_SAMPLE,
     evaluate_shadow_predictions,
     promotion_decision,
@@ -65,5 +67,22 @@ def test_shadow_candidate_requires_better_brier_and_no_accuracy_regression() -> 
         candidate_accuracy=0.59,
         production_brier=0.50,
         production_accuracy=0.60,
+        sample_size=MINIMUM_PROMOTION_SAMPLE,
+    )[0] is False
+
+
+def test_shadow_candidate_must_clear_absolute_quality_floors() -> None:
+    assert promotion_decision(
+        candidate_brier=MAXIMUM_PROMOTION_BRIER - 0.01,
+        candidate_accuracy=MINIMUM_PROMOTION_ACCURACY - 0.01,
+        production_brier=0.70,
+        production_accuracy=0.40,
+        sample_size=MINIMUM_PROMOTION_SAMPLE,
+    )[0] is False
+    assert promotion_decision(
+        candidate_brier=MAXIMUM_PROMOTION_BRIER + 0.01,
+        candidate_accuracy=MINIMUM_PROMOTION_ACCURACY + 0.05,
+        production_brier=0.70,
+        production_accuracy=0.40,
         sample_size=MINIMUM_PROMOTION_SAMPLE,
     )[0] is False

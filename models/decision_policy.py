@@ -5,7 +5,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 
-MINIMUM_ACTIONABLE_1X2_CONFIDENCE = 0.50
+# Chronological validation shows a material accuracy lift at 0.55 while still
+# retaining useful coverage. Lower-confidence outcomes remain visible as Pass.
+MINIMUM_ACTIONABLE_1X2_CONFIDENCE = 0.55
 
 
 def select_1x2(

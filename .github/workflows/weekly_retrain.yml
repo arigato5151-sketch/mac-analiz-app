@@ -50,7 +50,7 @@ jobs:
           ALLOW_DRIFT_SKIP: ${{ vars.ALLOW_DRIFT_SKIP || 'false' }}
         continue-on-error: false
       - name: Train and validate models
-        run: python -m models.train_model
+        run: python -m models.train_model --optimize --optuna-trials 25
       - name: Register newest model as a shadow candidate
         run: python -m models.shadow --register-newest
       - name: Seed upcoming shadow predictions
