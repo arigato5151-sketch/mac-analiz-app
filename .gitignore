@@ -6,6 +6,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .playwright-mcp/
+.auto_loop/
 .venv/
 venv/
 dist/

@@ -14,12 +14,12 @@
       ],
       "enabled": true
     },
-    "bash": {
+    "terminal_executor": {
       "type": "local",
       "command": [
         "npx",
         "-y",
-        "@modelcontextprotocol/server-bash"
+        "@wonderwhy-er/desktop-commander"
       ],
       "enabled": true
     }
