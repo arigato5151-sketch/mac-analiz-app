@@ -13,16 +13,27 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.components.data import load_evaluated_predictions
 from app.components.grid import build_read_only_grid_options
 from app.components.metrics import format_accuracy, summarize_binary_accuracy
-from app.components.ui import configure_page, disclaimer, evaluated_result_display, outcome_prediction_signal
+from app.components.ui import (
+    configure_page,
+    disclaimer,
+    evaluated_result_display,
+    outcome_prediction_signal,
+    page_header,
+    section_intro,
+)
 
 
 configure_page("Tahmin Sonuçları")
-st.title("Tahmin Sonuçları")
+page_header(
+    "Tahmin sonuçları",
+    "Tamamlanan maçlarda modelin ne kadar isabetli olduğunu sürüm, lig, tarih ve güven seviyesine göre denetleyin.",
+    eyebrow="ŞEFFAF PERFORMANS",
+)
 disclaimer()
-st.caption("Yalnızca tamamlanmış ve otomatik değerlendirilmiş maçlar gösterilir.")
+section_intro("Yalnızca maç başlamadan önce kaydedilmiş ve otomatik değerlendirilmiş tahminler gösterilir.")
 
 try:
-    evaluations = load_evaluated_predictions()
+    evaluations = load_evaluated_predictions(limit=1_000)
 except Exception as exc:
     st.error(f"Tahmin sonuçları yüklenemedi: {exc}")
     st.stop()
@@ -31,18 +42,45 @@ if evaluations.empty:
     st.info("Henüz değerlendirilmiş tahmin yok. Maçlar tamamlandıkça burada görünür.")
     st.stop()
 
+if len(evaluations) >= 1_000:
+    st.caption(
+        "Denetim listesi en güncel 1.000 değerlendirmeyi gösterir; daha eski "
+        "kayıtlar bu ekranda yer almaz."
+    )
+
 date_bounds = evaluations["match_date"].dt.date
-filters = st.columns(4)
-leagues = ["Tümü", *sorted(evaluations["league_name"].dropna().unique())]
-selected_league = filters[0].selectbox("Lig", leagues)
-status = filters[1].selectbox("1-X-2 sonucu", ["Tümü", "Doğru", "Yanlış"])
-confidence = filters[2].selectbox("1-X-2 güveni", ["Tümü", "Güçlü", "Orta", "Düşük"])
-selected_dates = filters[3].date_input(
-    "Maç tarihi",
-    value=(date_bounds.min(), date_bounds.max()),
-    min_value=date_bounds.min(),
-    max_value=date_bounds.max(),
-)
+with st.container(border=True):
+    st.markdown("**Sonuçları filtrele**")
+    first_row = st.columns(3)
+    model_versions = evaluations["model_version"].dropna().astype(str).unique().tolist()
+    timestamped_versions = [
+        version for version in model_versions if version.startswith("model_v")
+    ]
+    latest_model = (
+        max(timestamped_versions)
+        if timestamped_versions
+        else model_versions[-1]
+        if model_versions
+        else "Tümü"
+    )
+    selected_model = first_row[0].selectbox(
+        "Model sürümü",
+        ["Tümü", *model_versions],
+        index=(["Tümü", *model_versions].index(latest_model) if model_versions else 0),
+    )
+    leagues = ["Tümü", *sorted(evaluations["league_name"].dropna().unique())]
+    selected_league = first_row[1].selectbox("Lig", leagues)
+    status = first_row[2].selectbox("1-X-2 sonucu", ["Tümü", "Doğru", "Yanlış"])
+    second_row = st.columns(2)
+    confidence = second_row[0].selectbox(
+        "1-X-2 güveni", ["Tümü", "Güçlü", "Orta", "Düşük"]
+    )
+    selected_dates = second_row[1].date_input(
+        "Maç tarihi",
+        value=(date_bounds.min(), date_bounds.max()),
+        min_value=date_bounds.min(),
+        max_value=date_bounds.max(),
+    )
 
 filtered = evaluations.copy()
 filtered["_confidence"] = [
@@ -55,6 +93,8 @@ if len(selected_dates) == 2:
     ]
 if selected_league != "Tümü":
     filtered = filtered[filtered["league_name"] == selected_league]
+if selected_model != "Tümü":
+    filtered = filtered[filtered["model_version"].astype(str) == selected_model]
 if status == "Doğru":
     filtered = filtered[filtered["was_correct"]]
 elif status == "Yanlış":
@@ -107,10 +147,17 @@ summary[4].metric(
     delta=f"n={len(brier_scores)}",
     delta_color="off",
 )
+if len(filtered) < 100:
+    st.info(
+        f"Bu filtrede yalnızca {len(filtered)} maç var. Başarı oranını kesin bir "
+        "model performansı olarak yorumlamak için en az 100 maç bekleyin."
+    )
 
 display_df = evaluated_result_display(filtered)
 grid_options = build_read_only_grid_options(display_df)
 
+st.subheader("Maç bazlı sonuçlar")
+section_intro("✓ doğru, ✕ yanlış tahmini gösterir; Brier skorunda daha düşük değer daha iyidir.")
 AgGrid(
     display_df,
     gridOptions=grid_options,

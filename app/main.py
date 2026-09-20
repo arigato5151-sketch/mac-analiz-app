@@ -14,15 +14,21 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.components.data import load_latest_model_metadata, load_upcoming_dashboard
 from app.components.ui import (
+    compact_dashboard_display,
     configure_page,
     dashboard_display,
     disclaimer,
+    page_header,
+    section_intro,
 )
 
 
 configure_page("Ana Sayfa")
-st.title("⚽ Maç Analiz ve Tahmin")
-st.caption("25 lig · Poisson baseline · XGBoost · şeffaf performans takibi")
+page_header(
+    "Maçları tek bakışta değerlendirin",
+    "Yaklaşan karşılaşmaları, model olasılıklarını ve öne çıkan sinyalleri sade bir görünümde inceleyin.",
+    eyebrow="25 LİG · GÜNCEL TAHMİNLER",
+)
 disclaimer()
 
 try:
@@ -33,29 +39,54 @@ except Exception as exc:  # Streamlit must remain usable during upstream outages
     st.stop()
 
 col1, col2, col3 = st.columns(3)
-col1.metric("Önümüzdeki 3 gün", len(matches))
-col2.metric("Tahmin hazır", int(matches.get("model_version", []).notna().sum()) if not matches.empty and "model_version" in matches else 0)
-col3.metric("Model test Log Loss", f"{metadata['metrics']['log_loss']:.3f}" if metadata else "—")
-if metadata:
-    st.caption(f"Aktif model: {metadata['active_model_version']}")
+ready_count = (
+    int(matches["model_version"].notna().sum())
+    if not matches.empty and "model_version" in matches
+    else 0
+)
+col1.metric("Yaklaşan maç", len(matches), help="Önümüzdeki üç gündeki maç sayısı")
+col2.metric(
+    "Analiz hazır",
+    f"{ready_count}/{len(matches)}",
+    help="Model olasılıkları hazırlanmış maçlar",
+)
+col3.metric(
+    "Offline Brier",
+    f"{metadata['metrics']['brier_score']:.3f}" if metadata else "—",
+    help="Daha düşük değer, olasılık tahminlerinin daha iyi olduğunu gösterir.",
+)
+
+if not matches.empty and "model_version" in matches:
+    active_versions = matches["model_version"].dropna().astype(str)
+    if not active_versions.empty:
+        st.caption(f"Yaklaşan maçlarda kullanılan model: `{active_versions.iloc[0]}`")
 
 st.subheader("Yaklaşan maçlar")
+section_intro("Önce temel olasılıkları inceleyin; alternatif pazarları gerektiğinde açın.")
 if matches.empty:
     st.info("Seçili liglerde önümüzdeki üç gün için planlanmış maç bulunamadı.")
 else:
     leagues = ["Tümü", *sorted(matches["league_name"].dropna().unique())]
-    selected = st.selectbox("Lig", leagues)
+    selected = st.selectbox("Lig filtresi", leagues)
     filtered = matches if selected == "Tümü" else matches[matches["league_name"] == selected]
-    st.dataframe(
-        dashboard_display(filtered),
-        hide_index=True,
-        width="stretch",
-        height=min(700, 40 + 35 * len(filtered)),
-    )
+    overview_tab, markets_tab = st.tabs(["Hızlı görünüm", "Tüm pazarlar"])
+    with overview_tab:
+        st.dataframe(
+            compact_dashboard_display(filtered),
+            hide_index=True,
+            width="stretch",
+            height=min(680, 40 + 35 * len(filtered)),
+        )
+    with markets_tab:
+        st.dataframe(
+            dashboard_display(filtered),
+            hide_index=True,
+            width="stretch",
+            height=min(680, 40 + 35 * len(filtered)),
+        )
+    st.caption(f"{len(filtered)} maç gösteriliyor.")
 
-st.caption("Detaylı analiz için sol menüden Maç Detay sayfasını açın.")
-st.caption(
-    "“En güçlü sinyal”, 1-X-2, Üst 2.5 ve KG Var piyasaları arasındaki en yüksek "
-    "model olasılığını gösterir; alternatif pazar sütunları yalnızca eşik üstü "
-    "tahminleri içerir."
-)
+navigation = st.columns(3)
+navigation[0].page_link("pages/1_bugunun_maclari.py", label="Tüm maçları filtrele", icon="📅")
+navigation[1].page_link("pages/2_mac_detay.py", label="Maç detayını aç", icon="🔎")
+navigation[2].page_link("pages/3_model_performans.py", label="Model performansı", icon="📈")

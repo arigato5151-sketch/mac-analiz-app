@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from html import escape
 import json
 
 import pandas as pd
@@ -11,6 +12,7 @@ from models.market_forecast import (
     MINIMUM_DOUBLE_CHANCE_CONFIDENCE,
     MINIMUM_GOAL_MARKET_CONFIDENCE,
 )
+from models.decision_policy import MINIMUM_ACTIONABLE_1X2_CONFIDENCE
 
 
 OUTCOME_COLUMNS: tuple[tuple[str, str], ...] = (
@@ -33,12 +35,59 @@ def configure_page(title: str) -> None:
     st.markdown(
         """
         <style>
-        .block-container {padding-top: 1.6rem; padding-bottom: 3rem; max-width: 1280px;}
-        [data-testid="stMetric"] {background: rgba(120,120,120,.07); border: 1px solid rgba(120,120,120,.18); padding: .8rem; border-radius: .8rem;}
-        .disclaimer {font-size: .84rem; opacity: .72; border-left: 3px solid #f0b429; padding-left: .8rem;}
-        @media (max-width: 700px) {.block-container {padding-left: .8rem; padding-right: .8rem;}}
+        .block-container {padding-top: 1.25rem; padding-bottom: 3rem; max-width: 1320px;}
+        [data-testid="stMetric"] {
+            background: linear-gradient(145deg, rgba(53,196,141,.10), rgba(23,28,36,.88));
+            border: 1px solid rgba(53,196,141,.22);
+            padding: 1rem; border-radius: 1rem;
+        }
+        [data-testid="stMetricLabel"] {font-weight: 650;}
+        [data-testid="stMetricValue"] {letter-spacing: -.035em;}
+        [data-testid="stDataFrame"], [data-testid="stTable"] {
+            border: 1px solid rgba(120,120,120,.20); border-radius: .9rem; overflow: hidden;
+        }
+        .app-hero {
+            padding: 1.25rem 1.35rem; margin: 0 0 1rem;
+            border-radius: 1.15rem; border: 1px solid rgba(53,196,141,.24);
+            background: radial-gradient(circle at top right, rgba(53,196,141,.18), transparent 42%),
+                        linear-gradient(135deg, rgba(23,28,36,.96), rgba(14,17,23,.96));
+        }
+        .app-eyebrow {color: #35C48D; font-size: .76rem; font-weight: 750; letter-spacing: .08em; text-transform: uppercase;}
+        .app-hero h1 {font-size: clamp(1.65rem, 4vw, 2.45rem); line-height: 1.12; margin: .35rem 0 .45rem;}
+        .app-hero p {max-width: 760px; margin: 0; color: rgba(242,245,247,.74); font-size: .98rem;}
+        .section-note {color: rgba(242,245,247,.68); margin-top: -.35rem; margin-bottom: .9rem;}
+        .disclaimer {
+            font-size: .84rem; opacity: .82; border: 1px solid rgba(240,180,41,.24);
+            background: rgba(240,180,41,.07); padding: .7rem .85rem; border-radius: .75rem;
+        }
+        div[data-testid="stExpander"] {border-radius: .9rem; border-color: rgba(120,120,120,.20);}
+        div[data-testid="stTabs"] button {font-weight: 650;}
+        @media (max-width: 700px) {
+            .block-container {padding: .75rem .7rem 2rem;}
+            .app-hero {padding: 1rem; border-radius: .9rem;}
+            [data-testid="stMetric"] {padding: .75rem;}
+        }
         </style>
         """,
+        unsafe_allow_html=True,
+    )
+
+
+def page_header(
+    title: str,
+    description: str,
+    *,
+    eyebrow: str = "MAÇ ANALİZ",
+) -> None:
+    """Render a consistent, accessible heading without trusting dynamic HTML."""
+    st.markdown(
+        (
+            '<section class="app-hero">'
+            f'<div class="app-eyebrow">{escape(eyebrow)}</div>'
+            f'<h1>{escape(title)}</h1>'
+            f'<p>{escape(description)}</p>'
+            "</section>"
+        ),
         unsafe_allow_html=True,
     )
 
@@ -48,6 +97,15 @@ def disclaimer() -> None:
         '<p class="disclaimer">Tahminler istatistiksel olasılıktır; kesin sonuç veya bahis tavsiyesi değildir.</p>',
         unsafe_allow_html=True,
     )
+
+
+def confidence_label(probability: float) -> str:
+    """Map a probability to the same confidence bands used for publishing."""
+    if probability >= 0.60:
+        return "Güçlü"
+    if probability >= MINIMUM_ACTIONABLE_1X2_CONFIDENCE:
+        return "Orta"
+    return "Düşük"
 
 
 def probability_percent(value: object) -> str:
@@ -68,7 +126,7 @@ def prediction_signal(row: pd.Series) -> tuple[str, float | None, str]:
 
     market, probability = max(candidates, key=lambda item: item[1])
     confidence = "Güçlü" if probability >= 0.60 else "Orta" if probability >= 0.50 else "Düşük"
-    return market, probability, confidence
+    return market, probability, confidence_label(probability)
 
 
 def prediction_signal_text(row: pd.Series) -> str:
@@ -148,7 +206,7 @@ def outcome_prediction_signal(row: pd.Series) -> tuple[str, float | None, str]:
 
     market, probability = max(candidates, key=lambda item: item[1])
     confidence = "Güçlü" if probability >= 0.60 else "Orta" if probability >= 0.50 else "Düşük"
-    return market, probability, confidence
+    return market, probability, confidence_label(probability)
 
 
 def binary_market_evaluation(
@@ -174,6 +232,11 @@ def binary_market_evaluation(
         actual_label,
         predicted_positive == actual_positive,
     )
+
+
+def section_intro(text: str) -> None:
+    """Add short context below a section heading."""
+    st.markdown(f'<p class="section-note">{escape(text)}</p>', unsafe_allow_html=True)
 
 
 def evaluated_result_display(frame: pd.DataFrame) -> pd.DataFrame:
@@ -264,6 +327,33 @@ def dashboard_display(frame: pd.DataFrame) -> pd.DataFrame:
                 probability_percent
             ),
             "En güçlü sinyal": frame.apply(prediction_signal_text, axis=1),
+        }
+    )
+
+
+def compact_dashboard_display(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return the decision-focused fixture view; advanced markets stay optional."""
+    return pd.DataFrame(
+        {
+            "Tarih": frame["match_date"].dt.strftime("%d.%m %H:%M"),
+            "Lig": frame["league_name"],
+            "Maç": frame["home_team"] + " — " + frame["away_team"],
+            "1": frame.get("prob_home_win", pd.Series(index=frame.index)).map(
+                probability_percent
+            ),
+            "X": frame.get("prob_draw", pd.Series(index=frame.index)).map(
+                probability_percent
+            ),
+            "2": frame.get("prob_away_win", pd.Series(index=frame.index)).map(
+                probability_percent
+            ),
+            "Üst 2.5": frame.get(
+                "prob_over_2_5", pd.Series(index=frame.index)
+            ).map(probability_percent),
+            "KG Var": frame.get("prob_btts", pd.Series(index=frame.index)).map(
+                probability_percent
+            ),
+            "Öne çıkan": frame.apply(prediction_signal_text, axis=1),
         }
     )
 

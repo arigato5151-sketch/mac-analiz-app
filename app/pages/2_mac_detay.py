@@ -27,6 +27,7 @@ from data_pipeline.statsbomb_adapter import StatsBombAdapter
 from app.components.ui import (
     configure_page,
     disclaimer,
+    page_header,
     prediction_signal,
     probability_percent,
 )
@@ -38,7 +39,11 @@ LOGGER = logging.getLogger(__name__)
 
 
 configure_page("Maç Detay")
-st.title("Maç Detay Analizi")
+page_header(
+    "Maç detay analizi",
+    "Bir karşılaşmanın sonuç olasılıklarını, kadro durumunu, formunu ve skor senaryolarını birlikte inceleyin.",
+    eyebrow="DERİNLEMESİNE ANALİZ",
+)
 disclaimer()
 
 try:
@@ -60,7 +65,7 @@ matches["label"] = (
     + matches["away_team"]
 )
 selected_id = st.selectbox(
-    "Maç seçin",
+    "İncelenecek maç",
     matches["id"].tolist(),
     format_func=lambda match_id: matches.loc[matches["id"] == match_id, "label"].iloc[0],
 )
@@ -448,4 +453,3 @@ try:
 except Exception as sb_exc:
     LOGGER.warning("StatsBomb visual load error: %s", sb_exc)
     st.info("StatsBomb taktiksel analizleri şu anda hazırlanamadı.")
-

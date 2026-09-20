@@ -135,7 +135,7 @@ def load_prediction_performance() -> pd.DataFrame:
     rows = db.select_all(
         "evaluated_prediction_results",
         columns=(
-            "prediction_id,match_id,actual_result,was_correct,brier_score,"
+            "prediction_id,match_id,model_version,actual_result,was_correct,brier_score,"
             "prob_home_win,prob_draw,prob_away_win,"
             "evaluated_at,over_2_5_actual,over_2_5_was_correct,over_2_5_brier_score,"
             "btts_actual,btts_was_correct,btts_brier_score,"
@@ -196,7 +196,7 @@ def load_odds_history(match_id: int) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
-def load_evaluated_predictions(limit: int = 250) -> pd.DataFrame:
+def load_evaluated_predictions(limit: int = 1_000) -> pd.DataFrame:
     """Load evaluated predictions from the RLS-protected database view."""
     if limit < 1 or limit > 1_000:
         raise ValueError("limit must be between 1 and 1000")

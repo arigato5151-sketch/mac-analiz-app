@@ -16,20 +16,32 @@ from app.components.data import load_latest_model_metadata, load_prediction_perf
 from app.components.live_performance import summarize_live_performance
 from app.components.market_performance import summarize_diversified_market_performance
 from app.components.monte_carlo import simulate_top_pick_accuracy
-from app.components.ui import configure_page, disclaimer
+from app.components.ui import configure_page, disclaimer, page_header, section_intro
 from config.leagues import LEAGUES_BY_ID
 from models.decision_policy import MINIMUM_ACTIONABLE_1X2_CONFIDENCE
 from monitoring.drift_service import DriftMonitoringService
 
 
 configure_page("Model Performansı")
-st.title("Model Performansı")
+page_header(
+    "Model performansı",
+    "Offline testleri, canlı isabeti, güven aralıklarını ve veri sapmasını aynı ekranda izleyin.",
+    eyebrow="MODEL SAĞLIĞI",
+)
 disclaimer()
+
+with st.expander("Metrikleri nasıl okumalıyım?"):
+    st.markdown(
+        "- **İsabet:** En yüksek olasılıklı sonucun doğru çıkma oranı.\n"
+        "- **Brier:** Olasılıkların gerçekle uyumu; düşük olması iyidir.\n"
+        "- **Log Loss:** Yanlış ve aşırı güvenli tahminleri daha sert cezalandırır; düşük olması iyidir.\n"
+        "- **Kapsama:** Güven eşiğini geçip yayınlanan maçların oranı."
+    )
 
 metadata = load_latest_model_metadata()
 if metadata:
     metrics = metadata["metrics"]
-    st.caption(f"Aktif model: {metadata['active_model_version']}")
+    st.caption(f"Yerel offline referans model: {metadata['active_model_version']}")
     cols = st.columns(4)
     cols[0].metric(
         "Kalibre Log Loss",
@@ -254,6 +266,7 @@ except Exception as exc:
     st.warning(f"Monte Carlo dağılımı şu anda hazırlanamadı: {exc}")
 
 st.subheader("Canlı tahmin takibi")
+section_intro("Her model sürümü ayrı gösterilir; böylece eski sonuçlar yeni modelin performansını maskelemez.")
 performance = load_prediction_performance()
 if performance.empty:
     st.info(
@@ -261,6 +274,31 @@ if performance.empty:
         "isabet ve Brier trendi burada görünecek."
     )
 else:
+    versioned_performance = performance.dropna(subset=["model_version"]).copy()
+    model_versions = (
+        versioned_performance["model_version"].astype(str).unique().tolist()
+    )
+    if not model_versions:
+        st.warning("Canlı performans kayıtlarında model sürümü bulunamadı.")
+        st.stop()
+    latest_model_version = str(
+        versioned_performance.sort_values("evaluated_at").iloc[-1]["model_version"]
+    )
+    selected_model_version = st.selectbox(
+        "Canlı performans modeli",
+        model_versions,
+        index=model_versions.index(latest_model_version),
+        help=(
+            "Model sürümleri ayrı değerlendirilir; eski ve yeni tahminler "
+            "tek bir başarı oranında birleştirilmez."
+        ),
+    )
+    performance = versioned_performance[
+        versioned_performance["model_version"].astype(str) == selected_model_version
+    ].copy()
+    st.caption(
+        f"Canlı metrikler yalnızca {selected_model_version} sürümüne aittir."
+    )
     performance["evaluated_at"] = pd.to_datetime(performance["evaluated_at"], utc=True)
     performance["rolling_accuracy"] = performance["was_correct"].astype(float).rolling(30, min_periods=1).mean()
     performance["rolling_brier"] = performance["brier_score"].astype(float).rolling(30, min_periods=1).mean()
