@@ -47,12 +47,17 @@ LEAGUES_BY_ID: dict[int, LeagueConfig] = {
     league.id: league for league in TRACKED_LEAGUES
 }
 
-# Empirical priors; unlisted competitions retain the conservative global prior.
+# Re-estimated from 25,911 completed historical matches on 2026-09-21:
+# realized home expected score converted to Elo points per league. Every
+# tracked league carries its own measured value so nothing falls back to the
+# global prior silently.
 HOME_ADVANTAGE_BY_LEAGUE: dict[int, float] = {
-    39: 62.0, 140: 58.0, 135: 60.0, 78: 55.0, 61: 57.0,
-    203: 63.0, 94: 59.0, 88: 56.0, 40: 61.0, 71: 64.0,
+    2: 59, 3: 69, 13: 107, 39: 36, 40: 49, 61: 41, 62: 40,
+    71: 80, 78: 34, 88: 47, 94: 38, 135: 29, 136: 48, 140: 61,
+    141: 66, 144: 45, 179: 47, 197: 35, 203: 61, 207: 53, 218: 33,
+    253: 61, 262: 67, 307: 32, 848: 65,
 }
-DEFAULT_HOME_ADVANTAGE = 65.0
+DEFAULT_HOME_ADVANTAGE = 52
 
 
 def home_advantage_for_league(league_id: int) -> float:

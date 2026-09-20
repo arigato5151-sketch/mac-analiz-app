@@ -28,7 +28,7 @@ from data_pipeline.odds import MatchOdds, fetch_match_odds, record_odds_quote
 from data_pipeline.refresh_context import current_elo_ratings
 from db.db_client import DatabaseError, SupabaseRestClient
 from models.feature_engineering import CausalFeatureState
-from models.decision_policy import MINIMUM_ACTIONABLE_1X2_CONFIDENCE, select_1x2
+from models.decision_policy import minimum_confidence_for_league, select_1x2
 from models.market_forecast import format_telegram_market_lines
 from models.predict import generate_prediction_rows, load_latest_team_forms, persist_predictions, resolve_model_path
 from models.shadow import run_shadow_predictions
@@ -201,12 +201,14 @@ def pre_match_message(
 ) -> str:
     kickoff = datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
     outcome_labels = ("Ev kazanır", "Beraberlik", "Deplasman kazanır")
+    publish_threshold = minimum_confidence_for_league(match.get("league_id"))
     outcome_index, probability, actionable = select_1x2(
         (
             prediction["prob_home_win"],
             prediction["prob_draw"],
             prediction["prob_away_win"],
-        )
+        ),
+        threshold=publish_threshold,
     )
     outcome = outcome_labels[outcome_index]
     result_line = (
@@ -214,7 +216,7 @@ def pre_match_message(
         if actionable
         else (
             f"1X2: Pas · en yüksek {outcome} %{probability * 100:.0f} "
-            f"(<%{MINIMUM_ACTIONABLE_1X2_CONFIDENCE * 100:.0f} güven eşiği)"
+            f"(<%{publish_threshold * 100:.0f} güven eşiği)"
         )
     )
     lines = [

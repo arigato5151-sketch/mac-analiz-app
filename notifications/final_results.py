@@ -9,7 +9,7 @@ from typing import Any
 
 from config.settings import get_settings
 from db.db_client import SupabaseRestClient
-from models.decision_policy import MINIMUM_ACTIONABLE_1X2_CONFIDENCE, select_1x2
+from models.decision_policy import minimum_confidence_for_league, select_1x2
 from notifications.telegram import TelegramError, send_telegram_message
 
 
@@ -50,12 +50,14 @@ def final_result_message(
     home_score = int(match["home_score"])
     away_score = int(match["away_score"])
     outcome_labels = ("Ev kazanır", "Beraberlik", "Deplasman kazanır")
+    publish_threshold = minimum_confidence_for_league(match.get("league_id"))
     outcome_index, outcome_probability, actionable = select_1x2(
         (
             prediction["prob_home_win"],
             prediction["prob_draw"],
             prediction["prob_away_win"],
-        )
+        ),
+        threshold=publish_threshold,
     )
     predicted_outcome = outcome_labels[outcome_index]
     outcome_correct = predicted_outcome == _outcome_label(home_score, away_score)
@@ -66,7 +68,7 @@ def final_result_message(
         else (
             f"1-X-2: Pas · en yüksek {predicted_outcome} "
             f"%{outcome_probability * 100:.0f} "
-            f"(<%{MINIMUM_ACTIONABLE_1X2_CONFIDENCE * 100:.0f})"
+            f"(<%{publish_threshold * 100:.0f})"
         )
     )
     return "\n".join(
