@@ -77,8 +77,11 @@ if metadata:
         league_frame["Doğruluk"] = league_frame["accuracy"].map(
             lambda value: f"%{value * 100:.1f}"
         )
-        st.dataframe(
-            league_frame[["Lig", "matches", "log_loss", "brier_score", "ece", "Doğruluk"]]
+        league_display = (
+            league_frame[
+                ["Lig", "matches", "log_loss", "brier_score", "ece", "Doğruluk"]
+            ]
+            .sort_values("log_loss")
             .rename(
                 columns={
                     "matches": "Maç",
@@ -87,7 +90,13 @@ if metadata:
                     "ece": "ECE",
                 }
             )
-            .sort_values("Log Loss"),
+        )
+        for metric_column in ("Log Loss", "Brier", "ECE"):
+            league_display[metric_column] = league_display[metric_column].map(
+                lambda value: f"{float(value):.3f}"
+            )
+        st.dataframe(
+            league_display,
             hide_index=True,
             width="stretch",
         )

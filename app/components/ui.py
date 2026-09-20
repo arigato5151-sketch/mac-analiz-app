@@ -35,6 +35,7 @@ def configure_page(title: str) -> None:
     st.markdown(
         """
         <style>
+        [data-testid="stSidebarNav"] {display: none;}
         .block-container {padding-top: 1.25rem; padding-bottom: 3rem; max-width: 1320px;}
         [data-testid="stMetric"] {
             background: linear-gradient(145deg, rgba(53,196,141,.10), rgba(23,28,36,.88));
@@ -71,6 +72,28 @@ def configure_page(title: str) -> None:
         """,
         unsafe_allow_html=True,
     )
+    _render_sidebar_navigation()
+
+
+def _render_sidebar_navigation() -> None:
+    """Replace filename-derived navigation with clear task-oriented labels."""
+    with st.sidebar:
+        st.markdown("### ⚽ Maç Analiz")
+        st.caption("Tahmin, karşılaştırma ve performans merkezi")
+        st.page_link("main.py", label="Genel bakış", icon="🏠")
+        st.page_link(
+            "pages/1_bugunun_maclari.py", label="Maç programı", icon="📅"
+        )
+        st.page_link("pages/2_mac_detay.py", label="Maç analizi", icon="🔎")
+        st.page_link(
+            "pages/3_model_performans.py", label="Model performansı", icon="📈"
+        )
+        st.page_link(
+            "pages/5_tahmin_sonuclari.py", label="Tahmin sonuçları", icon="✅"
+        )
+        st.page_link("pages/4_ayarlar.py", label="Veri kapsamı", icon="⚙️")
+        st.divider()
+        st.caption("Saat dilimi: Europe/Istanbul")
 
 
 def page_header(

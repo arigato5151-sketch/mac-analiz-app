@@ -12,3 +12,6 @@ runOnSave = true
 
 [browser]
 gatherUsageStats = false
+
+[client]
+showSidebarNavigation = false
