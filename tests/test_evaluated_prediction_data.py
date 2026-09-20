@@ -119,5 +119,6 @@ def test_live_performance_requests_diversified_market_fields(monkeypatch) -> Non
     assert frame.empty
     assert len(db.calls) == 1
     assert db.calls[0][0] == "evaluated_prediction_results"
+    assert "model_version" in db.calls[0][1]["columns"]
     assert "market_probabilities" in db.calls[0][1]["columns"]
     assert "market_performance" in db.calls[0][1]["columns"]
