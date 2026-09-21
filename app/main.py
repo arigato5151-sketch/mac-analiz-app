@@ -12,7 +12,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.components.data import load_latest_model_metadata, load_upcoming_dashboard
+from app.components.data import (
+    UPCOMING_HORIZON_DAYS,
+    load_latest_model_metadata,
+    load_upcoming_dashboard,
+)
 from app.components.ui import (
     compact_dashboard_display,
     configure_page,
@@ -21,7 +25,6 @@ from app.components.ui import (
     page_header,
     section_intro,
 )
-from config.settings import UPCOMING_HORIZON_DAYS
 
 
 configure_page("Ana Sayfa")

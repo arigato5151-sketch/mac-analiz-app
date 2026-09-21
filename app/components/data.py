@@ -11,11 +11,7 @@ import pandas as pd
 import joblib
 import streamlit as st
 
-from config.settings import (
-    PROJECT_ROOT,
-    UPCOMING_HORIZON_DAYS,
-    get_public_supabase_settings,
-)
+from config.settings import PROJECT_ROOT, get_public_supabase_settings
 from db.db_client import PublicSupabaseRestClient
 from models.feature_engineering import CausalFeatureState
 from models.train_model import load_historical_matches
@@ -26,6 +22,7 @@ MATCH_DETAIL_TTL_SECONDS = 900
 HISTORY_TTL_SECONDS = 900
 REFERENCE_DATA_TTL_SECONDS = 21_600
 MODEL_METADATA_TTL_SECONDS = 3_600
+UPCOMING_HORIZON_DAYS = 7
 
 
 @st.cache_resource(show_spinner=False)
