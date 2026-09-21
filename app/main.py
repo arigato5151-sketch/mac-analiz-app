@@ -21,6 +21,7 @@ from app.components.ui import (
     page_header,
     section_intro,
 )
+from config.settings import UPCOMING_HORIZON_DAYS
 
 
 configure_page("Ana Sayfa")
@@ -32,7 +33,7 @@ page_header(
 disclaimer()
 
 try:
-    matches = load_upcoming_dashboard(3)
+    matches = load_upcoming_dashboard()
     metadata = load_latest_model_metadata()
 except Exception as exc:  # Streamlit must remain usable during upstream outages.
     st.error(f"Veriler şu anda yüklenemedi: {exc}")
@@ -44,7 +45,11 @@ ready_count = (
     if not matches.empty and "model_version" in matches
     else 0
 )
-col1.metric("Yaklaşan maç", len(matches), help="Önümüzdeki üç gündeki maç sayısı")
+col1.metric(
+    "Yaklaşan maç",
+    len(matches),
+    help=f"Önümüzdeki {UPCOMING_HORIZON_DAYS} gündeki maç sayısı",
+)
 col2.metric(
     "Analiz hazır",
     f"{ready_count}/{len(matches)}",
@@ -64,7 +69,10 @@ if not matches.empty and "model_version" in matches:
 st.subheader("Yaklaşan maçlar")
 section_intro("Önce temel olasılıkları inceleyin; alternatif pazarları gerektiğinde açın.")
 if matches.empty:
-    st.info("Seçili liglerde önümüzdeki üç gün için planlanmış maç bulunamadı.")
+    st.info(
+        f"Seçili liglerde önümüzdeki {UPCOMING_HORIZON_DAYS} gün için "
+        "planlanmış maç bulunamadı."
+    )
 else:
     leagues = ["Tümü", *sorted(matches["league_name"].dropna().unique())]
     selected = st.selectbox("Lig filtresi", leagues)

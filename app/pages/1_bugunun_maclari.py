@@ -33,7 +33,7 @@ page_header(
 disclaimer()
 
 try:
-    matches = load_upcoming_dashboard(3)
+    matches = load_upcoming_dashboard()
 except Exception as exc:
     st.error(f"Maçlar yüklenemedi: {exc}")
     st.stop()

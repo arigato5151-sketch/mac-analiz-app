@@ -26,8 +26,8 @@ iki Supabase alanı yeterlidir. Gizli dosyalar Git tarafından yok sayılır.
 ## Temel komutlar
 
 ```powershell
-# Önümüzdeki üç günün fikstürü
-python -m data_pipeline.fetch_fixtures --days 3
+# Önümüzdeki yedi günün fikstürü
+python -m data_pipeline.fetch_fixtures --days 7
 
 # Üç sezonluk tarihsel veri
 python -m data_pipeline.backfill --seasons 2023 2024 2025
@@ -36,7 +36,7 @@ python -m data_pipeline.backfill --seasons 2023 2024 2025
 python -m models.train_model
 
 # Gelecek maç tahminleri
-python -m models.predict --days 3
+python -m models.predict --days 7
 
 # Testler
 python -m pytest -q

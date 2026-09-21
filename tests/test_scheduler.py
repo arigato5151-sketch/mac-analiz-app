@@ -50,6 +50,20 @@ def test_daily_summary_uses_morning_mode(monkeypatch) -> None:
     )
 
 
+def test_morning_update_uses_shared_seven_day_horizon(monkeypatch) -> None:
+    run_module = MagicMock(return_value={"returncode": 0})
+    monkeypatch.setattr(scheduler, "_run_module", run_module)
+
+    scheduler.run_morning_update()
+
+    assert [call.args for call in run_module.call_args_list] == [
+        ("data_pipeline.fetch_fixtures", "--days", "7"),
+        ("data_pipeline.refresh_context", "--days", "7"),
+        ("models.predict", "--days", "7"),
+        ("data_pipeline.data_quality", "--days", "7"),
+    ]
+
+
 def test_result_job_calls_existing_notification_entrypoint(monkeypatch) -> None:
     from notifications import final_results
 

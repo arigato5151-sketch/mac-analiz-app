@@ -11,7 +11,7 @@ from typing import Any
 import joblib
 import numpy as np
 
-from config.settings import PROJECT_ROOT, get_settings
+from config.settings import PROJECT_ROOT, UPCOMING_HORIZON_DAYS, get_settings
 from db.db_client import SupabaseRestClient
 from data_pipeline.odds import attach_pre_match_odds
 from models.artifact_store import ArtifactStoreError, download_model_artifacts
@@ -328,7 +328,7 @@ def persist_predictions(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path)
-    parser.add_argument("--days", type=int, default=3)
+    parser.add_argument("--days", type=int, default=UPCOMING_HORIZON_DAYS)
     args = parser.parse_args()
 
     settings = get_settings()

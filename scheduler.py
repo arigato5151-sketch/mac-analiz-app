@@ -12,6 +12,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from config.settings import UPCOMING_HORIZON_DAYS
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
@@ -115,11 +117,12 @@ def _run_module(module: str, *arguments: str) -> dict[str, Any]:
 # Job functions use subprocesses for CLI tasks so concurrent jobs never mutate sys.argv.
 def run_morning_update() -> dict[str, Any]:
     """Morning data update - fetch fixtures, refresh context, generate predictions."""
+    horizon = str(UPCOMING_HORIZON_DAYS)
     return {
-        "fixtures": _run_module("data_pipeline.fetch_fixtures", "--days", "3"),
-        "refresh_context": _run_module("data_pipeline.refresh_context", "--days", "3"),
-        "predictions": _run_module("models.predict", "--days", "3"),
-        "quality": _run_module("data_pipeline.data_quality", "--days", "3"),
+        "fixtures": _run_module("data_pipeline.fetch_fixtures", "--days", horizon),
+        "refresh_context": _run_module("data_pipeline.refresh_context", "--days", horizon),
+        "predictions": _run_module("models.predict", "--days", horizon),
+        "quality": _run_module("data_pipeline.data_quality", "--days", horizon),
     }
 
 

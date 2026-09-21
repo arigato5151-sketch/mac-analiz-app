@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from config.leagues import LEAGUES_BY_ID
-from config.settings import get_settings
+from config.settings import UPCOMING_HORIZON_DAYS, get_settings
 from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_injuries import sync_injuries
 from data_pipeline.fetch_team_stats import sync_team_form
@@ -67,7 +67,7 @@ def refresh_upcoming_context(
     db: SupabaseRestClient,
     *,
     now: datetime,
-    horizon_days: int = 3,
+    horizon_days: int = UPCOMING_HORIZON_DAYS,
 ) -> dict[str, Any]:
     """Refresh context with partial-failure reporting and safe retry semantics."""
     targets = upcoming_team_targets(db, now=now, horizon_days=horizon_days)
@@ -128,7 +128,7 @@ def refresh_upcoming_context(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--days", type=int, default=3)
+    parser.add_argument("--days", type=int, default=UPCOMING_HORIZON_DAYS)
     args = parser.parse_args()
     settings = get_settings()
     api = ApiFootballClient(settings.api_football_key)

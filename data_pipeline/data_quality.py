@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from config.settings import get_settings
+from config.settings import UPCOMING_HORIZON_DAYS, get_settings
 from db.db_client import SupabaseRestClient
 
 
@@ -75,7 +75,7 @@ def assess_morning_quality(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--days", type=int, default=3)
+    parser.add_argument("--days", type=int, default=UPCOMING_HORIZON_DAYS)
     args = parser.parse_args()
     if args.days < 1 or args.days > 14:
         parser.error("--days must be between 1 and 14")

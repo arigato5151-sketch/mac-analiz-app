@@ -54,7 +54,7 @@ jobs:
       - name: Register newest model as a shadow candidate
         run: python -m models.shadow --register-newest
       - name: Seed upcoming shadow predictions
-        run: python -m models.shadow --days 3
+        run: python -m models.shadow --days 7
       - name: Publish shadow candidate artifacts to Supabase Storage
         run: python -m models.artifact_store --push models/saved_models
       - name: Promote proven shadow candidate
@@ -67,4 +67,4 @@ jobs:
         run: python -m models.artifact_store --push models/saved_models
       - name: Refresh upcoming predictions
         if: github.event_name == 'workflow_dispatch' && inputs.promote_candidate == true
-        run: python -m models.predict --days 3
+        run: python -m models.predict --days 7

@@ -244,7 +244,7 @@ except Exception as drift_exc:
 
 st.subheader("Monte Carlo tahmin belirsizliği")
 try:
-    upcoming = load_upcoming_dashboard(3)
+    upcoming = load_upcoming_dashboard()
     probability_columns = ["prob_home_win", "prob_draw", "prob_away_win"]
     simulation_input = upcoming.dropna(subset=probability_columns)
     if simulation_input.empty:
@@ -267,7 +267,7 @@ try:
         )
         st.plotly_chart(histogram, width="stretch")
         st.caption(
-            f"Önümüzdeki üç gündeki {len(simulation_input)} maç için 10.000 senaryo. "
+            f"Önümüzdeki yedi gündeki {len(simulation_input)} maç için 10.000 senaryo. "
             f"Merkez %80 aralığı: %{lower * 100:.1f} – %{upper * 100:.1f}. "
             "Bu dağılım gerçekleşmiş performans değil, model olasılıklarındaki belirsizliktir."
         )

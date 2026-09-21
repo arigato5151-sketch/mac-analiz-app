@@ -11,7 +11,11 @@ import pandas as pd
 import joblib
 import streamlit as st
 
-from config.settings import PROJECT_ROOT, get_public_supabase_settings
+from config.settings import (
+    PROJECT_ROOT,
+    UPCOMING_HORIZON_DAYS,
+    get_public_supabase_settings,
+)
 from db.db_client import PublicSupabaseRestClient
 from models.feature_engineering import CausalFeatureState
 from models.train_model import load_historical_matches
@@ -48,7 +52,9 @@ def load_completed_match_history() -> list[dict[str, Any]]:
 
 
 @st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
-def load_upcoming_dashboard(horizon_days: int = 3) -> pd.DataFrame:
+def load_upcoming_dashboard(
+    horizon_days: int = UPCOMING_HORIZON_DAYS,
+) -> pd.DataFrame:
     db = get_db()
     now = datetime.now(timezone.utc)
     end = now + timedelta(days=horizon_days)

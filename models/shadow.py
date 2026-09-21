@@ -11,7 +11,7 @@ from typing import Any
 
 import joblib
 
-from config.settings import PROJECT_ROOT, get_settings
+from config.settings import PROJECT_ROOT, UPCOMING_HORIZON_DAYS, get_settings
 from data_pipeline.isotime import parse_iso_datetime
 from db.db_client import DatabaseError, SupabaseRestClient
 from evaluation.track_performance import EVALUATION_LOOKBACK_DAYS
@@ -282,7 +282,7 @@ def main() -> None:
     parser.add_argument("--register-newest", action="store_true")
     parser.add_argument("--evaluate", action="store_true")
     parser.add_argument("--promote")
-    parser.add_argument("--days", type=int, default=3)
+    parser.add_argument("--days", type=int, default=UPCOMING_HORIZON_DAYS)
     args = parser.parse_args()
     settings = get_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)

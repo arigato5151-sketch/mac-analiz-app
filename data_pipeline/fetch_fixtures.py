@@ -9,7 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from config.leagues import LEAGUES_BY_ID, TRACKED_LEAGUE_IDS
-from config.settings import get_settings
+from config.settings import UPCOMING_HORIZON_DAYS, get_settings
 from data_pipeline.api_client import ApiFootballClient
 from db.db_client import SupabaseRestClient
 from monitoring.operational_events import record_api_diagnostics, record_exception
@@ -131,7 +131,12 @@ def sync_fixtures(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--days", type=int, default=3, help="Days including today")
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=UPCOMING_HORIZON_DAYS,
+        help="Days including today",
+    )
     args = parser.parse_args()
     if args.days < 1 or args.days > 14:
         parser.error("--days must be between 1 and 14")
