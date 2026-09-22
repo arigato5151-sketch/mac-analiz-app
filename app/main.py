@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import streamlit as st
 
 # Streamlit Cloud starts with ``app/`` on the import path.
@@ -26,6 +28,7 @@ from app.components.ui import (
     page_header,
     section_intro,
 )
+from models.baselines import detect_upcoming_collapse
 
 
 configure_page("Ana Sayfa")
@@ -80,6 +83,16 @@ if not matches.empty and "model_version" in matches:
         st.caption(
             f"Yaklaşan maçlarda kullanılan model: {version_label(production_version)}"
         )
+    prob_matrix = (
+        matches[["prob_home_win", "prob_draw", "prob_away_win"]]
+        .apply(pd.to_numeric, errors="coerce")
+        .to_numpy(float)
+    )
+    collapse_warning = detect_upcoming_collapse(
+        prob_matrix[~np.isnan(prob_matrix).any(axis=1)]
+    )
+    if collapse_warning:
+        st.warning(f"{collapse_warning} Tahminleri doğrulanmış kabul etmeyin.")
 
 st.subheader("Yaklaşan maçlar")
 section_intro("Önce temel olasılıkları inceleyin; alternatif pazarları gerektiğinde açın.")

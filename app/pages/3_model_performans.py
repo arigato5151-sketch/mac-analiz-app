@@ -12,7 +12,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.components.data import load_latest_model_metadata, load_prediction_performance, load_upcoming_dashboard
+from app.components.data import (
+    load_evaluated_predictions,
+    load_latest_model_metadata,
+    load_prediction_performance,
+    load_upcoming_dashboard,
+)
 from app.components.live_performance import summarize_live_performance
 from app.components.market_performance import summarize_diversified_market_performance
 from app.components.monte_carlo import simulate_top_pick_accuracy
@@ -63,6 +68,13 @@ if metadata:
             f"{metrics['expected_calibration_error']:.3f} "
             f"(ham {metrics['raw_expected_calibration_error']:.3f}) · "
             f"365 gün yarı ömürlü zaman ağırlığı"
+        )
+    calibrated_loss = float(metrics["log_loss"])
+    raw_loss = float(metrics.get("raw_log_loss", calibrated_loss))
+    if calibrated_loss > raw_loss + 1e-9:
+        st.warning(
+            "Kalibrasyon ham modelden kötü; kalibre edilmiş bu sürüm "
+            "production'a uygun sayılmaz."
         )
 
     league_rows = metadata.get("league_metrics", [])
@@ -126,6 +138,73 @@ if metadata:
         )
 else:
     st.warning("Kaydedilmiş model değerlendirme metadatası bulunamadı.")
+
+try:
+    import numpy as np
+
+    from models.baselines import audit_class_distribution, compare_to_baselines
+
+    evaluated = load_evaluated_predictions(limit=1_000)
+    if evaluated.empty:
+        st.info("Baseline karşılaştırması için değerlendirilmiş tahmin yok.")
+    else:
+        eval_probs = evaluated[["prob_home_win", "prob_draw", "prob_away_win"]].apply(
+            pd.to_numeric, errors="coerce"
+        ).to_numpy(float)
+        eval_labels = evaluated["actual_result"].map(
+            {"home_win": 0, "draw": 1, "away_win": 2}
+        ).to_numpy(float)
+        valid = ~np.isnan(eval_probs).any(axis=1) & ~np.isnan(eval_labels)
+        if valid.sum() < 50:
+            st.info(
+                f"Baseline karşılaştırması için yeterli örneklem yok ({int(valid.sum())} maç)."
+            )
+        else:
+            comparison = compare_to_baselines(eval_labels[valid], eval_probs[valid])
+            st.subheader("Baseline karşılaştırması (canlı örneklem)")
+            section_intro(
+                "Model, aynı maçlarda çoğunluk sınıfı ve basit ev sahibi "
+                "referanslarıyla karşılaştırılır."
+            )
+            baseline_frame = pd.DataFrame(
+                [
+                    {
+                        "Referans": result.name,
+                        "Log Loss": f"{result.log_loss:.4f}",
+                        "Brier": f"{result.brier_score:.4f}",
+                        "Doğruluk": f"%{result.accuracy * 100:.1f}",
+                    }
+                    for result in [comparison["model"], *comparison["baselines"]]
+                ]
+            )
+            st.dataframe(baseline_frame, hide_index=True, width="stretch")
+            st.caption(
+                f"Model ECE: {comparison['model_ece']:.4f} · "
+                + (
+                    "Model mevcut tüm referans baseline'larını log-loss'ta geçiyor."
+                    if comparison["beats_all_available"]
+                    else "Model en az bir referans baseline'ı geçemiyor."
+                )
+            )
+
+            audit = audit_class_distribution(eval_labels[valid], eval_probs[valid])
+            st.caption(
+                "Dağılım denetimi — gerçekleşen: "
+                + ", ".join(
+                    f"{label} %{share * 100:.1f}"
+                    for label, share in audit.realized_share.items()
+                )
+                + " · öngörülen ortalama: "
+                + ", ".join(
+                    f"{label} %{share * 100:.1f}"
+                    for label, share in audit.predicted_share.items()
+                )
+                + f" · seçim yoğunlaşması: %{audit.top_pick_concentration * 100:.1f}"
+            )
+            if audit.warning:
+                st.warning(audit.warning)
+except Exception as exc:
+    st.warning(f"Baseline karşılaştırması şu anda hazırlanamadı: {exc}")
 
 st.subheader("Model ve Veri Sapma Analizi (Drift & Kalite)")
 try:

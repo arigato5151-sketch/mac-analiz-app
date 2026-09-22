@@ -29,6 +29,10 @@ MINIMUM_PROMOTION_SAMPLE = 100
 MINIMUM_BRIER_IMPROVEMENT = 0.005
 MINIMUM_PROMOTION_ACCURACY = 0.50
 MAXIMUM_PROMOTION_BRIER = 0.62
+# A candidate whose calibrated loss is worse than its raw loss is not
+# production-ready, and its calibration must not regress beyond production's.
+MINIMUM_BASELINE_ADVANTAGE = 0.01
+MAXIMUM_ECE_REGRESSION = 1.25
 
 
 def candidate_path(model_version: str) -> Path:
@@ -192,8 +196,14 @@ def promotion_decision(
     production_brier: float,
     production_accuracy: float,
     sample_size: int,
+    candidate_calibrated_log_loss: float | None = None,
+    candidate_raw_log_loss: float | None = None,
+    candidate_ece: float | None = None,
+    production_ece: float | None = None,
+    candidate_log_loss: float | None = None,
+    candidate_baseline_log_loss: float | None = None,
 ) -> tuple[bool, str]:
-    """Use a conservative two-metric gate; no sample means no promotion."""
+    """Use a conservative multi-metric gate; no sample means no promotion."""
     if sample_size < MINIMUM_PROMOTION_SAMPLE:
         return False, f"Gölge örneklemi yetersiz: {sample_size}/{MINIMUM_PROMOTION_SAMPLE}"
     if candidate_accuracy < MINIMUM_PROMOTION_ACCURACY:
@@ -212,7 +222,42 @@ def promotion_decision(
         )
     if candidate_accuracy < production_accuracy:
         return False, "Aday modelin 1-X-2 isabeti canlı modelden düşük"
+    if (
+        candidate_calibrated_log_loss is not None
+        and candidate_raw_log_loss is not None
+        and candidate_calibrated_log_loss > candidate_raw_log_loss
+    ):
+        return False, (
+            "Aday modelin kalibrasyonu ham modelden kötü; production'a uygun değil"
+        )
+    if (
+        candidate_ece is not None
+        and production_ece is not None
+        and candidate_ece > production_ece * MAXIMUM_ECE_REGRESSION
+    ):
+        return False, (
+            "Aday modelin kalibrasyonu (ECE) üretim modelinden kabul edilemez "
+            f"derecede kötü: {candidate_ece:.4f} > {production_ece * MAXIMUM_ECE_REGRESSION:.4f}"
+        )
+    if (
+        candidate_log_loss is not None
+        and candidate_baseline_log_loss is not None
+        and candidate_log_loss > candidate_baseline_log_loss - MINIMUM_BASELINE_ADVANTAGE
+    ):
+        return False, (
+            "Aday model, kronolojik frekans baseline'ına karşı anlamlı üstünlük "
+            "sağlamıyor"
+        )
     return True, "Aday model gölge karşılaştırmasını geçti"
+
+
+def _production_offline_metrics() -> dict[str, Any]:
+    """Offline metrics of the current production artifact, when available."""
+    latest = PROJECT_ROOT / "models" / "saved_models" / "latest.joblib"
+    if not latest.is_file():
+        return {}
+    bundle = joblib.load(latest)
+    return dict(bundle.get("metrics", {}))
 
 
 def promote_candidate(db: SupabaseRestClient, model_version: str) -> str:
@@ -255,12 +300,20 @@ def promote_candidate(db: SupabaseRestClient, model_version: str) -> str:
     ]
     if not paired:
         raise RuntimeError("No same-match production baseline is available")
+    candidate_offline = dict(candidate[0].get("offline_metrics") or {})
+    production_offline = _production_offline_metrics()
     accepted, reason = promotion_decision(
         candidate_brier=sum(float(row[0]["brier_score"]) for row in paired) / len(paired),
         candidate_accuracy=sum(bool(row[0]["was_correct"]) for row in paired) / len(paired),
         production_brier=sum(float(row[1]["brier_score"]) for row in paired) / len(paired),
         production_accuracy=sum(bool(row[1]["was_correct"]) for row in paired) / len(paired),
         sample_size=len(paired),
+        candidate_calibrated_log_loss=candidate_offline.get("log_loss"),
+        candidate_raw_log_loss=candidate_offline.get("raw_log_loss"),
+        candidate_ece=candidate_offline.get("expected_calibration_error"),
+        production_ece=production_offline.get("expected_calibration_error"),
+        candidate_log_loss=candidate_offline.get("log_loss"),
+        candidate_baseline_log_loss=candidate_offline.get("baseline_log_loss"),
     )
     if not accepted:
         raise RuntimeError(reason)
@@ -277,11 +330,69 @@ def promote_candidate(db: SupabaseRestClient, model_version: str) -> str:
     return reason
 
 
+def shadow_report(db: SupabaseRestClient) -> dict[str, Any]:
+    """Production live metrics and per-candidate shadow metrics, kept separate."""
+    production = db.select_all("prediction_performance", columns="was_correct,brier_score")
+    production_summary: dict[str, Any] = {
+        "n": len(production),
+        "accuracy": (
+            sum(bool(row["was_correct"]) for row in production) / len(production)
+            if production
+            else None
+        ),
+        "brier": (
+            sum(float(row["brier_score"]) for row in production) / len(production)
+            if production
+            else None
+        ),
+    }
+    candidates = db.select_all(
+        "model_candidates", columns="model_version,status,offline_metrics"
+    )
+    version_by_shadow_id = {
+        int(row["id"]): str(row["model_version"])
+        for row in db.select_all("shadow_predictions", columns="id,model_version")
+    }
+    shadow_rows = db.select_all(
+        "shadow_prediction_performance",
+        columns="shadow_prediction_id,was_correct,brier_score",
+    )
+    by_version: dict[str, list[dict[str, Any]]] = {}
+    for row in shadow_rows:
+        version = version_by_shadow_id.get(int(row["shadow_prediction_id"]))
+        if version:
+            by_version.setdefault(version, []).append(row)
+    candidate_summary = []
+    for candidate in candidates:
+        version = str(candidate["model_version"])
+        rows = by_version.get(version, [])
+        candidate_summary.append(
+            {
+                "model_version": version,
+                "status": str(candidate["status"]),
+                "n": len(rows),
+                "accuracy": (
+                    sum(bool(r["was_correct"]) for r in rows) / len(rows)
+                    if rows
+                    else None
+                ),
+                "brier": (
+                    sum(float(r["brier_score"]) for r in rows) / len(rows)
+                    if rows
+                    else None
+                ),
+                "offline_log_loss": (candidate.get("offline_metrics") or {}).get("log_loss"),
+            }
+        )
+    return {"production": production_summary, "candidates": candidate_summary}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--register-newest", action="store_true")
     parser.add_argument("--evaluate", action="store_true")
     parser.add_argument("--promote")
+    parser.add_argument("--report", action="store_true")
     parser.add_argument("--days", type=int, default=UPCOMING_HORIZON_DAYS)
     args = parser.parse_args()
     settings = get_settings()
@@ -293,7 +404,14 @@ def main() -> None:
         result["evaluated"] = len(evaluate_shadow_predictions(db))
     if args.promote:
         result["promotion"] = promote_candidate(db, args.promote)
-    if not args.register_newest and not args.evaluate and not args.promote:
+    if args.report:
+        result["report"] = shadow_report(db)
+    if (
+        not args.register_newest
+        and not args.evaluate
+        and not args.promote
+        and not args.report
+    ):
         now = datetime.now(timezone.utc)
         matches = load_upcoming_matches(db, now=now, horizon_days=args.days)
         team_ids = {

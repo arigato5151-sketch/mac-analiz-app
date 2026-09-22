@@ -1,0 +1,174 @@
+"""Reference baselines the model must beat before its accuracy means anything.
+
+Raw accuracy alone cannot justify a model: these helpers compute the majority
+class, always-home, Poisson and (when odds exist) vig-free market references
+on the same rows, audit the draw distribution and detect a collapsing class
+in the upcoming prediction distribution.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+from sklearn.metrics import log_loss
+
+from models.calibration import expected_calibration_error
+
+CLASS_LABELS = ("home_win", "draw", "away_win")
+
+# A healthy 1X-2 model never concentrates every pick on one class and never
+# squeezes any class out of the distribution entirely.
+MIN_CLASS_SHARE = 0.10
+MAX_TOP_PICK_CONCENTRATION = 0.90
+
+
+@dataclass(frozen=True)
+class BaselineResult:
+    name: str
+    log_loss: float
+    brier_score: float
+    accuracy: float
+
+
+def _one_hot(labels: np.ndarray) -> np.ndarray:
+    return np.eye(len(CLASS_LABELS))[labels.astype(int)]
+
+
+def _metrics(labels: np.ndarray, probabilities: np.ndarray, name: str) -> BaselineResult:
+    one_hot = _one_hot(labels)
+    correct = (probabilities.argmax(axis=1) == labels).astype(float)
+    return BaselineResult(
+        name=name,
+        log_loss=float(log_loss(labels, probabilities, labels=list(range(len(CLASS_LABELS))))),
+        brier_score=float(np.mean((probabilities - one_hot) ** 2)),
+        accuracy=float(correct.mean()),
+    )
+
+
+def majority_class_baseline(labels: np.ndarray) -> BaselineResult:
+    """Always predict the historically most frequent class."""
+    counts = np.bincount(labels.astype(int), minlength=len(CLASS_LABELS))
+    probabilities = np.tile(
+        (counts / counts.sum()).astype(float), (len(labels), 1)
+    )
+    return _metrics(labels, probabilities, "Çoğunluk sınıfı")
+
+
+def home_pick_baseline(labels: np.ndarray) -> BaselineResult:
+    """Always predict the home win."""
+    probabilities = np.tile(np.array([1.0, 0.0, 0.0]), (len(labels), 1))
+    return _metrics(labels, probabilities, "Basit ev sahibi seçimi")
+
+
+def given_probabilities_baseline(
+    labels: np.ndarray, probabilities: np.ndarray, name: str
+) -> BaselineResult:
+    """Score an externally supplied probability matrix (Poisson or market)."""
+    values = np.asarray(probabilities, dtype=float)
+    if values.ndim != 2 or values.shape[1] != len(CLASS_LABELS) or len(values) != len(labels):
+        raise ValueError("Baseline probabilities must be aligned (n, 3) matrices")
+    return _metrics(labels, values, name)
+
+
+def compare_to_baselines(
+    labels: np.ndarray,
+    model_probabilities: np.ndarray,
+    *,
+    poisson_probabilities: np.ndarray | None = None,
+    market_probabilities: np.ndarray | None = None,
+) -> dict[str, object]:
+    """Compare the model with every available baseline on the same rows."""
+    model = _metrics(labels, np.asarray(model_probabilities, dtype=float), "Model")
+    baselines: list[BaselineResult] = [
+        majority_class_baseline(labels),
+        home_pick_baseline(labels),
+    ]
+    if poisson_probabilities is not None:
+        baselines.append(
+            given_probabilities_baseline(labels, poisson_probabilities, "Poisson")
+        )
+    if market_probabilities is not None:
+        baselines.append(
+            given_probabilities_baseline(
+                labels, market_probabilities, "Piyasa (marjsız)"
+            )
+        )
+    return {
+        "model": model,
+        "baselines": baselines,
+        "model_ece": float(
+            expected_calibration_error(labels, np.asarray(model_probabilities, dtype=float))
+        ),
+        "beats_all_available": all(
+            model.log_loss < baseline.log_loss for baseline in baselines
+        ),
+    }
+
+
+@dataclass(frozen=True)
+class DistributionAudit:
+    predicted_share: dict[str, float]
+    realized_share: dict[str, float]
+    top_pick_concentration: float
+    collapsed_class: str | None
+    warning: str | None
+
+
+def detect_upcoming_collapse(probabilities: np.ndarray) -> str | None:
+    """Collapse check for the upcoming (label-less) prediction distribution."""
+    values = np.asarray(probabilities, dtype=float)
+    if values.ndim != 2 or values.shape[1] != len(CLASS_LABELS) or not len(values):
+        return None
+    predicted_share = {
+        CLASS_LABELS[index]: float(values[:, index].mean())
+        for index in range(len(CLASS_LABELS))
+    }
+    for label in CLASS_LABELS:
+        if predicted_share[label] < MIN_CLASS_SHARE:
+            return (
+                f"{label} sınıfı tahmin dağılımında çöktü: ortalama olasılık "
+                f"%{predicted_share[label] * 100:.1f}; tahmin hattı sağlıklı değil."
+            )
+    picks = np.bincount(values.argmax(axis=1), minlength=len(CLASS_LABELS))
+    concentration = float(picks.max() / picks.sum())
+    if concentration > MAX_TOP_PICK_CONCENTRATION:
+        return (
+            "Seçimlerin "
+            f"%{concentration * 100:.1f}'i tek sınıfta toplandı; dağılım bozuk."
+        )
+    return None
+
+
+def audit_class_distribution(
+    labels: np.ndarray, probabilities: np.ndarray
+) -> DistributionAudit:
+    """Audit draw share and detect a class collapsing out of the distribution."""
+    values = np.asarray(probabilities, dtype=float)
+    realized_counts = np.bincount(labels.astype(int), minlength=len(CLASS_LABELS))
+    realized_share = {
+        CLASS_LABELS[index]: float(realized_counts[index] / realized_counts.sum())
+        for index in range(len(CLASS_LABELS))
+    }
+    predicted_share = {
+        CLASS_LABELS[index]: float(values[:, index].mean())
+        for index in range(len(CLASS_LABELS))
+    }
+    picks = np.bincount(values.argmax(axis=1), minlength=len(CLASS_LABELS))
+    concentration = float(picks.max() / picks.sum())
+    collapsed_class = next(
+        (
+            label
+            for label in CLASS_LABELS
+            if predicted_share[label] < MIN_CLASS_SHARE
+        ),
+        None,
+    )
+    warning = detect_upcoming_collapse(values)
+    return DistributionAudit(
+        predicted_share=predicted_share,
+        realized_share=realized_share,
+        top_pick_concentration=concentration,
+        collapsed_class=collapsed_class,
+        warning=warning,
+    )

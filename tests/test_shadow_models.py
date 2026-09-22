@@ -86,3 +86,67 @@ def test_shadow_candidate_must_clear_absolute_quality_floors() -> None:
         production_accuracy=0.40,
         sample_size=MINIMUM_PROMOTION_SAMPLE,
     )[0] is False
+
+
+def test_shadow_candidate_with_worse_calibration_than_raw_is_rejected() -> None:
+    accepted, reason = promotion_decision(
+        candidate_brier=0.42,
+        candidate_accuracy=0.60,
+        production_brier=0.50,
+        production_accuracy=0.55,
+        sample_size=MINIMUM_PROMOTION_SAMPLE,
+        candidate_calibrated_log_loss=1.02,
+        candidate_raw_log_loss=1.01,
+    )
+
+    assert accepted is False
+    assert "ham modelden kötü" in reason
+
+
+def test_shadow_candidate_with_unacceptable_ece_regression_is_rejected() -> None:
+    accepted, reason = promotion_decision(
+        candidate_brier=0.42,
+        candidate_accuracy=0.60,
+        production_brier=0.50,
+        production_accuracy=0.55,
+        sample_size=MINIMUM_PROMOTION_SAMPLE,
+        candidate_ece=0.10,
+        production_ece=0.01,
+    )
+
+    assert accepted is False
+    assert "ECE" in reason
+
+
+def test_shadow_candidate_must_beat_the_frequency_baseline() -> None:
+    accepted, reason = promotion_decision(
+        candidate_brier=0.42,
+        candidate_accuracy=0.60,
+        production_brier=0.50,
+        production_accuracy=0.55,
+        sample_size=MINIMUM_PROMOTION_SAMPLE,
+        candidate_log_loss=1.07,
+        candidate_baseline_log_loss=1.073,
+    )
+
+    assert accepted is False
+    assert "baseline" in reason
+    assert promotion_decision(
+        candidate_brier=0.42,
+        candidate_accuracy=0.60,
+        production_brier=0.50,
+        production_accuracy=0.55,
+        sample_size=MINIMUM_PROMOTION_SAMPLE,
+        candidate_log_loss=1.01,
+        candidate_baseline_log_loss=1.073,
+    )[0] is True
+
+
+def test_new_gate_checks_stay_silent_when_metrics_are_unavailable() -> None:
+    assert promotion_decision(
+        candidate_brier=0.42,
+        candidate_accuracy=0.60,
+        production_brier=0.50,
+        production_accuracy=0.55,
+        sample_size=MINIMUM_PROMOTION_SAMPLE,
+    )[0] is True
