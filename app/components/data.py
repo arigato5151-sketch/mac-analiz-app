@@ -104,6 +104,10 @@ def load_upcoming_dashboard(
     frame["match_date"] = pd.to_datetime(frame["match_date"], utc=True).dt.tz_convert(
         "Europe/Istanbul"
     )
+    if "predicted_at" in frame:
+        frame["predicted_at"] = pd.to_datetime(
+            frame["predicted_at"], utc=True, errors="coerce"
+        ).dt.tz_convert("Europe/Istanbul")
     return frame.sort_values("match_date").reset_index(drop=True)
 
 
@@ -235,6 +239,27 @@ def load_odds_history(match_id: int) -> pd.DataFrame:
     if not frame.empty:
         frame["captured_at"] = pd.to_datetime(frame["captured_at"], utc=True).dt.tz_convert("Europe/Istanbul")
     return frame
+
+
+@st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
+def load_recent_odds_for_matches(match_ids: tuple[int, ...]) -> pd.DataFrame:
+    """Latest odds quote per match for a small, visible match window."""
+    if not match_ids:
+        return pd.DataFrame()
+    ids_filter = "in.(" + ",".join(str(int(match_id)) for match_id in match_ids) + ")"
+    rows = get_db().select_all(
+        "odds_quote_history",
+        columns="match_id,bookmaker,odds,captured_at",
+        filters={"match_id": ids_filter},
+        order="captured_at.desc",
+    )
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame
+    frame["captured_at"] = pd.to_datetime(frame["captured_at"], utc=True).dt.tz_convert(
+        "Europe/Istanbul"
+    )
+    return frame.drop_duplicates("match_id", keep="first")
 
 
 @st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)

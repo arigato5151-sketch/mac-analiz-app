@@ -36,6 +36,13 @@ def _one_hot(labels: np.ndarray) -> np.ndarray:
 
 
 def _metrics(labels: np.ndarray, probabilities: np.ndarray, name: str) -> BaselineResult:
+    probabilities = np.asarray(probabilities, dtype=float)
+    if probabilities.ndim != 2 or probabilities.shape != (len(labels), len(CLASS_LABELS)):
+        raise ValueError("Probabilities must be an aligned (n, 3) matrix")
+    if not np.isfinite(probabilities).all() or (probabilities < 0).any() or (probabilities > 1).any():
+        raise ValueError("Probabilities must be finite values between zero and one")
+    if not np.allclose(probabilities.sum(axis=1), 1.0, atol=1e-6):
+        raise ValueError("Probability rows must sum to one")
     one_hot = _one_hot(labels)
     correct = (probabilities.argmax(axis=1) == labels).astype(float)
     return BaselineResult(

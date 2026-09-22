@@ -42,12 +42,23 @@ def test_compare_to_baselines_flags_a_model_that_cannot_beat_them() -> None:
 def test_compare_to_baselines_confirms_a_strong_model() -> None:
     labels = np.array([0, 0, 2, 1, 0])
     one_hot = np.eye(3)[labels]
-    model = one_hot * 0.8 + 0.1
+    model = one_hot * 0.85 + 0.05
 
     comparison = compare_to_baselines(labels, model)
 
     assert comparison["beats_all_available"] is True
     assert comparison["model"].accuracy == pytest.approx(1.0)
+
+
+def test_baseline_metrics_reject_non_normalized_probabilities() -> None:
+    labels = np.array([0, 1, 2])
+
+    with pytest.raises(ValueError, match="sum to one"):
+        given_probabilities_baseline(
+            labels,
+            np.tile(np.array([0.5, 0.4, 0.2]), (len(labels), 1)),
+            "Bozuk",
+        )
 
 
 def test_market_baseline_is_only_scored_when_provided() -> None:

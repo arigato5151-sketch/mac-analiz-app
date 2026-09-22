@@ -108,6 +108,7 @@ def test_upcoming_dashboard_requests_predictions_only_for_visible_fixtures(monke
     assert "market_probabilities" in prediction_call[1]["columns"]
     assert frame.loc[0, "home_team"] == "Ev"
     assert frame.loc[0, "market_probabilities"] == {"double_chance": {"1X": 0.8}}
+    assert str(frame.loc[0, "predicted_at"].tz) == "Europe/Istanbul"
 
 
 def test_live_performance_requests_diversified_market_fields(monkeypatch) -> None:

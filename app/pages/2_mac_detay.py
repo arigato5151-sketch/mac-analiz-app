@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.components.availability import summarize_availability
 from app.components.commentary import summarize_absences, summarize_form
 from app.components.data import load_confirmed_lineups, load_match_availability, load_match_baseline, load_odds_history, load_upcoming_dashboard
+from app.components.decision_board import requested_match_id
 from app.components.freshness import FRESHNESS_CURRENT, freshness_status
 from app.components.match_visuals import build_form_comparison, build_radar_comparison
 from app.components.model_registry import (
@@ -70,9 +71,17 @@ matches["label"] = (
     + " — "
     + matches["away_team"]
 )
+deep_linked_id = requested_match_id(st.query_params.to_dict(), matches)
+if deep_linked_id is None:
+    deep_linked_id = requested_match_id(
+        {"match_id": st.session_state.pop("selected_match_id", None)}, matches
+    )
+match_ids = matches["id"].tolist()
+default_index = match_ids.index(deep_linked_id) if deep_linked_id in match_ids else 0
 selected_id = st.selectbox(
     "İncelenecek maç",
-    matches["id"].tolist(),
+    match_ids,
+    index=default_index,
     format_func=lambda match_id: matches.loc[matches["id"] == match_id, "label"].iloc[0],
 )
 selected = matches.loc[matches["id"] == selected_id].iloc[0]
