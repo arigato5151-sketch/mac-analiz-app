@@ -16,7 +16,13 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.components.availability import summarize_availability
 from app.components.commentary import summarize_absences, summarize_form
 from app.components.data import load_confirmed_lineups, load_match_availability, load_match_baseline, load_odds_history, load_upcoming_dashboard
+from app.components.freshness import FRESHNESS_CURRENT, freshness_status
 from app.components.match_visuals import build_form_comparison, build_radar_comparison
+from app.components.model_registry import (
+    active_production_version,
+    status_label_tr,
+    version_label,
+)
 from app.components.pitch_visuals import (
     render_action_heatmap,
     render_pass_network,
@@ -84,6 +90,18 @@ else:
         f"güven seviyesi: **{confidence}**. Bu, kesin sonuç değil istatistiksel olasılıktır."
     )
 
+production_version = active_production_version()
+selected_version = str(selected.get("model_version") or "").strip()
+if not production_version:
+    st.caption("Üretim modeli bilgisi doğrulanamadı.")
+elif selected_version and selected_version != production_version:
+    st.caption(
+        f"Üretim modeli: `{production_version}` ({status_label_tr(production_version)}) · "
+        f"bu maçın tahmini `{selected_version}` eski bir sürümden."
+    )
+else:
+    st.caption(f"Üretim modeli: {version_label(production_version)}")
+
 metrics = st.columns(5)
 for column, label, key in zip(
     metrics,
@@ -137,12 +155,27 @@ try:
             now=availability_now,
         )
         column.markdown(f"**{team_name}** · {summary.status}")
-        if summary.status == "Güncel":
-            column.caption(
-                f"Sakat: {summary.injured} · Cezalı: {summary.suspended} · Şüpheli: {summary.doubtful}"
+        if summary.status == FRESHNESS_CURRENT:
+            freshness_note = (
+                f"Son güncelleme: {summary.refreshed_at:%d.%m %H:%M}"
+                if summary.refreshed_at
+                else "Güncellik zamanı doğrulanamadı"
             )
-        elif summary.status == "Güncel değil":
-            column.warning("Kadro verisi 30 saati geçti; tahmine ek bağlam olarak kullanmayın.")
+            column.caption(
+                f"Sakat: {summary.injured} · Cezalı: {summary.suspended} · "
+                f"Şüpheli: {summary.doubtful} · {freshness_note}"
+            )
+            if summary.quality_warning:
+                column.warning(summary.quality_warning)
+        elif summary.status == FRESHNESS_STALE:
+            stale_note = (
+                f"son güncelleme {summary.refreshed_at:%d.%m %H:%M}"
+                if summary.refreshed_at
+                else "güncellik zamanı bilinmiyor"
+            )
+            column.warning(
+                f"Kadro verisi {stale_note} ile 30 saati geçti; tahmine ek bağlam olarak kullanmayın."
+            )
         else:
             column.info("Bu takım için doğrulanmış güncel kadro verisi yok.")
     if not availability_rows.empty:
@@ -214,7 +247,17 @@ try:
             hide_index=True,
             width="stretch",
         )
-        st.caption("Kapanış oranı, maç başlangıcından önce yakalanabilen son sağlayıcı kotasyonudur. Veri yoksa CLV hesaplanmaz.")
+        odds_reference = odds_history["captured_at"].max().to_pydatetime()
+        odds_age_status = freshness_status(
+            odds_reference,
+            source="odds",
+            now=pd.Timestamp.now(tz="UTC").to_pydatetime(),
+        )
+        st.caption(
+            f"Oran verisi: {odds_age_status} (son kayıt {odds_reference:%d.%m %H:%M}). "
+            "Kapanış oranı, maç başlangıcından önce yakalanabilen son sağlayıcı "
+            "kotasyonudur. Veri yoksa veya eskiyse değer hesaplanmaz."
+        )
 except Exception as exc:
     st.warning(f"Oran geçmişi şu anda yüklenemedi: {exc}")
 

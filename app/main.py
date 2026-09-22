@@ -17,6 +17,7 @@ from app.components.data import (
     load_latest_model_metadata,
     load_upcoming_dashboard,
 )
+from app.components.model_registry import active_production_version, version_label
 from app.components.ui import (
     compact_dashboard_display,
     configure_page,
@@ -65,9 +66,20 @@ col3.metric(
 )
 
 if not matches.empty and "model_version" in matches:
-    active_versions = matches["model_version"].dropna().astype(str)
-    if not active_versions.empty:
-        st.caption(f"Yaklaşan maçlarda kullanılan model: `{active_versions.iloc[0]}`")
+    predicted_versions = matches["model_version"].dropna().astype(str).unique().tolist()
+    production_version = active_production_version()
+    if not production_version:
+        st.caption("Üretim modeli bilgisi doğrulanamadı.")
+    elif set(predicted_versions) - {production_version}:
+        st.warning(
+            "Yaklaşan maç tahminleri üretim modeliyle eşleşmiyor: "
+            f"{', '.join(sorted(predicted_versions))} (üretim: {production_version}). "
+            "Tutarsızlık giderilene kadar bu tahminleri doğrulanmış kabul etmeyin."
+        )
+    else:
+        st.caption(
+            f"Yaklaşan maçlarda kullanılan model: {version_label(production_version)}"
+        )
 
 st.subheader("Yaklaşan maçlar")
 section_intro("Önce temel olasılıkları inceleyin; alternatif pazarları gerektiğinde açın.")

@@ -13,6 +13,11 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.components.data import load_evaluated_predictions
 from app.components.grid import build_read_only_grid_options
 from app.components.metrics import format_accuracy, summarize_binary_accuracy
+from app.components.model_registry import (
+    active_production_version,
+    production_version_for,
+    version_label,
+)
 from app.components.ui import (
     configure_page,
     disclaimer,
@@ -31,6 +36,12 @@ page_header(
 )
 disclaimer()
 section_intro("Yalnızca maç başlamadan önce kaydedilmiş ve otomatik değerlendirilmiş tahminler gösterilir.")
+
+production_version = active_production_version()
+if production_version:
+    st.caption(f"Üretim modeli: {version_label(production_version)}")
+else:
+    st.caption("Üretim modeli bilgisi doğrulanamadı.")
 
 try:
     evaluations = load_evaluated_predictions(limit=1_000)
@@ -53,20 +64,18 @@ with st.container(border=True):
     st.markdown("**Sonuçları filtrele**")
     first_row = st.columns(3)
     model_versions = evaluations["model_version"].dropna().astype(str).unique().tolist()
-    timestamped_versions = [
-        version for version in model_versions if version.startswith("model_v")
-    ]
-    latest_model = (
-        max(timestamped_versions)
-        if timestamped_versions
-        else model_versions[-1]
-        if model_versions
-        else "Tümü"
-    )
+    sample_sizes = evaluations.groupby("model_version").size().to_dict()
+    default_version = production_version_for(model_versions)
     selected_model = first_row[0].selectbox(
         "Model sürümü",
         ["Tümü", *model_versions],
-        index=(["Tümü", *model_versions].index(latest_model) if model_versions else 0),
+        index=(["Tümü", *model_versions].index(default_version) if default_version else 0),
+        format_func=lambda value: (
+            value
+            if value == "Tümü"
+            else version_label(value, sample_size=sample_sizes.get(value, 0))
+        ),
+        help="Varsayılan, üretim modelidir; her sürümün rolü ve örneklemi etikette görünür.",
     )
     leagues = ["Tümü", *sorted(evaluations["league_name"].dropna().unique())]
     selected_league = first_row[1].selectbox("Lig", leagues)

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.components import data
+from db.db_client import DatabaseError
 
 
 class ResultsViewDb:
@@ -122,3 +123,46 @@ def test_live_performance_requests_diversified_market_fields(monkeypatch) -> Non
     assert "model_version" in db.calls[0][1]["columns"]
     assert "market_probabilities" in db.calls[0][1]["columns"]
     assert "market_performance" in db.calls[0][1]["columns"]
+
+
+class SquadContextDb:
+    """player_availability works; the team snapshot table is not exposed."""
+
+    def select_all(self, table: str, **kwargs: Any) -> list[dict[str, Any]]:
+        if table == "player_availability":
+            return [
+                {
+                    "team_id": 1,
+                    "player_name": "A",
+                    "status": "injured",
+                    "updated_at": "2026-09-20T10:00:00+00:00",
+                },
+                {
+                    "team_id": 1,
+                    "player_name": "A",
+                    "status": "doubtful",
+                    "updated_at": "2026-09-21T10:00:00+00:00",
+                },
+                {
+                    "team_id": 2,
+                    "player_name": "B",
+                    "status": "suspended",
+                    "updated_at": "2026-09-19T10:00:00+00:00",
+                },
+            ]
+        raise DatabaseError(
+            "Supabase GET team_availability_status failed (404): not exposed"
+        )
+
+
+def test_match_availability_deduplicates_and_derives_freshness(monkeypatch) -> None:
+    data.load_match_availability.clear()
+    monkeypatch.setattr(data, "get_db", lambda: SquadContextDb())
+
+    players, snapshots = data.load_match_availability(1, 2)
+
+    assert len(players) == 2
+    repeated = players[players["player_name"] == "A"].iloc[0]
+    assert repeated["status"] == "doubtful"
+    assert not snapshots.empty
+    assert snapshots["refreshed_at"].notna().all()

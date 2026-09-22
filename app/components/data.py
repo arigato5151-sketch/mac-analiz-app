@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,9 @@ from config.settings import PROJECT_ROOT, get_public_supabase_settings
 from db.db_client import PublicSupabaseRestClient
 from models.feature_engineering import CausalFeatureState
 from models.train_model import load_historical_matches
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 LIVE_DATA_TTL_SECONDS = 300
@@ -153,7 +157,14 @@ def load_prediction_performance() -> pd.DataFrame:
 def load_match_availability(
     home_team_id: int, away_team_id: int
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load the latest public squad context for the two teams in a fixture."""
+    """Load the latest public squad context for the two teams in a fixture.
+
+    Player rows are deduplicated to the newest record per player so historical
+    availability rows never mix into the current squad view. When the team
+    snapshot table is not exposed by the environment, the freshness reference
+    is derived from the newest per-team row timestamp instead of reporting
+    every team as unknown.
+    """
     team_filter = f"(team_id.eq.{home_team_id},team_id.eq.{away_team_id})"
     db = get_db()
     players = pd.DataFrame(
@@ -164,13 +175,41 @@ def load_match_availability(
             order="updated_at.desc",
         )
     )
-    snapshots = pd.DataFrame(
-        db.select_all(
-            "team_availability_status",
-            columns="team_id,refreshed_at,available_count,unavailable_count",
-            filters={"or": team_filter},
+    snapshots = pd.DataFrame()
+    try:
+        snapshots = pd.DataFrame(
+            db.select_all(
+                "team_availability_status",
+                columns="team_id,refreshed_at,available_count,unavailable_count",
+                filters={"or": team_filter},
+            )
         )
-    )
+    except Exception as exc:
+        LOGGER.warning(
+            "team_availability_status unavailable, deriving freshness from rows: %s",
+            exc,
+        )
+    if not players.empty:
+        players["updated_at"] = pd.to_datetime(
+            players["updated_at"], utc=True, errors="coerce"
+        )
+        players = (
+            players.dropna(subset=["updated_at"])
+            .sort_values("updated_at", ascending=False)
+            .drop_duplicates(subset=["team_id", "player_name"], keep="first")
+        )
+        if snapshots.empty:
+            derived = (
+                players.assign(
+                    refreshed_at=pd.to_datetime(
+                        players["updated_at"], utc=True, errors="coerce"
+                    )
+                )
+                .dropna(subset=["refreshed_at"])
+                .groupby("team_id", as_index=False)["refreshed_at"]
+                .max()
+            )
+            snapshots = derived
     return players, snapshots
 
 
