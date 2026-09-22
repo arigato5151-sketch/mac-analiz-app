@@ -17,7 +17,11 @@ from app.components.availability import summarize_availability
 from app.components.commentary import summarize_absences, summarize_form
 from app.components.data import load_confirmed_lineups, load_match_availability, load_match_baseline, load_odds_history, load_upcoming_dashboard
 from app.components.decision_board import requested_match_id
-from app.components.freshness import FRESHNESS_CURRENT, freshness_status
+from app.components.freshness import (
+    FRESHNESS_CURRENT,
+    FRESHNESS_STALE,
+    freshness_status,
+)
 from app.components.match_visuals import build_form_comparison, build_radar_comparison
 from app.components.model_registry import (
     active_production_version,
@@ -148,13 +152,16 @@ st.markdown("### Maç bağlamı")
 st.subheader("Kadro durumu")
 try:
     availability_rows, availability_snapshots = load_match_availability(
-        int(selected["home_team_id"]), int(selected["away_team_id"])
+        int(selected["home_team_id"]),
+        int(selected["away_team_id"]),
+        int(selected_id),
     )
     snapshots_by_team = {
         int(row["team_id"]): row.to_dict()
         for _, row in availability_snapshots.iterrows()
     }
     availability_data = availability_rows.to_dict("records")
+    availability_summaries = []
     availability_now = pd.Timestamp.now(tz="UTC").to_pydatetime()
     availability_columns = st.columns(2)
     for column, team_id, team_name in (
@@ -167,6 +174,7 @@ try:
             team_id=team_id,
             now=availability_now,
         )
+        availability_summaries.append(summary)
         column.markdown(f"**{team_name}** · {summary.status}")
         if summary.status == FRESHNESS_CURRENT:
             freshness_note = (
@@ -190,7 +198,10 @@ try:
                 f"Kadro verisi {stale_note} ile 30 saati geçti; tahmine ek bağlam olarak kullanmayın."
             )
         else:
-            column.info("Bu takım için doğrulanmış güncel kadro verisi yok.")
+            column.info(
+                summary.quality_warning
+                or "Bu takım için doğrulanmış güncel kadro verisi yok."
+            )
     if not availability_rows.empty:
         display_availability = availability_rows.copy()
         display_availability["Durum"] = display_availability["status"].map(
@@ -209,10 +220,12 @@ try:
             hide_index=True,
             width="stretch",
         )
-    st.caption(
-        "Kadro verisi doğrulanmış güncellik bağlamıdır; tarihsel oyuncu erişilebilirliği olmadığı için "
-        "kalibre edilmiş model olasılıklarına doğrudan ağırlık uygulanmaz."
-    )
+    if any(item.status == FRESHNESS_CURRENT for item in availability_summaries):
+        st.caption(
+            "Kadro verisi doğrulanmış güncellik bağlamıdır; tarihsel oyuncu "
+            "erişilebilirliği olmadığı için kalibre edilmiş model "
+            "olasılıklarına doğrudan ağırlık uygulanmaz."
+        )
 except Exception as exc:
     st.warning(f"Kadro durumu şu anda yüklenemedi: {exc}")
 

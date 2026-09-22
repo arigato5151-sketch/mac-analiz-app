@@ -12,6 +12,13 @@ from data_pipeline.api_client import ApiFootballClient
 from db.db_client import SupabaseRestClient
 
 
+MAX_PLAUSIBLE_UNAVAILABLE = 15
+
+
+class AvailabilityDataQualityError(RuntimeError):
+    """Raised before persistence when provider availability data is implausible."""
+
+
 def _availability_status(reason: str) -> str:
     normalized = reason.lower()
     if "suspend" in normalized or "card" in normalized:
@@ -25,13 +32,18 @@ def transform_injuries(
     injuries: list[dict[str, Any]], league_id: int
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     teams: dict[int, dict[str, Any]] = {}
-    availability: dict[tuple[int, str, str], dict[str, Any]] = {}
+    availability: dict[tuple[int | None, int, str], dict[str, Any]] = {}
     now = datetime.now(timezone.utc).isoformat()
     for item in injuries:
         team = item["team"]
         player = item["player"]
         reason = player.get("reason") or player.get("type") or "injury"
         team_id = int(team["id"])
+        fixture_id = (
+            int(item["fixture"]["id"])
+            if item.get("fixture", {}).get("id") is not None
+            else None
+        )
         teams[team_id] = {
             "id": team_id,
             "name": team["name"],
@@ -39,8 +51,10 @@ def transform_injuries(
             "logo_url": team.get("logo"),
         }
         status = _availability_status(reason)
-        key = (team_id, player["name"], status)
+        player_identity = str(player.get("id") or player["name"]).casefold()
+        key = (fixture_id, team_id, player_identity)
         availability[key] = {
+            "match_id": fixture_id,
             "team_id": team_id,
             "player_name": player["name"],
             "status": status,
@@ -56,15 +70,64 @@ def sync_injuries(
     *,
     league_id: int,
     team_ids: set[int] | None = None,
+    fixture_ids: set[int] | None = None,
 ) -> int:
     league = LEAGUES_BY_ID.get(league_id)
     if league is None:
         raise ValueError(f"League {league_id} is not configured")
-    injuries = api.get("injuries", {"league": league_id, "season": league.season})
+    if fixture_ids:
+        injuries = []
+        for fixture_id in sorted(fixture_ids):
+            fixture_rows = api.get("injuries", {"fixture": fixture_id})
+            unexpected_fixtures = {
+                int(item.get("fixture", {}).get("id") or 0)
+                for item in fixture_rows
+                if int(item.get("fixture", {}).get("id") or 0) != fixture_id
+            }
+            if unexpected_fixtures:
+                raise AvailabilityDataQualityError(
+                    f"Fixture {fixture_id} returned unrelated injury rows"
+                )
+            injuries.extend(fixture_rows)
+    else:
+        # A season-only request returns historical incidents and must never be
+        # persisted as the current squad state.
+        injuries = api.get(
+            "injuries",
+            {
+                "league": league_id,
+                "season": league.season,
+                "date": datetime.now(timezone.utc).date().isoformat(),
+            },
+        )
     teams, rows = transform_injuries(injuries, league_id)
     if team_ids is not None:
+        unexpected_teams = {
+            int(row["team_id"]) for row in rows if int(row["team_id"]) not in team_ids
+        }
+        if fixture_ids and unexpected_teams:
+            raise AvailabilityDataQualityError(
+                "Fixture injury response contains teams outside the requested scope"
+            )
         teams = [team for team in teams if int(team["id"]) in team_ids]
         rows = [row for row in rows if int(row["team_id"]) in team_ids]
+
+    player_names_by_team: dict[int, set[str]] = {
+        team_id: set() for team_id in (team_ids or set())
+    }
+    for row in rows:
+        player_names_by_team.setdefault(int(row["team_id"]), set()).add(
+            str(row["player_name"]).casefold()
+        )
+    implausible = {
+        team_id: len(player_names)
+        for team_id, player_names in player_names_by_team.items()
+        if len(player_names) > MAX_PLAUSIBLE_UNAVAILABLE
+    }
+    if implausible:
+        raise AvailabilityDataQualityError(
+            f"Implausible unavailable-player totals: {implausible}"
+        )
     db.upsert("teams", teams, on_conflict="id")
 
     # Clear every requested team, including teams that are no longer injured.
@@ -76,9 +139,10 @@ def sync_injuries(
         db.delete("player_availability", filters={"team_id": f"eq.{team_id}"})
     if rows:
         db.upsert("player_availability", rows)
-    counts_by_team = {team_id: 0 for team_id in refreshed_team_ids}
-    for row in rows:
-        counts_by_team[int(row["team_id"])] += 1
+    counts_by_team = {
+        team_id: len(player_names_by_team.get(team_id, set()))
+        for team_id in refreshed_team_ids
+    }
     available_by_team = {
         team_id: max(0, 22 - unavailable_count)
         for team_id, unavailable_count in counts_by_team.items()

@@ -167,3 +167,36 @@ def test_match_availability_deduplicates_and_derives_freshness(monkeypatch) -> N
     assert repeated["status"] == "doubtful"
     assert not snapshots.empty
     assert snapshots["refreshed_at"].notna().all()
+
+
+def test_match_availability_excludes_other_fixture_rows(monkeypatch) -> None:
+    class FixtureSquadDb:
+        def select_all(self, table: str, **kwargs: Any) -> list[dict[str, Any]]:
+            if table == "player_availability":
+                assert kwargs["filters"]["match_id"] == "eq.101"
+                return [
+                    {
+                        "match_id": 101,
+                        "team_id": 1,
+                        "player_name": "Current",
+                        "status": "injured",
+                        "updated_at": "2026-09-21T10:00:00+00:00",
+                    },
+                    {
+                        "match_id": 202,
+                        "team_id": 1,
+                        "player_name": "Other fixture",
+                        "status": "injured",
+                        "updated_at": "2026-09-21T10:00:00+00:00",
+                    },
+                ]
+            if table == "team_availability_status":
+                return []
+            raise AssertionError(table)
+
+    data.load_match_availability.clear()
+    monkeypatch.setattr(data, "get_db", lambda: FixtureSquadDb())
+
+    players, _ = data.load_match_availability(1, 2, 101)
+
+    assert players["player_name"].tolist() == ["Current"]

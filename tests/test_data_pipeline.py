@@ -312,6 +312,24 @@ def test_transform_injuries_maps_status_and_deduplicates() -> None:
     assert len(teams) == 1
     assert len(rows) == 1
     assert rows[0]["status"] == "suspended"
+    assert rows[0]["match_id"] is None
+
+
+def test_transform_injuries_keeps_fixture_specific_rows() -> None:
+    base = {
+        "team": {"id": 1, "name": "Team", "logo": "team.png"},
+        "player": {"id": 7, "name": "Player", "reason": "Injury"},
+    }
+
+    _, rows = transform_injuries(
+        [
+            {**base, "fixture": {"id": 101}},
+            {**base, "fixture": {"id": 202}},
+        ],
+        league_id=39,
+    )
+
+    assert {row["match_id"] for row in rows} == {101, 202}
 
 
 def test_transform_lineups_accepts_only_complete_official_xis() -> None:

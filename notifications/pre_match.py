@@ -368,6 +368,7 @@ def _refresh_and_predict(
     }
     elo_by_team = current_elo_ratings(historical, team_ids)
     teams_by_league: dict[int, set[int]] = {}
+    fixtures_by_league: dict[int, set[int]] = {}
     for match in matches:
         league_id = int(match["league_id"])
         if league_id not in LEAGUES_BY_ID:
@@ -375,6 +376,7 @@ def _refresh_and_predict(
         teams_by_league.setdefault(league_id, set()).update(
             (int(match["home_team_id"]), int(match["away_team_id"]))
         )
+        fixtures_by_league.setdefault(league_id, set()).add(int(match["id"]))
     # Track teams that failed sync so their matches can be skipped
     failed_team_ids: set[int] = set()
     for league_id, affected_teams in teams_by_league.items():
@@ -386,7 +388,13 @@ def _refresh_and_predict(
                 print(f"Team form sync failed for team {team_id}: {type(error).__name__}")
                 failed_team_ids.add(team_id)
         try:
-            sync_injuries(api, db, league_id=league_id, team_ids=affected_teams)
+            sync_injuries(
+                api,
+                db,
+                league_id=league_id,
+                team_ids=affected_teams,
+                fixture_ids=fixtures_by_league[league_id],
+            )
         except Exception as error:
             print(f"Injuries sync failed for league {league_id}: {type(error).__name__}")
             # On injuries sync failure, mark all teams in this league as failed
@@ -458,7 +466,7 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
     }
     availability_rows = db.select_all(
         "player_availability",
-        columns="team_id,player_name,status",
+        columns="match_id,team_id,player_name,status",
         filters={"team_id": f"in.({','.join(map(str, team_ids))})"},
     )
     sent = 0
@@ -512,7 +520,11 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
                 prediction=prediction,
                 historical=historical,
                 team_forms=team_forms,
-                availability_rows=availability_rows,
+                availability_rows=[
+                    row
+                    for row in availability_rows
+                    if int(row.get("match_id") or -1) == match_id
+                ],
                 home_team=teams.get(int(match["home_team_id"]), "Ev sahibi"),
                 away_team=teams.get(int(match["away_team_id"]), "Deplasman"),
             )

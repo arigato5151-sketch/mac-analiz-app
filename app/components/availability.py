@@ -54,11 +54,27 @@ def summarize_availability(
         if status in counts:
             counts[status] += 1
     total = sum(counts.values())
-    quality_warning = None
+    reported_unavailable = snapshot.get("unavailable_count")
+    if total == 0 and reported_unavailable not in (None, 0, "0"):
+        return AvailabilitySummary(
+            team_id,
+            FRESHNESS_UNKNOWN,
+            refreshed_at,
+            0,
+            0,
+            0,
+            "Takım özeti eksik oyuncu bildiriyor ancak bu maçla eşleşen "
+            "oyuncu kaydı yok; veri kullanılmadı.",
+        )
     if total > MAX_PLAUSIBLE_ABSENCES:
-        quality_warning = (
-            f"{total} eksik kaydı şüpheli derecede yüksek; veri hattı hatası "
-            "olabilir, sayılar doğrulanmadan güvenilir kabul edilmez."
+        return AvailabilitySummary(
+            team_id,
+            FRESHNESS_UNKNOWN,
+            refreshed_at,
+            0,
+            0,
+            0,
+            f"{total} eksik kaydı makul sınırı aştı; veri kullanılmadı.",
         )
     return AvailabilitySummary(
         team_id,
@@ -67,5 +83,5 @@ def summarize_availability(
         counts["injured"],
         counts["suspended"],
         counts["doubtful"],
-        quality_warning,
+        None,
     )

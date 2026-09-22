@@ -175,7 +175,7 @@ def load_shadow_model_status() -> pd.DataFrame:
 
 @st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
 def load_match_availability(
-    home_team_id: int, away_team_id: int
+    home_team_id: int, away_team_id: int, match_id: int | None = None
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load the latest public squad context for the two teams in a fixture.
 
@@ -186,15 +186,24 @@ def load_match_availability(
     every team as unknown.
     """
     team_filter = f"(team_id.eq.{home_team_id},team_id.eq.{away_team_id})"
+    player_filters = {"or": team_filter}
+    if match_id is not None:
+        player_filters["match_id"] = f"eq.{match_id}"
     db = get_db()
-    players = pd.DataFrame(
-        db.select_all(
-            "player_availability",
-            columns="team_id,player_name,status,updated_at",
-            filters={"or": team_filter},
-            order="updated_at.desc",
+    try:
+        players = pd.DataFrame(
+            db.select_all(
+                "player_availability",
+                columns="match_id,team_id,player_name,status,updated_at",
+                filters=player_filters,
+                order="updated_at.desc",
+            )
         )
-    )
+    except Exception as exc:
+        LOGGER.warning(
+            "Fixture-scoped player availability unavailable: %s", type(exc).__name__
+        )
+        players = pd.DataFrame()
     snapshots = pd.DataFrame()
     try:
         snapshots = pd.DataFrame(
@@ -210,13 +219,23 @@ def load_match_availability(
             exc,
         )
     if not players.empty:
+        if "match_id" not in players:
+            players["match_id"] = None
+        if match_id is not None:
+            players = players[
+                pd.to_numeric(players["match_id"], errors="coerce") == match_id
+            ].copy()
+        if players.empty:
+            return players, snapshots
         players["updated_at"] = pd.to_datetime(
             players["updated_at"], utc=True, errors="coerce"
         )
         players = (
             players.dropna(subset=["updated_at"])
             .sort_values("updated_at", ascending=False)
-            .drop_duplicates(subset=["team_id", "player_name"], keep="first")
+            .drop_duplicates(
+                subset=["match_id", "team_id", "player_name"], keep="first"
+            )
         )
         if snapshots.empty:
             derived = (

@@ -43,7 +43,26 @@ def test_suspiciously_high_totals_carry_a_quality_warning() -> None:
         now=now,
     )
 
-    assert summary.status == "Güncel"
+    assert summary.status == "Bilinmiyor"
+    assert summary.injured == 0
+    assert summary.quality_warning is not None
+
+
+def test_snapshot_count_without_fixture_players_is_not_reported_as_zero() -> None:
+    now = datetime(2026, 8, 29, 12, tzinfo=timezone.utc)
+
+    summary = summarize_availability(
+        [],
+        {
+            "team_id": 1,
+            "refreshed_at": (now - timedelta(hours=2)).isoformat(),
+            "unavailable_count": 4,
+        },
+        team_id=1,
+        now=now,
+    )
+
+    assert summary.status == "Bilinmiyor"
     assert summary.quality_warning is not None
 
 

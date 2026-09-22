@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -19,15 +20,21 @@ from models.feature_engineering import CausalFeatureState
 from models.train_model import load_historical_matches
 
 
-def upcoming_team_targets(
+@dataclass(frozen=True)
+class UpcomingLeagueTarget:
+    team_ids: frozenset[int]
+    fixture_ids: frozenset[int]
+
+
+def upcoming_context_targets(
     db: SupabaseRestClient, *, now: datetime, horizon_days: int
-) -> dict[int, set[int]]:
-    """Return upcoming team IDs grouped by configured league."""
+) -> dict[int, UpcomingLeagueTarget]:
+    """Return exact upcoming teams and fixtures grouped by configured league."""
     if horizon_days < 1 or horizon_days > 14:
         raise ValueError("horizon_days must be between 1 and 14")
     rows = db.select_all(
         "matches",
-        columns="league_id,home_team_id,away_team_id,match_date,status",
+        columns="id,league_id,home_team_id,away_team_id,match_date,status",
         filters={
             "status": "eq.scheduled",
             "and": (
@@ -36,15 +43,34 @@ def upcoming_team_targets(
             ),
         },
     )
-    grouped: defaultdict[int, set[int]] = defaultdict(set)
+    grouped: defaultdict[int, dict[str, set[int]]] = defaultdict(
+        lambda: {"team_ids": set(), "fixture_ids": set()}
+    )
     for row in rows:
         league_id = int(row["league_id"])
         if league_id not in LEAGUES_BY_ID:
             continue
-        grouped[league_id].update(
+        grouped[league_id]["team_ids"].update(
             (int(row["home_team_id"]), int(row["away_team_id"]))
         )
-    return dict(grouped)
+        grouped[league_id]["fixture_ids"].add(int(row["id"]))
+    return {
+        league_id: UpcomingLeagueTarget(
+            team_ids=frozenset(values["team_ids"]),
+            fixture_ids=frozenset(values["fixture_ids"]),
+        )
+        for league_id, values in grouped.items()
+    }
+
+
+def upcoming_team_targets(
+    db: SupabaseRestClient, *, now: datetime, horizon_days: int
+) -> dict[int, set[int]]:
+    """Return upcoming team IDs grouped by configured league."""
+    targets = upcoming_context_targets(db, now=now, horizon_days=horizon_days)
+    return {
+        league_id: set(target.team_ids) for league_id, target in targets.items()
+    }
 
 
 def current_elo_ratings(
@@ -70,8 +96,10 @@ def refresh_upcoming_context(
     horizon_days: int = UPCOMING_HORIZON_DAYS,
 ) -> dict[str, Any]:
     """Refresh context with partial-failure reporting and safe retry semantics."""
-    targets = upcoming_team_targets(db, now=now, horizon_days=horizon_days)
-    all_team_ids = {team_id for teams in targets.values() for team_id in teams}
+    targets = upcoming_context_targets(db, now=now, horizon_days=horizon_days)
+    all_team_ids = {
+        team_id for target in targets.values() for team_id in target.team_ids
+    }
     if not all_team_ids:
         return {
             "leagues": 0,
@@ -86,7 +114,8 @@ def refresh_upcoming_context(
     form_count = 0
     availability_count = 0
 
-    for league_id, team_ids in sorted(targets.items()):
+    for league_id, target in sorted(targets.items()):
+        team_ids = set(target.team_ids)
         season = LEAGUES_BY_ID[league_id].season
         for team_id in sorted(team_ids):
             try:
@@ -105,7 +134,11 @@ def refresh_upcoming_context(
 
         try:
             availability_count += sync_injuries(
-                api, db, league_id=league_id, team_ids=team_ids
+                api,
+                db,
+                league_id=league_id,
+                team_ids=team_ids,
+                fixture_ids=set(target.fixture_ids),
             )
         except Exception as exc:
             failures.append(
