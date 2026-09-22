@@ -99,10 +99,14 @@ if not matches.empty and "model_version" in matches:
         st.warning(f"{collapse_warning} Tahminleri doğrulanmış kabul etmeyin.")
 
     # Son veri güncelleme yalnızca doğrulanmış bir zaman damgası varsa gösterilir.
-    latest_prediction = (
+    latest_prediction_raw = (
         matches["predicted_at"].dropna().max() if "predicted_at" in matches else None
     )
-    if latest_prediction is not None:
+    latest_prediction = pd.to_datetime(
+        latest_prediction_raw, utc=True, errors="coerce"
+    )
+    if pd.notna(latest_prediction):
+        latest_prediction = latest_prediction.tz_convert("Europe/Istanbul")
         st.caption(
             f"Son tahmin güncellemesi: {latest_prediction:%d.%m %H:%M} (Europe/Istanbul)"
         )
