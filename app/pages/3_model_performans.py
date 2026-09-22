@@ -1,5 +1,6 @@
 """Transparent offline and live model performance metrics."""
 
+import logging
 import sys
 from pathlib import Path
 from typing import Any
@@ -16,15 +17,22 @@ from app.components.data import (
     load_evaluated_predictions,
     load_latest_model_metadata,
     load_prediction_performance,
+    load_shadow_model_status,
     load_upcoming_dashboard,
 )
 from app.components.live_performance import summarize_live_performance
 from app.components.market_performance import summarize_diversified_market_performance
+from app.components.model_registry import STATUS_CANDIDATE, load_model_registry
 from app.components.monte_carlo import simulate_top_pick_accuracy
+from app.components.shadow_status import summarize_shadow_candidate
 from app.components.ui import configure_page, disclaimer, page_header, section_intro
 from config.leagues import LEAGUES_BY_ID
 from models.decision_policy import MINIMUM_ACTIONABLE_1X2_CONFIDENCE
 from monitoring.drift_service import DriftMonitoringService
+
+
+LOGGER = logging.getLogger(__name__)
+CHART_CONFIG = {"displayModeBar": False, "displaylogo": False}
 
 
 configure_page("Model Performansı")
@@ -138,6 +146,87 @@ if metadata:
         )
 else:
     st.warning("Kaydedilmiş model değerlendirme metadatası bulunamadı.")
+
+st.subheader("Gölge model durumu")
+section_intro(
+    "Adaylar yalnızca aynı tamamlanmış maçlardaki üretim modeliyle "
+    "karşılaştırılır; offline skor tek başına terfi için yeterli değildir."
+)
+try:
+    shadow_frame = load_shadow_model_status()
+except Exception as exc:
+    LOGGER.warning("Public shadow-model status is unavailable: %s", type(exc).__name__)
+    shadow_frame = pd.DataFrame()
+
+if shadow_frame.empty:
+    local_candidates = [
+        info for info in load_model_registry() if info.status == STATUS_CANDIDATE
+    ]
+    if local_candidates:
+        st.info(
+            f"{len(local_candidates)} aday artefakt bulundu; canlı aynı-maç "
+            "karşılaştırması henüz yayınlanmadı. Bu adayların terfi durumu "
+            "kanıtlanmış değil."
+        )
+        st.dataframe(
+            pd.DataFrame(
+                {
+                    "Model": [info.version for info in local_candidates],
+                    "Durum": ["Veri bekleniyor"] * len(local_candidates),
+                    "Aynı maç örneklemi": ["—"] * len(local_candidates),
+                }
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+    else:
+        st.caption("Aktif gölge model adayı bulunmuyor.")
+else:
+    shadow_summaries = [
+        summarize_shadow_candidate(row)
+        for row in shadow_frame.to_dict("records")
+    ]
+    active_shadows = [
+        summary
+        for summary in shadow_summaries
+        if summary.lifecycle_status == "shadow"
+    ]
+    ready_shadows = [
+        summary for summary in active_shadows if summary.decision == "Terfiye hazır"
+    ]
+    shadow_metrics = st.columns(3)
+    shadow_metrics[0].metric("Aktif aday", str(len(active_shadows)))
+    shadow_metrics[1].metric("Terfiye hazır", str(len(ready_shadows)))
+    shadow_metrics[2].metric(
+        "En yüksek aynı-maç örneklemi",
+        str(max((item.paired_matches for item in active_shadows), default=0)),
+    )
+
+    def _percent(value: float | None) -> str:
+        return f"%{value * 100:.1f}" if value is not None else "—"
+
+    def _score(value: float | None) -> str:
+        return f"{value:.3f}" if value is not None else "—"
+
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "Model": item.model_version,
+                    "Karar": item.decision,
+                    "Aynı maç": item.paired_matches,
+                    "Aday isabet": _percent(item.candidate_accuracy),
+                    "Üretim isabet": _percent(item.production_accuracy),
+                    "Aday Brier": _score(item.candidate_brier),
+                    "Üretim Brier": _score(item.production_brier),
+                    "Gerekçe": item.reason,
+                }
+                for item in shadow_summaries
+            ]
+        ),
+        hide_index=True,
+        width="stretch",
+    )
 
 try:
     import numpy as np
@@ -344,7 +433,7 @@ try:
             line_dash="dash",
             annotation_text=f"Ortalama %{mean_accuracy * 100:.1f}",
         )
-        st.plotly_chart(histogram, width="stretch")
+        st.plotly_chart(histogram, width="stretch", config=CHART_CONFIG)
         st.caption(
             f"Önümüzdeki yedi gündeki {len(simulation_input)} maç için 10.000 senaryo. "
             f"Merkez %80 aralığı: %{lower * 100:.1f} – %{upper * 100:.1f}. "
@@ -494,6 +583,7 @@ else:
     st.plotly_chart(
         px.line(chart_data, x="evaluated_at", y="Değer", color="Metrik"),
         width="stretch",
+        config=CHART_CONFIG,
     )
     last_30 = performance.tail(30)
     st.caption(

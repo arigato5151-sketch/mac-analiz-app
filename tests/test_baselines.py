@@ -61,6 +61,21 @@ def test_baseline_metrics_reject_non_normalized_probabilities() -> None:
         )
 
 
+def test_baseline_metrics_normalize_harmless_decimal_drift() -> None:
+    labels = np.array([0, 1, 2])
+    probabilities = np.array(
+        [
+            [0.6000004, 0.25, 0.15],
+            [0.20, 0.5000004, 0.30],
+            [0.15, 0.25, 0.6000004],
+        ]
+    )
+
+    result = given_probabilities_baseline(labels, probabilities, "Yuvarlanmış")
+
+    assert np.isfinite(result.log_loss)
+
+
 def test_market_baseline_is_only_scored_when_provided() -> None:
     labels = np.array([0, 0, 2, 1, 0])
     model = np.tile(np.array([0.5, 0.3, 0.2]), (len(labels), 1))

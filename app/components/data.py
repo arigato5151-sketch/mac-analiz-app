@@ -158,6 +158,22 @@ def load_prediction_performance() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
+def load_shadow_model_status() -> pd.DataFrame:
+    """Load sanitized, same-match shadow/production aggregate metrics."""
+    rows = get_db().select_all(
+        "shadow_model_status",
+        columns=(
+            "model_version,status,registered_at,promoted_at,prediction_count,"
+            "evaluated_matches,paired_matches,candidate_accuracy,candidate_brier,"
+            "production_accuracy,production_brier,offline_log_loss,"
+            "offline_raw_log_loss,offline_baseline_log_loss,offline_ece"
+        ),
+        order="registered_at.desc",
+    )
+    return pd.DataFrame(rows)
+
+
+@st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
 def load_match_availability(
     home_team_id: int, away_team_id: int
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
