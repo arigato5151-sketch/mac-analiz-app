@@ -30,7 +30,6 @@ from app.components.pitch_visuals import (
     render_player_radar,
     render_shot_map,
 )
-from data_pipeline.statsbomb_adapter import StatsBombAdapter
 from app.components.ui import (
     configure_page,
     disclaimer,
@@ -43,6 +42,7 @@ from models.market_forecast import derive_market_probabilities, format_market_su
 
 
 LOGGER = logging.getLogger(__name__)
+CHART_CONFIG = {"displayModeBar": False, "displaylogo": False}
 
 
 configure_page("Maç Detay")
@@ -89,6 +89,7 @@ availability_data: list[dict[str, object]] = []
 
 st.subheader(f"{selected['home_team']} — {selected['away_team']}")
 st.caption(f"{selected['league_name']} · {selected['match_date'].strftime('%d.%m.%Y %H:%M')}")
+st.markdown("### Karar özeti")
 
 market, confidence_probability, confidence = prediction_signal(selected)
 if confidence_probability is None:
@@ -139,8 +140,11 @@ st.plotly_chart(
         color="Sonuç",
     ).update_layout(showlegend=False),
     width="stretch",
+    config=CHART_CONFIG,
 )
 
+st.divider()
+st.markdown("### Maç bağlamı")
 st.subheader("Kadro durumu")
 try:
     availability_rows, availability_snapshots = load_match_availability(
@@ -212,12 +216,12 @@ try:
 except Exception as exc:
     st.warning(f"Kadro durumu şu anda yüklenemedi: {exc}")
 
-st.subheader("Onaylı ilk 11")
 try:
     lineups = load_confirmed_lineups(int(selected_id))
     if len(lineups) < 2:
-        st.info("Resmî ilk 11 henüz açıklanmadı. API-Football çoğu ligde kadroyu başlama saatinden 20–40 dakika önce yayınlar.")
+        st.caption("Onaylı ilk 11 · henüz açıklanmadı.")
     else:
+        st.subheader("Onaylı ilk 11")
         lineup_columns = st.columns(2)
         for column, team_id, team_name in (
             (lineup_columns[0], int(selected["home_team_id"]), selected["home_team"]),
@@ -237,12 +241,12 @@ try:
 except Exception as exc:
     st.warning(f"Onaylı ilk 11 şu anda yüklenemedi: {exc}")
 
-st.subheader("Oran hareketi")
 try:
     odds_history = load_odds_history(int(selected_id))
     if odds_history.empty:
-        st.info("Bu maç için henüz kaydedilmiş oran hareketi yok.")
+        st.caption("Oran hareketi · kaydedilmiş güncel veri yok.")
     else:
+        st.subheader("Oran hareketi")
         odds_rows = odds_history.copy()
         odds_rows["Zaman"] = odds_rows["captured_at"].dt.strftime("%d.%m %H:%M")
         odds_rows["Referans"] = odds_rows["is_notification_reference"].map({True: "Bildirim anı", False: "Piyasa güncellemesi"})
@@ -270,6 +274,8 @@ try:
 except Exception as exc:
     st.warning(f"Oran geçmişi şu anda yüklenemedi: {exc}")
 
+st.divider()
+st.markdown("### Teknik analiz")
 try:
     detail = load_match_baseline(int(selected_id))
     baseline = detail["prediction"]
@@ -312,11 +318,11 @@ try:
         aspect="auto",
         color_continuous_scale="YlGnBu",
     )
-    st.plotly_chart(heatmap, width="stretch")
+    st.plotly_chart(heatmap, width="stretch", config=CHART_CONFIG)
     home_state = detail["home_state"]
     away_state = detail["away_state"]
 
-    st.subheader("Yapay Zeka Maç Yorumu")
+    st.subheader("İsteğe bağlı yapay zekâ yorumu")
     st.caption(
         "Yorum; mevcut model olasılıkları, Poisson beklenen golü, son form ve doğrulanmış "
         "kadro verisinden üretilir. Kesin sonuç veya bahis tavsiyesi değildir."
@@ -410,8 +416,12 @@ try:
         legend={"orientation": "h", "y": -0.2},
     )
     comparison_columns = st.columns(2)
-    comparison_columns[0].plotly_chart(radar_figure, width="stretch")
-    comparison_columns[1].plotly_chart(form_figure, width="stretch")
+    comparison_columns[0].plotly_chart(
+        radar_figure, width="stretch", config=CHART_CONFIG
+    )
+    comparison_columns[1].plotly_chart(
+        form_figure, width="stretch", config=CHART_CONFIG
+    )
     st.caption("Radar 0–100 ölçeğinde normalize edilmiştir; form grafiği son beş maçın gerçek 0/1/3 puanlarını gösterir.")
 
     elo_cols = st.columns(3)
@@ -427,19 +437,13 @@ try:
 except Exception as exc:
     st.warning(f"Poisson detayları şu anda hazırlanamadı: {exc}")
 
-st.subheader("Taktiksel Saha Görselleri (StatsBomb & mplsoccer)")
 try:
-    from data_pipeline.statsbomb_adapter import STATSBOMB_AVAILABLE, StatsBombAdapter
+    from data_pipeline.statsbomb_adapter import StatsBombAdapter
 
     statsbomb_adapter = StatsBombAdapter()
 
-    if not statsbomb_adapter.is_available:
-        st.info(
-            "ℹ️ **StatsBomb araştırma modülü bu ortamda etkin değil.** "
-            "StatsBomb Open Data ve taktiksel saha analizleri, `requirements-research.txt` "
-            "kullanılarak ayrı bir araştırma ortamında etkinleştirilebilir."
-        )
-    else:
+    if statsbomb_adapter.is_available:
+        st.subheader("Taktiksel saha görselleri")
         load_sb_key = f"load_statsbomb_{selected_id}"
         if load_sb_key not in st.session_state:
             st.session_state[load_sb_key] = False
