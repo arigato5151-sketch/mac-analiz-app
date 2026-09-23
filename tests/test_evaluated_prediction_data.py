@@ -124,6 +124,7 @@ def test_live_performance_requests_diversified_market_fields(monkeypatch) -> Non
     assert "model_version" in db.calls[0][1]["columns"]
     assert "market_probabilities" in db.calls[0][1]["columns"]
     assert "market_performance" in db.calls[0][1]["columns"]
+    assert "league_name" in db.calls[0][1]["columns"]
 
 
 class SquadContextDb:

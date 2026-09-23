@@ -156,7 +156,7 @@ def load_prediction_performance() -> pd.DataFrame:
             "prob_home_win,prob_draw,prob_away_win,"
             "evaluated_at,over_2_5_actual,over_2_5_was_correct,over_2_5_brier_score,"
             "btts_actual,btts_was_correct,btts_brier_score,"
-            "market_probabilities,market_performance"
+            "market_probabilities,market_performance,league_name"
         ),
         order="evaluated_at.asc",
     )
