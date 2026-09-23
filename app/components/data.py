@@ -15,7 +15,6 @@ import streamlit as st
 from config.settings import PROJECT_ROOT, get_public_supabase_settings
 from db.db_client import PublicSupabaseRestClient
 from models.feature_engineering import CausalFeatureState
-from models.train_model import load_historical_matches
 
 
 LOGGER = logging.getLogger(__name__)
@@ -27,6 +26,13 @@ HISTORY_TTL_SECONDS = 900
 REFERENCE_DATA_TTL_SECONDS = 21_600
 MODEL_METADATA_TTL_SECONDS = 3_600
 UPCOMING_HORIZON_DAYS = 7
+
+
+def load_historical_matches(db: PublicSupabaseRestClient) -> list[dict[str, Any]]:
+    """Load training history without importing the training stack at startup."""
+    from models.train_model import load_historical_matches as _load_historical_matches
+
+    return _load_historical_matches(db)
 
 
 @st.cache_resource(show_spinner=False)
