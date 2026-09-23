@@ -521,17 +521,16 @@ def build_training_dataset(
     if not valid:
         raise ValueError("No completed matches available for feature engineering")
 
-    # Compute league-specific Dixon-Coles rhos if not provided
-    if league_rhos is None:
-        league_rhos = estimate_league_dixon_coles_rhos(valid)
-
-    state = CausalFeatureState(league_rhos=league_rhos)
+    state = CausalFeatureState(league_rhos=league_rhos or {})
     feature_rows: list[dict[str, float]] = []
     label_rows: list[dict[str, Any]] = []
+    observed_matches: list[dict[str, Any]] = []
     for row in valid:
         home_score = int(row["home_score"])
         away_score = int(row["away_score"])
         match_at = datetime.fromisoformat(str(row["match_date"]).replace("Z", "+00:00"))
+        if league_rhos is None:
+            state.league_rhos = estimate_league_dixon_coles_rhos(observed_matches)
         feature_rows.append(state.feature_row(row))
         label_rows.append(
             {
@@ -543,6 +542,7 @@ def build_training_dataset(
             }
         )
         state.update(row)
+        observed_matches.append(row)
 
     features = pd.DataFrame(feature_rows, columns=FEATURE_COLUMNS)
     labels = pd.DataFrame(label_rows)

@@ -1,4 +1,5 @@
 import pytest
+import models.feature_engineering as feature_engineering
 
 from models.feature_engineering import (
     BINARY_FEATURE_COLUMNS,
@@ -61,6 +62,28 @@ def test_features_are_causal_and_updates_apply_to_next_match() -> None:
     assert features.iloc[1]["elo_abs_diff"] == abs(features.iloc[1]["elo_diff"])
     assert features.iloc[1]["home_rest_days"] == 7.0
     assert labels["result"].tolist() == [0, 1]
+
+
+def test_training_rho_estimation_only_sees_prior_matches(monkeypatch) -> None:
+    observed_lengths: list[int] = []
+
+    def fake_rho_estimator(matches):
+        observed_lengths.append(len(matches))
+        return {39: 0.0}
+
+    monkeypatch.setattr(
+        feature_engineering,
+        "estimate_league_dixon_coles_rhos",
+        fake_rho_estimator,
+    )
+    build_training_dataset(
+        [
+            completed_match(index, f"2026-01-{index:02d}T12:00:00+00:00", 1, 0)
+            for index in range(1, 4)
+        ]
+    )
+
+    assert observed_lengths == [0, 1, 2]
 
 
 def test_upcoming_matches_do_not_mutate_state_without_results() -> None:
