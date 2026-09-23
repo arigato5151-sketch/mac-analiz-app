@@ -31,6 +31,48 @@ from monitoring.feature_snapshot import (
 )
 
 
+def _availability_at(
+    history: list[dict[str, Any]],
+    *,
+    match_id: int,
+    team_id: int,
+    observed_at: datetime,
+) -> dict[str, int] | None:
+    """Return the latest causal fixture/team snapshot available at observation time."""
+    candidates: list[tuple[datetime, dict[str, Any]]] = []
+    for row in history:
+        if int(row["team_id"]) != team_id:
+            continue
+        row_match_id = row.get("match_id")
+        if row_match_id is not None and int(row_match_id) != match_id:
+            continue
+        timestamp_value = row.get("ingested_at") or row.get("refreshed_at")
+        if not timestamp_value:
+            continue
+        timestamp = datetime.fromisoformat(
+            str(timestamp_value).replace("Z", "+00:00")
+        )
+        if timestamp.tzinfo is None:
+            continue
+        timestamp = timestamp.astimezone(timezone.utc)
+        if timestamp <= observed_at:
+            candidates.append((timestamp, row))
+    fixture_candidates = [
+        item for item in candidates
+        if item[1].get("match_id") is not None
+    ]
+    selected = max(fixture_candidates or candidates, default=None, key=lambda item: item[0])
+    if selected is None:
+        return None
+    row = selected[1]
+    return {
+        "available_count": int(row["available_count"]),
+        "unavailable_count": int(row.get("unavailable_count", max(
+            0, 22 - int(row["available_count"])
+        ))),
+    }
+
+
 def newest_versioned_model(model_dir: Path) -> Path | None:
     """Return the artifact with the newest embedded version timestamp.
 
@@ -91,6 +133,9 @@ def load_upcoming_matches(
 ) -> list[dict[str, Any]]:
     if horizon_days < 1 or horizon_days > 14:
         raise ValueError("horizon_days must be between 1 and 14")
+    if now.tzinfo is None:
+        raise ValueError("now must include a timezone")
+    observed_at = now.astimezone(timezone.utc)
     end = now + timedelta(days=horizon_days)
     matches = db.select_all(
         "matches",
@@ -110,25 +155,58 @@ def load_upcoming_matches(
         filters={"captured_at": f"gte.{(now - timedelta(days=horizon_days)).isoformat()}"},
         order="captured_at.asc,id.asc",
     )
+    availability_history = db.select_all(
+        "team_availability_history",
+        columns=(
+            "team_id,match_id,observed_at,ingested_at,refreshed_at,"
+            "available_count,unavailable_count"
+        ),
+        order="ingested_at.asc",
+    )
     availability = db.select_all(
         "team_availability_status",
-        columns="team_id,available_count,unavailable_count",
+        columns="team_id,available_count,unavailable_count,refreshed_at",
     )
-    available_counts = {
-        int(row["team_id"]): int(row["available_count"]) for row in availability
-    }
-    unavailable_counts = {
-        int(row["team_id"]): int(row["unavailable_count"]) for row in availability
-    }
+    fallback_availability: dict[int, dict[str, int]] = {}
+    for row in availability:
+        refreshed_at = row.get("refreshed_at")
+        if refreshed_at:
+            parsed_refreshed_at = datetime.fromisoformat(
+                str(refreshed_at).replace("Z", "+00:00")
+            )
+            if parsed_refreshed_at.tzinfo is None:
+                continue
+            if parsed_refreshed_at.astimezone(timezone.utc) > observed_at:
+                continue
+        fallback_availability[int(row["team_id"])] = {
+            "available_count": int(row["available_count"]),
+            "unavailable_count": int(row["unavailable_count"]),
+        }
     lineups = db.select_all("fixture_lineups", columns="match_id,team_id")
     confirmed = {(int(row["match_id"]), int(row["team_id"])) for row in lineups}
     enriched = attach_pre_match_odds(matches, quotes, observed_at=now)
     for match in enriched:
         home_id, away_id = int(match["home_team_id"]), int(match["away_team_id"])
-        match["home_available_count"] = available_counts.get(home_id, 22)
-        match["away_available_count"] = available_counts.get(away_id, 22)
-        match["home_unavailable_count"] = unavailable_counts.get(home_id, 0)
-        match["away_unavailable_count"] = unavailable_counts.get(away_id, 0)
+        home_availability = _availability_at(
+            availability_history,
+            match_id=int(match["id"]),
+            team_id=home_id,
+            observed_at=observed_at,
+        ) or fallback_availability.get(
+            home_id, {"available_count": 22, "unavailable_count": 0}
+        )
+        away_availability = _availability_at(
+            availability_history,
+            match_id=int(match["id"]),
+            team_id=away_id,
+            observed_at=observed_at,
+        ) or fallback_availability.get(
+            away_id, {"available_count": 22, "unavailable_count": 0}
+        )
+        match["home_available_count"] = home_availability["available_count"]
+        match["away_available_count"] = away_availability["available_count"]
+        match["home_unavailable_count"] = home_availability["unavailable_count"]
+        match["away_unavailable_count"] = away_availability["unavailable_count"]
         # Training history preserves counts, not player-level status snapshots.
         # Use the same representation at inference to avoid train/serve skew.
         match["home_lineup_confirmed"] = (int(match["id"]), home_id) in confirmed
