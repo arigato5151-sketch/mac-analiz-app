@@ -24,7 +24,11 @@ except ImportError:
     shap = None
     SHAP_AVAILABLE = False
 
-from config.settings import PROJECT_ROOT, get_settings
+from config.settings import (
+    PRE_MATCH_DECISION_LEAD_MINUTES,
+    PROJECT_ROOT,
+    get_settings,
+)
 from db.db_client import SupabaseRestClient
 from data_pipeline.odds import attach_pre_match_odds
 from models.calibration import (
@@ -792,7 +796,7 @@ def load_completed_matches(db: SupabaseRestClient) -> list[dict[str, Any]]:
     matches = load_historical_matches(db)
     quotes = db.select_all(
         "odds_quote_history",
-        columns="match_id,odds,captured_at",
+        columns="match_id,odds,source_updated_at,captured_at",
         order="captured_at.asc",
     )
     availability = db.select_all(
@@ -817,7 +821,7 @@ def attach_historical_context(
     *,
     availability_history: list[dict[str, Any]],
     lineups: list[dict[str, Any]],
-    decision_lead_minutes: int = 20,
+    decision_lead_minutes: int = PRE_MATCH_DECISION_LEAD_MINUTES,
 ) -> list[dict[str, Any]]:
     """Attach only context that existed before each historical kickoff."""
     if decision_lead_minutes < 0:

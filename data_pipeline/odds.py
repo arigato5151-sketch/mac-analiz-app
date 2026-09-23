@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 import numpy as np
+from config.settings import PRE_MATCH_DECISION_LEAD_MINUTES
 
 from data_pipeline.api_client import ApiFootballClient
 from db.db_client import SupabaseRestClient
@@ -294,7 +295,7 @@ def attach_pre_match_odds(
     quotes: list[dict[str, Any]],
     *,
     observed_at: datetime | None = None,
-    training_lead_minutes: int = 20,
+    training_lead_minutes: int = PRE_MATCH_DECISION_LEAD_MINUTES,
 ) -> list[dict[str, Any]]:
     """Attach causal opening/current quotes at the intended decision time.
 

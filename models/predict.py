@@ -106,7 +106,7 @@ def load_upcoming_matches(
     )
     quotes = db.select_all(
         "odds_quote_history",
-        columns="id,match_id,odds,captured_at",
+        columns="id,match_id,odds,source_updated_at,captured_at",
         filters={"captured_at": f"gte.{(now - timedelta(days=horizon_days)).isoformat()}"},
         order="captured_at.asc,id.asc",
     )

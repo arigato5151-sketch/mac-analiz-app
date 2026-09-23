@@ -39,6 +39,32 @@ def test_historical_loader_requests_only_base_match_columns() -> None:
     )
 
 
+def test_historical_loader_requests_odds_source_timestamp() -> None:
+    calls: list[dict[str, object]] = []
+
+    class _Db:
+        def select_all(self, table: str, **kwargs: object) -> list[dict]:
+            calls.append({"table": table, **kwargs})
+            if table == "matches":
+                return [{
+                    "id": 10,
+                    "league_id": 1,
+                    "home_team_id": 1,
+                    "away_team_id": 2,
+                    "match_date": "2026-01-10T12:00:00+00:00",
+                    "status": "finished",
+                    "home_score": 2,
+                    "away_score": 1,
+                }]
+            return []
+
+    from models.train_model import load_completed_matches
+
+    load_completed_matches(_Db())
+    odds_call = next(call for call in calls if call["table"] == "odds_quote_history")
+    assert "source_updated_at" in str(odds_call["columns"])
+
+
 def test_historical_context_uses_only_pre_kickoff_observations() -> None:
     matches = [{
         "id": 10,
