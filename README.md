@@ -88,6 +88,12 @@ db/migrations/017_restrict_raw_prediction_tables.sql
 db/migrations/018_rename_pre_match_notification_type.sql
 db/migrations/019_add_automatic_pre_match_commentary.sql
 db/migrations/020_fix_public_performance_view_permissions.sql
+db/migrations/021_align_pre_match_notification_type.sql
+db/migrations/022_diversified_prediction_markets.sql
+db/migrations/023_backfill_binary_market_performance.sql
+db/migrations/024_expand_telegram_prediction_markets.sql
+db/migrations/025_public_shadow_model_status.sql
+db/migrations/026_fixture_scoped_player_availability.sql
 ```
 
 Migration'lar idempotent olacak şekilde tasarlanmıştır; yine de üretim
@@ -123,10 +129,12 @@ Model artefaktları (`.joblib` + metadata `.json`) git'e değil Supabase Storage
 saklanır; `Weekly retrain` iş akışı yeni candidate artefaktları
 `python -m models.artifact_store --push models/saved_models` ile `models`
 bucket'ına yükler ve doğrulama sonrası promote eder. Tahmin/deneme çalışmaları
-(`models/predict.py`, `models/shadow.py`) artefaktı önce `models/saved_models/`
-altında arar, yoksa `SUPABASE_URL` ve `SUPABASE_SERVICE_ROLE_KEY` ile Storage'dan
-indirir (`--pull` ile elle de indirilebilir). Depodaki `.joblib` dosyaları CI'da
-güncellenmez; eski track'li artefaktlar artık kaynak olarak kabul edilmez.
+(`models/predict.py`, `models/shadow.py`) önce çalışma dizinindeki geçici
+`models/saved_models/` hydration klasörünü kullanır, yoksa
+`SUPABASE_URL` ve `SUPABASE_SERVICE_ROLE_KEY` ile Storage'dan indirir
+(`--pull` ile elle de indirilebilir). Üretim `.joblib` dosyaları repoda tutulmaz;
+Streamlit yalnızca repoda bulunan metadata'yı kullanabildiğinde offline referans
+gösterir, eski veya eksik yerel binary'yi üretim modeli gibi sunmaz.
 
 ## Telegram bildirimleri
 

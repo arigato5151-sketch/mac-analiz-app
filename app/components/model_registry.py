@@ -1,8 +1,10 @@
 """Single source of truth for model version roles across all UI screens.
 
 Every screen that names a model version must resolve its role through this
-module. ``latest.joblib`` is the production artifact; artifacts trained after
-it are candidates awaiting the promotion gate; everything older is retired.
+module. When a production artifact has been hydrated locally,
+``latest.joblib`` identifies it; artifacts trained after it are candidates
+awaiting the promotion gate; everything older is retired. Without a hydrated
+artifact, the UI must not invent a production role.
 """
 
 from __future__ import annotations

@@ -5,6 +5,7 @@ pandas==3.0.5
 scikit-learn==1.9.0
 xgboost==3.4.1
 joblib==1.5.3
+pyarrow>=18,<24
 streamlit>=1.45,<2
 streamlit-aggrid>=1.2,<2
 plotly>=6.0,<7
