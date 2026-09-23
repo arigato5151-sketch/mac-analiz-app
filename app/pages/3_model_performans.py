@@ -452,11 +452,17 @@ except Exception as exc:
 
 st.subheader("Canlı tahmin takibi")
 section_intro("Her model sürümü ayrı gösterilir; böylece eski sonuçlar yeni modelin performansını maskelemez.")
-performance = load_prediction_performance()
+try:
+    performance = load_prediction_performance()
+except Exception as exc:
+    st.warning(f"Canlı performans verisi şu anda yüklenemedi: {exc}")
+    performance = pd.DataFrame()
+
 if performance.empty:
     st.info(
-        "Henüz sonuçlanıp değerlendirilen canlı tahmin yok. Maçlar tamamlandıkça "
-        "isabet ve Brier trendi burada görünecek."
+        "Henüz sonuçlanıp değerlendirilen canlı tahmin yok veya veri kaynağı "
+        "henüz yapılandırılmadı. Maçlar tamamlandıkça isabet ve Brier trendi "
+        "burada görünecek."
     )
 else:
     versioned_performance = performance.dropna(subset=["model_version"]).copy()
