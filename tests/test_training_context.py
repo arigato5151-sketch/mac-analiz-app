@@ -91,3 +91,36 @@ def test_historical_context_uses_only_pre_kickoff_observations() -> None:
     assert row["away_available_count"] == 21
     assert row["home_lineup_confirmed"] is True
     assert row["away_lineup_confirmed"] is False
+
+
+def test_historical_context_prefers_fixture_scoped_availability() -> None:
+    matches = [
+        {
+            "id": 10,
+            "home_team_id": 1,
+            "away_team_id": 2,
+            "match_date": "2026-01-10T12:00:00+00:00",
+        }
+    ]
+    availability = [
+        {
+            "team_id": 1,
+            "match_id": 10,
+            "ingested_at": "2026-01-10T10:00:00+00:00",
+            "observed_at": None,
+            "available_count": 18,
+        },
+        {
+            "team_id": 1,
+            "match_id": 11,
+            "ingested_at": "2026-01-10T09:00:00+00:00",
+            "observed_at": None,
+            "available_count": 22,
+        },
+    ]
+
+    row = attach_historical_context(
+        matches, availability_history=availability, lineups=[]
+    )[0]
+
+    assert row["home_available_count"] == 18

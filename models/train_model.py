@@ -801,8 +801,8 @@ def load_completed_matches(db: SupabaseRestClient) -> list[dict[str, Any]]:
     )
     availability = db.select_all(
         "team_availability_history",
-        columns="team_id,refreshed_at,available_count",
-        order="refreshed_at.asc",
+        columns="team_id,match_id,observed_at,ingested_at,refreshed_at,available_count",
+        order="ingested_at.asc",
     )
     lineups = db.select_all(
         "fixture_lineups",
@@ -827,14 +827,30 @@ def attach_historical_context(
     if decision_lead_minutes < 0:
         raise ValueError("decision_lead_minutes must not be negative")
     availability_by_team: dict[int, list[tuple[datetime, int]]] = {}
+    availability_by_fixture: dict[tuple[int, int], list[tuple[datetime, int]]] = {}
     for item in availability_history:
-        refreshed_at = datetime.fromisoformat(
-            str(item["refreshed_at"]).replace("Z", "+00:00")
+        ingested_value = item.get("ingested_at") or item.get("refreshed_at")
+        ingested_at = datetime.fromisoformat(
+            str(ingested_value).replace("Z", "+00:00")
         )
-        availability_by_team.setdefault(int(item["team_id"]), []).append(
-            (refreshed_at, int(item["available_count"]))
+        observed_value = item.get("observed_at")
+        observed_at = (
+            datetime.fromisoformat(str(observed_value).replace("Z", "+00:00"))
+            if observed_value
+            else ingested_at
         )
+        available_at = max(observed_at, ingested_at)
+        value = (available_at, int(item["available_count"]))
+        fixture_id = item.get("match_id")
+        if fixture_id is not None:
+            availability_by_fixture.setdefault(
+                (int(fixture_id), int(item["team_id"])), []
+            ).append(value)
+        else:
+            availability_by_team.setdefault(int(item["team_id"]), []).append(value)
     for observations in availability_by_team.values():
+        observations.sort(key=lambda item: item[0])
+    for observations in availability_by_fixture.values():
         observations.sort(key=lambda item: item[0])
 
     confirmed_at_by_fixture = {
@@ -850,7 +866,8 @@ def attach_historical_context(
         decision_at = kickoff - timedelta(minutes=decision_lead_minutes)
         for side in ("home", "away"):
             team_id = int(row[f"{side}_team_id"])
-            observations = availability_by_team.get(team_id, [])
+            fixture_observations = availability_by_fixture.get((int(row["id"]), team_id))
+            observations = fixture_observations or availability_by_team.get(team_id, [])
             timestamps = [item[0] for item in observations]
             index = bisect_right(timestamps, decision_at) - 1
             if index >= 0:

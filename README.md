@@ -94,6 +94,7 @@ db/migrations/023_backfill_binary_market_performance.sql
 db/migrations/024_expand_telegram_prediction_markets.sql
 db/migrations/025_public_shadow_model_status.sql
 db/migrations/026_fixture_scoped_player_availability.sql
+db/migrations/027_causal_availability_timestamps.sql
 ```
 
 Migration'lar idempotent olacak şekilde tasarlanmıştır; yine de üretim

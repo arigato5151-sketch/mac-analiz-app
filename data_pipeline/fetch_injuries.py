@@ -152,7 +152,10 @@ def sync_injuries(
         [
             {
                 "team_id": team_id,
+                "match_id": None,
                 "refreshed_at": refreshed_at,
+                "ingested_at": refreshed_at,
+                "observed_at": None,
                 "available_count": available_by_team[team_id],
                 "unavailable_count": count,
             }
@@ -161,17 +164,42 @@ def sync_injuries(
         on_conflict="team_id",
     )
     # Append-only history keeps future training snapshots causal and auditable.
-    db.insert(
-        "team_availability_history",
-        [
+    history_rows: list[dict[str, Any]] = []
+    if fixture_ids:
+        counts_by_fixture_team: dict[tuple[int, int], int] = {}
+        for row in rows:
+            fixture_id = row.get("match_id")
+            if fixture_id is not None:
+                key = (int(fixture_id), int(row["team_id"]))
+                counts_by_fixture_team[key] = counts_by_fixture_team.get(key, 0) + 1
+        for (fixture_id, team_id), count in counts_by_fixture_team.items():
+            history_rows.append(
+                {
+                    "team_id": team_id,
+                    "match_id": fixture_id,
+                    "refreshed_at": refreshed_at,
+                    "observed_at": None,
+                    "ingested_at": refreshed_at,
+                    "available_count": max(0, 22 - count),
+                    "unavailable_count": count,
+                }
+            )
+    else:
+        history_rows = [
             {
                 "team_id": team_id,
+                "match_id": None,
                 "refreshed_at": refreshed_at,
+                "observed_at": None,
+                "ingested_at": refreshed_at,
                 "available_count": available_by_team[team_id],
                 "unavailable_count": count,
             }
             for team_id, count in counts_by_team.items()
-        ],
+        ]
+    db.insert(
+        "team_availability_history",
+        history_rows,
     )
     return len(rows)
 
