@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from math import sqrt
 from typing import Iterable
 
+import pandas as pd
+
 
 WILSON_95_Z = 1.959963984540054
 
@@ -99,3 +101,72 @@ def summarize_live_performance(
         reference_accuracy=reference_accuracy,
         status=status,
     )
+
+
+def build_performance_breakdowns(
+    performance: pd.DataFrame,
+    *,
+    confidence_edges: tuple[float, ...] = (0.50, 0.60, 0.70, 0.80, 0.90, 1.01),
+) -> dict[str, list[dict[str, float | int | str]]]:
+    """Group evaluated 1X2 outcomes by league and top-pick confidence.
+
+    Rows missing a required value are excluded rather than treated as failures.
+    The returned counts make coverage visible, preventing small high-confidence
+    groups from being mistaken for the overall model rate.
+    """
+    required = {
+        "league_name",
+        "was_correct",
+        "brier_score",
+        "prob_home_win",
+        "prob_draw",
+        "prob_away_win",
+    }
+    missing = required.difference(performance.columns)
+    if missing:
+        raise ValueError(f"performance is missing columns: {', '.join(sorted(missing))}")
+    if len(confidence_edges) < 2 or any(
+        left >= right for left, right in zip(confidence_edges, confidence_edges[1:])
+    ):
+        raise ValueError("confidence_edges must be strictly increasing")
+
+    frame = performance.copy()
+    probability_columns = ["prob_home_win", "prob_draw", "prob_away_win"]
+    frame[probability_columns] = frame[probability_columns].apply(
+        pd.to_numeric, errors="coerce"
+    )
+    frame["brier_score"] = pd.to_numeric(frame["brier_score"], errors="coerce")
+    frame = frame.dropna(
+        subset=["league_name", "was_correct", "brier_score", *probability_columns]
+    )
+    if frame.empty:
+        return {"league": [], "confidence": []}
+
+    frame["confidence"] = frame[probability_columns].max(axis=1)
+
+    def summarize(group: pd.DataFrame, label: str) -> dict[str, float | int | str]:
+        sample_size = len(group)
+        return {
+            "Grup": label,
+            "Örneklem": sample_size,
+            "Kapsama": sample_size / len(frame),
+            "İsabet": group["was_correct"].astype(bool).mean(),
+            "Brier": group["brier_score"].mean(),
+        }
+
+    league_rows = [
+        summarize(group, str(league))
+        for league, group in frame.groupby("league_name", dropna=False)
+    ]
+    confidence_rows: list[dict[str, float | int | str]] = []
+    for lower, upper in zip(confidence_edges, confidence_edges[1:]):
+        group = frame[(frame["confidence"] >= lower) & (frame["confidence"] < upper)]
+        if group.empty:
+            continue
+        label = f"%{lower * 100:.0f}–%{min(upper, 1.0) * 100:.0f}"
+        confidence_rows.append(summarize(group, label))
+
+    return {
+        "league": sorted(league_rows, key=lambda row: (-int(row["Örneklem"]), str(row["Grup"]))),
+        "confidence": confidence_rows,
+    }

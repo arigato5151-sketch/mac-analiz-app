@@ -20,7 +20,10 @@ from app.components.data import (
     load_shadow_model_status,
     load_upcoming_dashboard,
 )
-from app.components.live_performance import summarize_live_performance
+from app.components.live_performance import (
+    build_performance_breakdowns,
+    summarize_live_performance,
+)
 from app.components.market_performance import summarize_diversified_market_performance
 from app.components.model_registry import STATUS_CANDIDATE, load_model_registry
 from app.components.monte_carlo import simulate_top_pick_accuracy
@@ -555,6 +558,43 @@ else:
     )
     st.subheader("Pazar bazlı canlı performans")
     st.dataframe(market_frame, hide_index=True, width="stretch")
+
+    breakdowns = build_performance_breakdowns(performance)
+    st.subheader("Lig ve güven seviyesi kırılımı")
+    section_intro(
+        "Başarı oranını tek ortalamada gizlememek için lig ve en güçlü 1-X-2 "
+        "olasılığına göre örneklem, kapsama ve Brier birlikte gösterilir."
+    )
+    breakdown_columns = st.columns(2)
+    for column, key, title in (
+        (breakdown_columns[0], "league", "Lig bazında"),
+        (breakdown_columns[1], "confidence", "Güven seviyesine göre"),
+    ):
+        rows = breakdowns[key]
+        with column:
+            st.markdown(f"**{title}**")
+            if not rows:
+                st.caption("Bu kırılım için yeterli geçerli veri yok.")
+            else:
+                breakdown_frame = pd.DataFrame(rows)
+                breakdown_frame["Kapsama"] = breakdown_frame["Kapsama"].map(
+                    lambda value: f"%{value * 100:.1f}"
+                )
+                breakdown_frame["İsabet"] = breakdown_frame["İsabet"].map(
+                    lambda value: f"%{value * 100:.1f}"
+                )
+                breakdown_frame["Brier"] = breakdown_frame["Brier"].map(
+                    lambda value: f"{value:.3f}"
+                )
+                st.dataframe(
+                    breakdown_frame.rename(columns={"Grup": "Grup"}),
+                    hide_index=True,
+                    width="stretch",
+                )
+    st.caption(
+        "Kapsama, ilgili grubun seçilen model sürümündeki geçerli değerlendirmeler "
+        "içindeki payıdır; örneklem küçüldükçe isabet oranı daha belirsizdir."
+    )
 
     if summary.status == "Yetersiz örneklem":
         st.info(
