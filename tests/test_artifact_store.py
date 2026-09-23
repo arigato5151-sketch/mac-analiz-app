@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -101,3 +102,33 @@ def test_list_models_returns_object_names(monkeypatch: pytest.MonkeyPatch) -> No
     )
 
     assert list_models() == ["model_artifacts/latest.joblib"]
+
+
+def test_cli_pull_bundle_hydrates_requested_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    model_path = tmp_path / "latest.joblib"
+
+    def fake_download(model_version: str, *, dest_dir: Path) -> dict[str, Path]:
+        assert model_version == "latest"
+        assert dest_dir == tmp_path
+        return {"model": model_path}
+
+    monkeypatch.setattr(artifact_store, "download_model_artifacts", fake_download)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "artifact_store",
+            "--pull-bundle",
+            "latest",
+            "--dest-dir",
+            str(tmp_path),
+        ],
+    )
+
+    artifact_store.main()
+
+    assert capsys.readouterr().out.strip() == f"downloaded model: {model_path}"

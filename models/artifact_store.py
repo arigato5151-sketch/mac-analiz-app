@@ -214,13 +214,25 @@ def download_model_artifacts(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument(
         "--push",
         type=Path,
         help="Upload model artifacts, metadata, and feature snapshots from this directory",
     )
-    parser.add_argument("--pull", help="Download a stored artifact to the current directory")
-    parser.add_argument("--list", action="store_true", help="List stored artifact names")
+    action.add_argument("--pull", help="Download one stored artifact to the current directory")
+    action.add_argument(
+        "--pull-bundle",
+        metavar="MODEL_VERSION",
+        help="Download a model and its metadata and feature snapshots",
+    )
+    action.add_argument("--list", action="store_true", help="List stored artifact names")
+    parser.add_argument(
+        "--dest-dir",
+        type=Path,
+        default=Path("models/saved_models"),
+        help="Destination directory used by --pull-bundle",
+    )
     args = parser.parse_args()
 
     if args.push is not None:
@@ -229,6 +241,13 @@ def main() -> None:
     elif args.pull:
         path = download_model(args.pull)
         print(f"downloaded {path}")
+    elif args.pull_bundle:
+        downloaded = download_model_artifacts(
+            args.pull_bundle,
+            dest_dir=args.dest_dir,
+        )
+        for kind, path in downloaded.items():
+            print(f"downloaded {kind}: {path}")
     elif args.list:
         for name in list_models():
             print(name)

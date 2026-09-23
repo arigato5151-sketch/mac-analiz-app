@@ -44,6 +44,11 @@ jobs:
       - run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
       - name: Run unit tests
         run: python -m pytest -q
+      - name: Hydrate production model and drift snapshots
+        run: >-
+          python -m models.artifact_store
+          --pull-bundle latest
+          --dest-dir models/saved_models
       - name: Drift check — abort on critical data drift
         run: python -m evaluation.drift_check --fail-on-critical --strict
         env:
