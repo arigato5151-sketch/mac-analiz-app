@@ -9,6 +9,7 @@ from data_pipeline.fetch_injuries import (
     AvailabilityDataQualityError,
     MAX_PLAUSIBLE_UNAVAILABLE,
     sync_injuries,
+    transform_injuries,
 )
 from data_pipeline.refresh_context import (
     current_elo_ratings,
@@ -115,6 +116,37 @@ def test_injury_sync_clears_teams_with_no_current_injuries() -> None:
     assert {row["unavailable_count"] for row in snapshots} == {0}
     history = next(rows for table, rows in db.upserts if table == "team_availability_history")
     assert {row["team_id"] for row in history} == {10, 20}
+
+
+def test_transform_injuries_keeps_only_past_timezone_aware_provider_time() -> None:
+    _, rows = transform_injuries(
+        [
+            {
+                "fixture": {"id": 101},
+                "team": {"id": 10, "name": "Team 10"},
+                "player": {
+                    "id": 7,
+                    "name": "Player",
+                    "reason": "Injury",
+                    "updated_at": "2026-09-23T12:00:00+00:00",
+                },
+            },
+            {
+                "fixture": {"id": 101},
+                "team": {"id": 10, "name": "Team 10"},
+                "player": {
+                    "id": 8,
+                    "name": "Player 2",
+                    "reason": "Injury",
+                    "updated_at": "not-a-timestamp",
+                },
+            },
+        ],
+        39,
+    )
+
+    assert rows[0]["observed_at"] == "2026-09-23T12:00:00+00:00"
+    assert rows[1]["observed_at"] is None
 
 
 def test_injury_sync_queries_exact_fixtures_and_counts_unique_players() -> None:

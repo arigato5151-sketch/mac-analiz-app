@@ -15,6 +15,33 @@ from db.db_client import SupabaseRestClient
 MAX_PLAUSIBLE_UNAVAILABLE = 15
 
 
+def _provider_observed_at(item: dict[str, Any], *, ingested_at: str) -> str | None:
+    """Return a trustworthy provider timestamp when the payload supplies one."""
+    raw_value = next(
+        (
+            item.get(field)
+            or item.get("player", {}).get(field)
+            for field in ("updated_at", "updatedAt", "last_update", "lastUpdate")
+        ),
+        None,
+    )
+    if not raw_value:
+        return None
+    try:
+        observed = datetime.fromisoformat(
+            str(raw_value).replace("Z", "+00:00")
+        )
+        ingested = datetime.fromisoformat(ingested_at)
+    except (TypeError, ValueError):
+        return None
+    if observed.tzinfo is None or ingested.tzinfo is None:
+        return None
+    observed_utc = observed.astimezone(timezone.utc)
+    if observed_utc > ingested.astimezone(timezone.utc):
+        return None
+    return observed_utc.isoformat()
+
+
 class AvailabilityDataQualityError(RuntimeError):
     """Raised before persistence when provider availability data is implausible."""
 
@@ -60,6 +87,7 @@ def transform_injuries(
             "status": status,
             "expected_return": None,
             "updated_at": now,
+            "observed_at": _provider_observed_at(item, ingested_at=now),
         }
     return list(teams.values()), list(availability.values())
 
@@ -167,18 +195,23 @@ def sync_injuries(
     history_rows: list[dict[str, Any]] = []
     if fixture_ids:
         counts_by_fixture_team: dict[tuple[int, int], int] = {}
+        observed_by_fixture_team: dict[tuple[int, int], list[str]] = {}
         for row in rows:
             fixture_id = row.get("match_id")
             if fixture_id is not None:
                 key = (int(fixture_id), int(row["team_id"]))
                 counts_by_fixture_team[key] = counts_by_fixture_team.get(key, 0) + 1
+                if row.get("observed_at"):
+                    observed_by_fixture_team.setdefault(key, []).append(
+                        str(row["observed_at"])
+                    )
         for (fixture_id, team_id), count in counts_by_fixture_team.items():
             history_rows.append(
                 {
                     "team_id": team_id,
                     "match_id": fixture_id,
                     "refreshed_at": refreshed_at,
-                    "observed_at": None,
+                    "observed_at": max(observed_by_fixture_team.get((fixture_id, team_id), []), default=None),
                     "ingested_at": refreshed_at,
                     "available_count": max(0, 22 - count),
                     "unavailable_count": count,
