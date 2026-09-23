@@ -108,6 +108,11 @@ def test_audit_flags_single_class_concentration() -> None:
     audit = audit_class_distribution(labels, probs)
 
     assert audit.collapsed_class is None
+    assert audit.top_pick_share == {
+        "home_win": pytest.approx(1.0),
+        "draw": pytest.approx(0.0),
+        "away_win": pytest.approx(0.0),
+    }
     assert audit.top_pick_concentration == pytest.approx(1.0)
     assert audit.warning is not None
 
@@ -155,3 +160,19 @@ def test_upcoming_collapse_checks_label_less_distributions() -> None:
     assert detect_upcoming_collapse(healthy) is None
     assert "çöktü" in (detect_upcoming_collapse(collapsed) or "")
     assert detect_upcoming_collapse(np.zeros((0, 3))) is None
+
+
+def test_upcoming_collapse_flags_a_class_missing_from_top_picks() -> None:
+    probabilities = np.array(
+        [
+            [0.46, 0.29, 0.25],
+            [0.25, 0.29, 0.46],
+        ]
+        * 10
+    )
+
+    warning = detect_upcoming_collapse(probabilities)
+
+    assert warning is not None
+    assert "draw" in warning
+    assert "%0.0" in warning

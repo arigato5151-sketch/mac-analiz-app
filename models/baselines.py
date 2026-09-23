@@ -20,6 +20,8 @@ CLASS_LABELS = ("home_win", "draw", "away_win")
 # A healthy 1X-2 model never concentrates every pick on one class and never
 # squeezes any class out of the distribution entirely.
 MIN_CLASS_SHARE = 0.10
+MIN_TOP_PICK_CLASS_SHARE = 0.05
+MIN_TOP_PICK_AUDIT_SAMPLE = 20
 MAX_TOP_PICK_CONCENTRATION = 0.90
 
 
@@ -121,6 +123,7 @@ def compare_to_baselines(
 class DistributionAudit:
     predicted_share: dict[str, float]
     realized_share: dict[str, float]
+    top_pick_share: dict[str, float]
     top_pick_concentration: float
     collapsed_class: str | None
     warning: str | None
@@ -142,12 +145,29 @@ def detect_upcoming_collapse(probabilities: np.ndarray) -> str | None:
                 f"%{predicted_share[label] * 100:.1f}; tahmin hattı sağlıklı değil."
             )
     picks = np.bincount(values.argmax(axis=1), minlength=len(CLASS_LABELS))
-    concentration = float(picks.max() / picks.sum())
+    top_pick_share = picks / picks.sum()
+    concentration = float(top_pick_share.max())
     if concentration > MAX_TOP_PICK_CONCENTRATION:
         return (
             "Seçimlerin "
             f"%{concentration * 100:.1f}'i tek sınıfta toplandı; dağılım bozuk."
         )
+    if len(values) >= MIN_TOP_PICK_AUDIT_SAMPLE:
+        collapsed_pick_index = next(
+            (
+                index
+                for index, share in enumerate(top_pick_share)
+                if share < MIN_TOP_PICK_CLASS_SHARE
+            ),
+            None,
+        )
+        if collapsed_pick_index is not None:
+            label = CLASS_LABELS[collapsed_pick_index]
+            return (
+                f"{label} sınıfı seçimlerden silindi: en güçlü tahmin olma payı "
+                f"%{top_pick_share[collapsed_pick_index] * 100:.1f}; modelin sınıf "
+                "ayrımı izlenmeli."
+            )
     return None
 
 
@@ -166,6 +186,10 @@ def audit_class_distribution(
         for index in range(len(CLASS_LABELS))
     }
     picks = np.bincount(values.argmax(axis=1), minlength=len(CLASS_LABELS))
+    top_pick_share = {
+        CLASS_LABELS[index]: float(picks[index] / picks.sum())
+        for index in range(len(CLASS_LABELS))
+    }
     concentration = float(picks.max() / picks.sum())
     collapsed_class = next(
         (
@@ -179,6 +203,7 @@ def audit_class_distribution(
     return DistributionAudit(
         predicted_share=predicted_share,
         realized_share=realized_share,
+        top_pick_share=top_pick_share,
         top_pick_concentration=concentration,
         collapsed_class=collapsed_class,
         warning=warning,

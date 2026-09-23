@@ -6,8 +6,10 @@ import pytest
 from sklearn.metrics import log_loss
 
 from models.calibration import (
+    CalibrationQuality,
     apply_binary_temperature,
     apply_multiclass_temperature,
+    calibration_candidate_is_safe,
     expected_calibration_error,
     fit_multiclass_temperature,
     guarded_multiclass_temperature,
@@ -86,3 +88,33 @@ def test_guarded_temperature_rejects_regime_shift() -> None:
             raw[index, label] = 0.60
 
     assert guarded_multiclass_temperature(labels, raw) == 1.0
+
+
+def test_calibration_candidate_rejects_secondary_metric_regression() -> None:
+    raw = CalibrationQuality(
+        log_loss=1.01,
+        brier_score=0.60,
+        expected_calibration_error=0.01,
+    )
+    candidate = CalibrationQuality(
+        log_loss=1.00,
+        brier_score=0.599,
+        expected_calibration_error=0.02,
+    )
+
+    assert calibration_candidate_is_safe(raw, candidate) is False
+
+
+def test_calibration_candidate_accepts_consistent_improvement() -> None:
+    raw = CalibrationQuality(
+        log_loss=1.01,
+        brier_score=0.60,
+        expected_calibration_error=0.02,
+    )
+    candidate = CalibrationQuality(
+        log_loss=1.00,
+        brier_score=0.59,
+        expected_calibration_error=0.01,
+    )
+
+    assert calibration_candidate_is_safe(raw, candidate) is True

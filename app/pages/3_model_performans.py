@@ -288,6 +288,11 @@ try:
                     f"{label} %{share * 100:.1f}"
                     for label, share in audit.predicted_share.items()
                 )
+                + " · en güçlü seçim payı: "
+                + ", ".join(
+                    f"{label} %{share * 100:.1f}"
+                    for label, share in audit.top_pick_share.items()
+                )
                 + f" · seçim yoğunlaşması: %{audit.top_pick_concentration * 100:.1f}"
             )
             if audit.warning:

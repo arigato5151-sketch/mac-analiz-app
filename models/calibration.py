@@ -2,12 +2,62 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 from scipy.optimize import minimize_scalar
 from sklearn.metrics import log_loss
 
 
 EPSILON = 1e-7
+
+
+@dataclass(frozen=True)
+class CalibrationQuality:
+    log_loss: float
+    brier_score: float
+    expected_calibration_error: float
+
+
+def calibration_candidate_is_safe(
+    raw: CalibrationQuality,
+    candidate: CalibrationQuality,
+    *,
+    minimum_log_loss_improvement: float = 1e-4,
+    maximum_secondary_regression: float = 1e-4,
+) -> bool:
+    """Require a loss improvement without sacrificing Brier score or ECE."""
+    return (
+        candidate.log_loss <= raw.log_loss - minimum_log_loss_improvement
+        and candidate.brier_score
+        <= raw.brier_score + maximum_secondary_regression
+        and candidate.expected_calibration_error
+        <= raw.expected_calibration_error + maximum_secondary_regression
+    )
+
+
+def _multiclass_quality(
+    labels: np.ndarray, probabilities: np.ndarray
+) -> CalibrationQuality:
+    one_hot = np.eye(probabilities.shape[1])[labels]
+    return CalibrationQuality(
+        log_loss=float(
+            log_loss(labels, probabilities, labels=list(range(probabilities.shape[1])))
+        ),
+        brier_score=float(np.mean((probabilities - one_hot) ** 2)),
+        expected_calibration_error=expected_calibration_error(labels, probabilities),
+    )
+
+
+def _binary_quality(
+    labels: np.ndarray, probabilities: np.ndarray
+) -> CalibrationQuality:
+    matrix = np.column_stack((1.0 - probabilities, probabilities))
+    return CalibrationQuality(
+        log_loss=float(log_loss(labels, probabilities, labels=[0, 1])),
+        brier_score=float(np.mean((probabilities - labels) ** 2)),
+        expected_calibration_error=expected_calibration_error(labels, matrix),
+    )
 
 
 def apply_multiclass_temperature(
@@ -90,15 +140,15 @@ def guarded_multiclass_temperature(
     if len(labels) - split < 50:
         split = len(labels) - 50
     candidate = fit_multiclass_temperature(labels[:split], values[:split])
-    raw_loss = log_loss(
-        labels[split:], values[split:], labels=list(range(values.shape[1]))
+    raw_quality = _multiclass_quality(labels[split:], values[split:])
+    candidate_quality = _multiclass_quality(
+        labels[split:], apply_multiclass_temperature(values[split:], candidate)
     )
-    candidate_loss = log_loss(
-        labels[split:],
-        apply_multiclass_temperature(values[split:], candidate),
-        labels=list(range(values.shape[1])),
-    )
-    if candidate_loss > raw_loss - minimum_improvement:
+    if not calibration_candidate_is_safe(
+        raw_quality,
+        candidate_quality,
+        minimum_log_loss_improvement=minimum_improvement,
+    ):
         return 1.0
     return fit_multiclass_temperature(labels, values)
 
@@ -118,13 +168,15 @@ def guarded_binary_temperature(
     if len(labels) - split < 50:
         split = len(labels) - 50
     candidate = fit_binary_temperature(labels[:split], values[:split])
-    raw_loss = log_loss(labels[split:], values[split:], labels=[0, 1])
-    candidate_loss = log_loss(
-        labels[split:],
-        apply_binary_temperature(values[split:], candidate),
-        labels=[0, 1],
+    raw_quality = _binary_quality(labels[split:], values[split:])
+    candidate_quality = _binary_quality(
+        labels[split:], apply_binary_temperature(values[split:], candidate)
     )
-    if candidate_loss > raw_loss - minimum_improvement:
+    if not calibration_candidate_is_safe(
+        raw_quality,
+        candidate_quality,
+        minimum_log_loss_improvement=minimum_improvement,
+    ):
         return 1.0
     return fit_binary_temperature(labels, values)
 
