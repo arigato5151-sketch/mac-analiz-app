@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from config.settings import get_settings
+from config.settings import get_supabase_admin_settings
 from db.db_client import SupabaseRestClient
 
 
@@ -81,7 +81,7 @@ def main() -> None:
     if args.manifest:
         print(json.dumps([migration.__dict__ | {"path": str(migration.path)} for migration in migrations], ensure_ascii=False, indent=2))
     if args.verify_production:
-        settings = get_settings()
+        settings = get_supabase_admin_settings()
         report = verify_ledger(
             migrations,
             SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key),

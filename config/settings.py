@@ -45,6 +45,15 @@ class PublicSupabaseSettings:
     request_timeout_seconds: float = 30.0
 
 
+@dataclass(frozen=True, slots=True)
+class SupabaseAdminSettings:
+    """Credentials required for database administration commands."""
+
+    supabase_url: str
+    supabase_service_role_key: str
+    request_timeout_seconds: float = 30.0
+
+
 def get_settings(env_file: Path | None = None) -> Settings:
     _load_env_file(env_file or PROJECT_ROOT / ".env")
 
@@ -63,6 +72,28 @@ def get_settings(env_file: Path | None = None) -> Settings:
 
     return Settings(
         api_football_key=values["API_FOOTBALL_KEY"],
+        supabase_url=values["SUPABASE_URL"],
+        supabase_service_role_key=values["SUPABASE_SERVICE_ROLE_KEY"],
+    )
+
+
+def get_supabase_admin_settings(
+    env_file: Path | None = None,
+) -> SupabaseAdminSettings:
+    """Load only the credentials required for Supabase administration."""
+    _load_env_file(env_file or PROJECT_ROOT / ".env")
+    values = {
+        "SUPABASE_URL": os.getenv("SUPABASE_URL", "").strip().rstrip("/"),
+        "SUPABASE_SERVICE_ROLE_KEY": os.getenv(
+            "SUPABASE_SERVICE_ROLE_KEY", ""
+        ).strip(),
+    }
+    missing = [name for name, value in values.items() if not value]
+    if missing:
+        raise ConfigurationError(
+            f"Missing Supabase administration settings: {', '.join(missing)}"
+        )
+    return SupabaseAdminSettings(
         supabase_url=values["SUPABASE_URL"],
         supabase_service_role_key=values["SUPABASE_SERVICE_ROLE_KEY"],
     )
