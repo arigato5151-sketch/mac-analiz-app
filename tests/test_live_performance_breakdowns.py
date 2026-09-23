@@ -51,3 +51,22 @@ def test_breakdowns_report_league_and_confidence_coverage() -> None:
 def test_breakdowns_reject_missing_columns() -> None:
     with pytest.raises(ValueError, match="missing columns"):
         build_performance_breakdowns(pd.DataFrame())
+
+
+def test_breakdowns_keep_confidence_when_league_is_unavailable() -> None:
+    frame = pd.DataFrame(
+        [
+            {
+                "was_correct": True,
+                "brier_score": 0.10,
+                "prob_home_win": 0.70,
+                "prob_draw": 0.20,
+                "prob_away_win": 0.10,
+            }
+        ]
+    )
+
+    result = build_performance_breakdowns(frame)
+
+    assert result["league"] == []
+    assert result["confidence"][0]["Örneklem"] == 1

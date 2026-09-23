@@ -115,7 +115,6 @@ def build_performance_breakdowns(
     groups from being mistaken for the overall model rate.
     """
     required = {
-        "league_name",
         "was_correct",
         "brier_score",
         "prob_home_win",
@@ -137,7 +136,7 @@ def build_performance_breakdowns(
     )
     frame["brier_score"] = pd.to_numeric(frame["brier_score"], errors="coerce")
     frame = frame.dropna(
-        subset=["league_name", "was_correct", "brier_score", *probability_columns]
+        subset=["was_correct", "brier_score", *probability_columns]
     )
     if frame.empty:
         return {"league": [], "confidence": []}
@@ -154,10 +153,15 @@ def build_performance_breakdowns(
             "Brier": group["brier_score"].mean(),
         }
 
-    league_rows = [
-        summarize(group, str(league))
-        for league, group in frame.groupby("league_name", dropna=False)
-    ]
+    if "league_name" in frame.columns:
+        league_rows = [
+            summarize(group, str(league))
+            for league, group in frame.dropna(subset=["league_name"]).groupby(
+                "league_name", dropna=False
+            )
+        ]
+    else:
+        league_rows = []
     confidence_rows: list[dict[str, float | int | str]] = []
     for lower, upper in zip(confidence_edges, confidence_edges[1:]):
         group = frame[(frame["confidence"] >= lower) & (frame["confidence"] < upper)]
