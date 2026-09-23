@@ -148,3 +148,39 @@ def test_live_odds_never_use_quote_after_observation_time() -> None:
     )[0]
 
     assert row["market_odds"]["home_win"] == "2.1"
+
+
+def test_training_odds_reject_source_update_after_decision_time() -> None:
+    matches = [{"id": 1, "match_date": "2026-09-06T18:00:00+00:00"}]
+    quotes = [
+        {
+            "match_id": 1,
+            "captured_at": "2026-09-06T17:10:00+00:00",
+            "source_updated_at": "2026-09-06T17:45:00+00:00",
+            "odds": {"home_win": "1.8"},
+        },
+        {
+            "match_id": 1,
+            "captured_at": "2026-09-06T17:15:00+00:00",
+            "source_updated_at": "2026-09-06T17:15:00+00:00",
+            "odds": {"home_win": "2.1"},
+        },
+    ]
+
+    row = attach_pre_match_odds(matches, quotes, training_lead_minutes=20)[0]
+
+    assert row["market_odds"]["home_win"] == "2.1"
+
+
+def test_odds_reject_malformed_source_update_timestamp() -> None:
+    matches = [{"id": 1, "match_date": "2026-09-06T18:00:00+00:00"}]
+    quotes = [{
+        "match_id": 1,
+        "captured_at": "2026-09-06T17:15:00+00:00",
+        "source_updated_at": "not-a-timestamp",
+        "odds": {"home_win": "2.1"},
+    }]
+
+    row = attach_pre_match_odds(matches, quotes, training_lead_minutes=20)[0]
+
+    assert "market_odds" not in row

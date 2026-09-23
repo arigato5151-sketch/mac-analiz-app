@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 import numpy as np
@@ -18,6 +18,13 @@ SECONDARY_BOOKMAKER_ID = 4
 SECONDARY_BOOKMAKER_NAME = "Pinnacle"
 MULTI_BOOKMAKER_IDS = [PRIMARY_BOOKMAKER_ID, SECONDARY_BOOKMAKER_ID]
 MULTI_BOOKMAKER_NAMES = {PRIMARY_BOOKMAKER_ID: PRIMARY_BOOKMAKER_NAME, SECONDARY_BOOKMAKER_ID: SECONDARY_BOOKMAKER_NAME}
+
+
+def _parse_utc_timestamp(value: object, *, field: str) -> datetime:
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError(f"{field} must include a timezone")
+    return parsed.astimezone(timezone.utc)
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,9 +311,14 @@ def attach_pre_match_odds(
     if training_lead_minutes < 0:
         raise ValueError("training_lead_minutes must not be negative")
     kickoff_by_match = {
-        int(match["id"]): datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
+        int(match["id"]): _parse_utc_timestamp(match["match_date"], field="match_date")
         for match in matches
     }
+    decision_at = (
+        _parse_utc_timestamp(observed_at, field="observed_at")
+        if observed_at is not None
+        else None
+    )
     valid_with_captured_at = [
         quote
         for quote in quotes
@@ -316,20 +328,40 @@ def attach_pre_match_odds(
     for quote in sorted(
         valid_with_captured_at,
         key=lambda item: (
-            datetime.fromisoformat(str(item["captured_at"]).replace("Z", "+00:00")),
+            _parse_utc_timestamp(item["captured_at"], field="captured_at"),
             int(item.get("id", 0)),
         ),
     ):
-        captured = datetime.fromisoformat(str(quote["captured_at"]).replace("Z", "+00:00"))
+        try:
+            captured = _parse_utc_timestamp(quote["captured_at"], field="captured_at")
+            source_updated = (
+                _parse_utc_timestamp(
+                    quote["source_updated_at"], field="source_updated_at"
+                )
+                if quote.get("source_updated_at")
+                else None
+            )
+        except (TypeError, ValueError):
+            continue
         match_id = int(quote["match_id"])
         if match_id not in kickoff_by_match:
             continue
         cutoff = (
-            observed_at
-            if observed_at is not None
+            decision_at
+            if decision_at is not None
             else kickoff_by_match[match_id] - timedelta(minutes=training_lead_minutes)
         )
-        if captured <= cutoff and captured < kickoff_by_match[match_id]:
+        if (
+            captured <= cutoff
+            and captured < kickoff_by_match[match_id]
+            and (
+                source_updated is None
+                or (
+                    source_updated <= cutoff
+                    and source_updated < kickoff_by_match[match_id]
+                )
+            )
+        ):
             valid_by_match.setdefault(match_id, []).append(quote)
 
     enriched: list[dict[str, Any]] = []
