@@ -28,6 +28,32 @@ def _load_env_file(path: Path) -> None:
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
+def _load_streamlit_secrets() -> None:
+    """Expose Streamlit Cloud secrets through the same settings interface.
+
+    Importing Streamlit is intentionally best-effort: CLI jobs and tests do not
+    need the Streamlit runtime, while the web app can keep its credentials in
+    ``st.secrets`` instead of a checked-in ``.env`` file.
+    """
+    try:
+        import streamlit as st
+
+        for key in (
+            "API_FOOTBALL_KEY",
+            "SUPABASE_URL",
+            "SUPABASE_ANON_KEY",
+            "SUPABASE_SERVICE_ROLE_KEY",
+        ):
+            if not os.getenv(key):
+                value = st.secrets.get(key)
+                if value:
+                    os.environ[key] = str(value).strip()
+    except Exception:
+        # Settings must remain usable outside Streamlit and before secrets are
+        # configured; the caller will report the precise missing keys.
+        return
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     api_football_key: str
@@ -56,6 +82,7 @@ class SupabaseAdminSettings:
 
 def get_settings(env_file: Path | None = None) -> Settings:
     _load_env_file(env_file or PROJECT_ROOT / ".env")
+    _load_streamlit_secrets()
 
     values = {
         "API_FOOTBALL_KEY": os.getenv("API_FOOTBALL_KEY", "").strip(),
@@ -82,6 +109,7 @@ def get_supabase_admin_settings(
 ) -> SupabaseAdminSettings:
     """Load only the credentials required for Supabase administration."""
     _load_env_file(env_file or PROJECT_ROOT / ".env")
+    _load_streamlit_secrets()
     values = {
         "SUPABASE_URL": os.getenv("SUPABASE_URL", "").strip().rstrip("/"),
         "SUPABASE_SERVICE_ROLE_KEY": os.getenv(
@@ -104,6 +132,7 @@ def get_public_supabase_settings(
 ) -> PublicSupabaseSettings:
     """Load the least-privileged credentials used by the UI only."""
     _load_env_file(env_file or PROJECT_ROOT / ".env")
+    _load_streamlit_secrets()
     url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
     anon_key = os.getenv("SUPABASE_ANON_KEY", "").strip()
     missing = [
