@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import joblib
 import numpy as np
 import pandas as pd
 import pytest
@@ -154,3 +155,37 @@ def test_download_model_artifacts_storage_unreachable_fallback(tmp_path: Path):
     with patch("models.artifact_store.download_model", side_effect=ArtifactStoreError("Network down")):
         with pytest.raises(ArtifactStoreError):
             download_model_artifacts("latest", dest_dir=tmp_path)
+
+
+def test_latest_bundle_falls_back_to_versioned_snapshots(tmp_path: Path):
+    model_version = "model_v20260923T070000Z"
+    requested: list[str] = []
+
+    def mock_download(name, dest_dir=None, local_path=None):
+        requested.append(name)
+        out_path = Path(dest_dir) / name
+        if name == "latest.joblib":
+            joblib.dump(
+                {"model_version": model_version},
+                out_path,
+            )
+            return out_path
+        if name == f"feature_snapshot_ref_{model_version}.parquet":
+            out_path.write_bytes(b"reference")
+            return out_path
+        if name == f"feature_snapshot_current_{model_version}.parquet":
+            out_path.write_bytes(b"current")
+            return out_path
+        raise ArtifactStoreError(f"Object not found: {name}")
+
+    with patch("models.artifact_store.download_model", side_effect=mock_download):
+        artifacts = download_model_artifacts("latest", dest_dir=tmp_path)
+
+    assert artifacts["ref_snapshot"].name == (
+        f"feature_snapshot_ref_{model_version}.parquet"
+    )
+    assert artifacts["current_snapshot"].name == (
+        f"feature_snapshot_current_{model_version}.parquet"
+    )
+    assert "feature_snapshot_ref.parquet" in requested
+    assert f"feature_snapshot_ref_{model_version}.parquet" in requested

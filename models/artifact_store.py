@@ -18,6 +18,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import joblib
 import requests
 
 from config.settings import get_settings
@@ -195,19 +196,44 @@ def download_model_artifacts(
         )
         raise
 
-    # Companion files are best-effort downloads
-    candidates = [
-        (json_name, "metadata"),
-        (f"feature_snapshot_ref_{base_name}.parquet" if base_name != "latest" else "feature_snapshot_ref.parquet", "ref_snapshot"),
-        (f"feature_snapshot_ref_{base_name}.json" if base_name != "latest" else "feature_snapshot_ref.json", "ref_metadata"),
-        (f"feature_snapshot_current_{base_name}.parquet" if base_name != "latest" else "feature_snapshot_current.parquet", "current_snapshot"),
-        (f"feature_snapshot_current_{base_name}.json" if base_name != "latest" else "feature_snapshot_current.json", "current_metadata"),
-    ]
-    for candidate_name, key in candidates:
+    snapshot_version = base_name
+    if base_name == "latest":
         try:
-            downloaded[key] = download_model(candidate_name, dest_dir=directory)
-        except ArtifactStoreError:
-            pass
+            bundle = joblib.load(downloaded["model"])
+            stored_version = str(bundle.get("model_version", "")).strip()
+            if stored_version:
+                snapshot_version = stored_version
+        except Exception as exc:
+            LOGGER.warning("Could not resolve version from latest model bundle: %s", exc)
+
+    # Companion files are best-effort. Prefer stable aliases, then fall back to
+    # versioned objects produced by older training runs.
+    candidate_groups: dict[str, list[str]] = {
+        "metadata": [json_name, f"{snapshot_version}.json"],
+        "ref_snapshot": [
+            "feature_snapshot_ref.parquet",
+            f"feature_snapshot_ref_{snapshot_version}.parquet",
+        ],
+        "ref_metadata": [
+            "feature_snapshot_ref.json",
+            f"feature_snapshot_ref_{snapshot_version}.json",
+        ],
+        "current_snapshot": [
+            "feature_snapshot_current.parquet",
+            f"feature_snapshot_current_{snapshot_version}.parquet",
+        ],
+        "current_metadata": [
+            "feature_snapshot_current.json",
+            f"feature_snapshot_current_{snapshot_version}.json",
+        ],
+    }
+    for key, candidate_names in candidate_groups.items():
+        for candidate_name in dict.fromkeys(candidate_names):
+            try:
+                downloaded[key] = download_model(candidate_name, dest_dir=directory)
+                break
+            except ArtifactStoreError:
+                continue
 
     return downloaded
 
