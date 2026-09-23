@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
@@ -77,6 +77,13 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     "home_lineup_confirmed",
     "away_lineup_confirmed",
 )
+
+
+def _match_datetime_utc(value: object) -> datetime:
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("match_date must include a timezone")
+    return parsed.astimezone(timezone.utc)
 
 # These features target the three-way result boundary. Keeping them out of the
 # binary goal models avoids letting a 1X2 experiment regress Üst/KG performance.
@@ -315,7 +322,7 @@ class CausalFeatureState:
     def feature_row(self, row: dict[str, Any]) -> dict[str, float]:
         home_id = int(row["home_team_id"])
         away_id = int(row["away_team_id"])
-        match_at = datetime.fromisoformat(str(row["match_date"]).replace("Z", "+00:00"))
+        match_at = _match_datetime_utc(row["match_date"])
         home = self.states[home_id]
         away = self.states[away_id]
 
@@ -517,7 +524,7 @@ def build_training_dataset(
         and row.get("away_score") is not None
         and row.get("match_date")
     ]
-    valid.sort(key=lambda row: (row["match_date"], int(row["id"])))
+    valid.sort(key=lambda row: (_match_datetime_utc(row["match_date"]), int(row["id"])))
     if not valid:
         raise ValueError("No completed matches available for feature engineering")
 
@@ -564,9 +571,10 @@ def build_upcoming_features(
         and row.get("away_score") is not None
         and row.get("match_date")
     ]
-    completed.sort(key=lambda row: (row["match_date"], int(row["id"])))
+    completed.sort(key=lambda row: (_match_datetime_utc(row["match_date"]), int(row["id"])))
     targets = sorted(
-        upcoming_matches, key=lambda row: (row["match_date"], int(row["id"]))
+        upcoming_matches,
+        key=lambda row: (_match_datetime_utc(row["match_date"]), int(row["id"])),
     )
     if not completed or not targets:
         raise ValueError("Completed history and upcoming matches are required")
@@ -597,9 +605,10 @@ def build_upcoming_poisson_predictions(
         and row.get("away_score") is not None
         and row.get("match_date")
     ]
-    completed.sort(key=lambda row: (row["match_date"], int(row["id"])))
+    completed.sort(key=lambda row: (_match_datetime_utc(row["match_date"]), int(row["id"])))
     targets = sorted(
-        upcoming_matches, key=lambda row: (row["match_date"], int(row["id"]))
+        upcoming_matches,
+        key=lambda row: (_match_datetime_utc(row["match_date"]), int(row["id"])),
     )
     if not completed or not targets:
         raise ValueError("Completed history and upcoming matches are required")

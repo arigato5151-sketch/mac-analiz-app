@@ -64,6 +64,17 @@ def test_features_are_causal_and_updates_apply_to_next_match() -> None:
     assert labels["result"].tolist() == [0, 1]
 
 
+def test_training_sorts_match_dates_by_utc_instant() -> None:
+    features, _ = build_training_dataset(
+        [
+            completed_match(1, "2026-01-01T12:00:00+03:00", 3, 0),
+            completed_match(2, "2026-01-01T10:00:00Z", 0, 0),
+        ]
+    )
+
+    assert features.iloc[1]["home_win_rate_5"] == 1.0
+
+
 def test_training_rho_estimation_only_sees_prior_matches(monkeypatch) -> None:
     observed_lengths: list[int] = []
 

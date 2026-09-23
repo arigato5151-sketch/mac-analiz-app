@@ -79,7 +79,13 @@ def current_elo_ratings(
     """Rebuild causal Elo once and return ratings for requested teams."""
     state = CausalFeatureState()
     for row in sorted(
-        completed_matches, key=lambda item: (item["match_date"], int(item["id"]))
+        completed_matches,
+        key=lambda item: (
+            datetime.fromisoformat(
+                str(item["match_date"]).replace("Z", "+00:00")
+            ).astimezone(timezone.utc),
+            int(item["id"]),
+        ),
     ):
         state.update(row)
     return {
