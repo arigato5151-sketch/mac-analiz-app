@@ -4,12 +4,22 @@ import pandas as pd
 
 from models.feature_engineering import FEATURE_COLUMNS
 from models.train_model import (
+    _chronological_slices,
     confidence_coverage_report,
     normalize_multiclass_probabilities,
     select_blend_weight,
     select_source_aware_result_weights,
     walk_forward_report,
 )
+
+
+def test_training_slices_leave_enough_rows_for_guarded_calibration() -> None:
+    fit, validation, calibration, test = _chronological_slices(1_000)
+
+    assert (fit.stop - fit.start) == 600
+    assert (validation.stop - validation.start) == 100
+    assert (calibration.stop - calibration.start) == 100
+    assert (test.stop - test.start) == 200
 
 
 def test_walk_forward_skips_insufficient_history() -> None:

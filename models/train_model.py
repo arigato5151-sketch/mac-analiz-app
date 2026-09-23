@@ -140,8 +140,8 @@ def _binary_model(preset: str = "balanced") -> XGBClassifier:
 def _chronological_slices(size: int) -> tuple[slice, slice, slice, slice]:
     if size < 1_000:
         raise ValueError("At least 1000 chronological matches are required")
-    validation_start = int(size * 0.65)
-    calibration_start = int(size * 0.75)
+    validation_start = int(size * 0.60)
+    calibration_start = int(size * 0.70)
     test_start = int(size * 0.80)
     return (
         slice(0, validation_start),
