@@ -23,7 +23,10 @@ LOGGER = logging.getLogger(__name__)
 LIVE_DATA_TTL_SECONDS = 300
 MATCH_DETAIL_TTL_SECONDS = 900
 HISTORY_TTL_SECONDS = 900
-REFERENCE_DATA_TTL_SECONDS = 21_600
+# Team/league rows are updated by the fixture sync. Keep this short enough
+# that newly synced national-team fixtures never remain as ``nan`` in the UI
+# because an old reference catalog is still cached.
+REFERENCE_DATA_TTL_SECONDS = 300
 MODEL_METADATA_TTL_SECONDS = 3_600
 UPCOMING_HORIZON_DAYS = 7
 
