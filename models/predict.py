@@ -12,7 +12,7 @@ import joblib
 import numpy as np
 
 from config.settings import PROJECT_ROOT, UPCOMING_HORIZON_DAYS, get_settings
-from db.db_client import SupabaseRestClient
+from db.db_client import DatabaseError, SupabaseRestClient
 from data_pipeline.odds import attach_pre_match_odds
 from models.artifact_store import ArtifactStoreError, download_model_artifacts
 from models.calibration import apply_binary_temperature, apply_multiclass_temperature
@@ -155,14 +155,19 @@ def load_upcoming_matches(
         filters={"captured_at": f"gte.{(now - timedelta(days=horizon_days)).isoformat()}"},
         order="captured_at.asc,id.asc",
     )
-    availability_history = db.select_all(
-        "team_availability_history",
-        columns=(
-            "team_id,match_id,observed_at,ingested_at,refreshed_at,"
-            "available_count,unavailable_count"
-        ),
-        order="ingested_at.asc",
-    )
+    try:
+        availability_history = db.select_all(
+            "team_availability_history",
+            columns=(
+                "team_id,match_id,observed_at,ingested_at,refreshed_at,"
+                "available_count,unavailable_count"
+            ),
+            order="ingested_at.asc",
+        )
+    except DatabaseError:
+        # Older deployments do not expose fixture-scoped availability yet.
+        # The current team snapshot below is a safe inference fallback.
+        availability_history = []
     availability = db.select_all(
         "team_availability_status",
         columns="team_id,available_count,unavailable_count,refreshed_at",
