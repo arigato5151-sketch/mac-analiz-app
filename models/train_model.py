@@ -29,7 +29,7 @@ from config.settings import (
     PROJECT_ROOT,
     get_settings,
 )
-from db.db_client import SupabaseRestClient
+from db.db_client import DatabaseError, SupabaseRestClient
 from data_pipeline.odds import attach_pre_match_odds
 from models.calibration import (
     apply_binary_temperature,
@@ -799,11 +799,16 @@ def load_completed_matches(db: SupabaseRestClient) -> list[dict[str, Any]]:
         columns="match_id,odds,source_updated_at,captured_at",
         order="captured_at.asc",
     )
-    availability = db.select_all(
-        "team_availability_history",
-        columns="team_id,match_id,observed_at,ingested_at,refreshed_at,available_count",
-        order="ingested_at.asc",
-    )
+    try:
+        availability = db.select_all(
+            "team_availability_history",
+            columns="team_id,match_id,observed_at,ingested_at,refreshed_at,available_count",
+            order="ingested_at.asc",
+        )
+    except DatabaseError:
+        # Older deployments do not expose fixture-scoped availability yet.
+        # Training remains valid with the score/xG/Elo causal features.
+        availability = []
     lineups = db.select_all(
         "fixture_lineups",
         columns="match_id,team_id,confirmed_at",
