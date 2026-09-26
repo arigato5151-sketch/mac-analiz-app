@@ -20,9 +20,10 @@ def test_supabase_admin_settings_do_not_require_api_football_key(
 
 def test_supabase_admin_settings_report_missing_credentials(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
 
     with pytest.raises(ConfigurationError, match="SUPABASE_URL"):
-        get_supabase_admin_settings()
+        get_supabase_admin_settings(env_file=tmp_path / "missing.env")

@@ -40,9 +40,9 @@ CHART_CONFIG = {"displayModeBar": False, "displaylogo": False}
 
 configure_page("Model Performansı")
 page_header(
-    "Model performansı",
-    "Offline testleri, canlı isabeti, güven aralıklarını ve veri sapmasını aynı ekranda izleyin.",
-    eyebrow="MODEL SAĞLIĞI",
+    "Gelişmiş model denetimi",
+    "Bu ekran günlük maç seçimi için değildir; tahmin sisteminin geçmiş performansını ve veri kalitesini denetlemek içindir.",
+    eyebrow="TEKNİK DENETİM",
 )
 disclaimer()
 

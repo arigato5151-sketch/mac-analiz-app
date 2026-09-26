@@ -18,7 +18,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.components.data import (
     UPCOMING_HORIZON_DAYS,
-    load_latest_model_metadata,
     load_recent_odds_for_matches,
     load_upcoming_dashboard,
 )
@@ -27,7 +26,6 @@ from app.components.model_registry import active_production_version, version_lab
 from app.components.ui import (
     compact_dashboard_display,
     configure_page,
-    dashboard_display,
     disclaimer,
     page_header,
     section_intro,
@@ -46,19 +44,18 @@ disclaimer()
 
 try:
     matches = load_upcoming_dashboard()
-    metadata = load_latest_model_metadata()
-except Exception as exc:  # Streamlit must remain usable during upstream outages.
-    st.error(f"Veriler şu anda yüklenemedi: {exc}")
+except Exception:  # Streamlit must remain usable during upstream outages.
+    st.error("Maç verileri şu anda kullanılamıyor. Birkaç dakika sonra tekrar deneyin.")
     st.stop()
 
-col1, col2, col3 = st.columns(3)
+col1, col2 = st.columns(2)
 ready_count = (
     int(matches["model_version"].notna().sum())
     if not matches.empty and "model_version" in matches
     else 0
 )
 col1.metric(
-    "Yaklaşan maç",
+    "Yak\u0131la\u015fan ma\u00e7",
     len(matches),
     help=f"Önümüzdeki {UPCOMING_HORIZON_DAYS} gündeki maç sayısı",
 )
@@ -67,27 +64,27 @@ col2.metric(
     f"{ready_count}/{len(matches)}",
     help="Model olasılıkları hazırlanmış maçlar",
 )
-col3.metric(
-    "Offline Brier",
-    f"{metadata['metrics']['brier_score']:.3f}" if metadata else "—",
-    help="Daha düşük değer, olasılık tahminlerinin daha iyi olduğunu gösterir.",
+st.caption(
+    "Analiz ekran\u0131 yaln\u0131zca incelemeye de\u011fer ma\u00e7lar\u0131 \\u00f6ne \\u00e7\u0131kar\u0131r. "
+    "Olas\u0131l\u0131klar kesin sonu\u00e7 de\u011fildir."
 )
 
 if not matches.empty and "model_version" in matches:
     predicted_versions = matches["model_version"].dropna().astype(str).unique().tolist()
     production_version = active_production_version()
-    if not production_version:
-        st.caption("Üretim modeli bilgisi doğrulanamadı.")
-    elif set(predicted_versions) - {production_version}:
-        st.warning(
-            "Yaklaşan maç tahminleri üretim modeliyle eşleşmiyor: "
-            f"{', '.join(sorted(predicted_versions))} (üretim: {production_version}). "
-            "Tutarsızlık giderilene kadar bu tahminleri doğrulanmış kabul etmeyin."
-        )
-    else:
-        st.caption(
-            f"Yaklaşan maçlarda kullanılan model: {version_label(production_version)}"
-        )
+    with st.expander("Veri ve model durumu"):
+        if not production_version:
+            st.caption("Üretim modeli bilgisi doğrulanamadı.")
+        elif set(predicted_versions) - {production_version}:
+            st.warning(
+                "Yaklaşan maç tahminleri aktif modelle eşleşmiyor: "
+                f"{', '.join(sorted(predicted_versions))} (aktif: {production_version}). "
+                "Bu durum düzelene kadar tahminleri temkinli yorumlayın."
+            )
+        else:
+            st.caption(
+                f"Yaklaşan maçlarda kullanılan model: {version_label(production_version)}"
+            )
     prob_matrix = (
         matches[["prob_home_win", "prob_draw", "prob_away_win"]]
         .apply(pd.to_numeric, errors="coerce")
@@ -97,7 +94,8 @@ if not matches.empty and "model_version" in matches:
         prob_matrix[~np.isnan(prob_matrix).any(axis=1)]
     )
     if collapse_warning:
-        st.warning(f"{collapse_warning} Tahminleri doğrulanmış kabul etmeyin.")
+        with st.expander("Tahmin kalitesi uyarısı"):
+            st.warning(f"{collapse_warning} Tahminleri temkinli yorumlayın.")
 
     # Son veri güncelleme yalnızca doğrulanmış bir zaman damgası varsa gösterilir.
     latest_prediction_raw = (
@@ -120,11 +118,20 @@ def open_detail(match_id: int) -> None:
     st.switch_page("pages/2_mac_detay.py")
 
 
+def toggle_watch(match_id: int) -> None:
+    """Keep a lightweight personal watchlist for the current session."""
+    watched = st.session_state.setdefault("watched_match_ids", set())
+    if match_id in watched:
+        watched.remove(match_id)
+    else:
+        watched.add(match_id)
+
+
 istanbul_now = datetime.now(ZoneInfo("Europe/Istanbul"))
 if matches.empty:
     st.info(
         f"Seçili liglerde önümüzdeki {UPCOMING_HORIZON_DAYS} gün için "
-        "planlanmış maç bulunamadı."
+        "planlanmış maç bulunamadı. Veri akışı henüz yenilenmemiş olabilir; daha sonra tekrar kontrol edin."
     )
 else:
     tomorrow = istanbul_now.date() + timedelta(days=1)
@@ -155,9 +162,13 @@ else:
         decisions = build_match_decisions(window, odds_by_match, now=istanbul_now)
 
         value_only = st.checkbox(
-            "Yalnızca value bulunan maçları göster",
-            help=f"Model-oran EV'si en az %{MIN_VALUE_EV * 100:.1f} olan maçları filtreler.",
+            "Yalnızca avantajlı oran bulunan maçları göster",
+            help=f"Model olasılığı ile oran arasındaki farkı en az %{MIN_VALUE_EV * 100:.1f} olan maçları filtreler.",
         )
+        watched_only = st.checkbox("Yalnızca takip ettiklerimi göster")
+        watched_count = len(st.session_state.setdefault("watched_match_ids", set()))
+        st.caption(f"Takipteki maç: {watched_count}")
+        st.caption("Takip listesi bu tarayıcı oturumu boyunca korunur.")
         if value_only:
             value_match_ids = set()
             for _, match_row in window.iterrows():
@@ -176,17 +187,22 @@ else:
                 if any(item.expected_value >= MIN_VALUE_EV for item in assessments):
                     value_match_ids.add(int(match_row["id"]))
             decisions = [decision for decision in decisions if decision.match_id in value_match_ids]
+        if watched_only:
+            watched_ids = st.session_state.setdefault("watched_match_ids", set())
+            decisions = [decision for decision in decisions if decision.match_id in watched_ids]
+            if not decisions:
+                st.info("Takip listenizde bu zaman aralığına uyan maç yok.")
 
         featured = sorted(
             (decision for decision in decisions if decision.featured),
             key=lambda decision: decision.probability or 0.0,
             reverse=True,
         )
-        st.markdown("**En güçlü sinyaller ve value durumu**")
+        st.markdown("**Aksiyon e\u015fi\u011fini ge\u00e7en ma\u00e7lar**")
         if not featured:
             st.info(
-                "Güven eşiğini geçen doğrulanmış sinyal yok; maçları aşağıdaki "
-                "listeden inceleyin."
+                "Bu aralıkta aksiyon eşiğini geçen sinyal yok. Aşağıdaki maçlar "
+                "yalnızca inceleme amaçlıdır."
             )
         for decision in featured[:5]:
             with st.container(border=True):
@@ -219,15 +235,22 @@ else:
                     )
                     if value is not None and value.expected_value >= MIN_VALUE_EV:
                         cols[2].caption(
-                            f"Değer: {value.key} · EV %{value.expected_value * 100:.1f} · "
+                            f"Oran avantajı: {value.key} · fark %{value.expected_value * 100:.1f} · "
                             f"oran {value.odds:.2f}"
                         )
                     elif value is not None:
                         cols[2].caption(
-                            f"Değer eşiği aşılmadı · minimum EV %{MIN_VALUE_EV * 100:.1f}"
+                            f"Oran avantajı eşiği aşılmadı · minimum %{MIN_VALUE_EV * 100:.1f}"
                         )
                     else:
-                        cols[2].caption("Value hesaplanamadı · geçerli oran yok")
+                        cols[2].caption("Oran avantajı hesaplanamadı · geçerli oran yok")
+                watched = st.session_state.setdefault("watched_match_ids", set())
+                cols[2].button(
+                    "Takipten çıkar" if decision.match_id in watched else "Takibe al",
+                    key=f"watch_{decision.match_id}",
+                    on_click=toggle_watch,
+                    args=(decision.match_id,),
+                )
                 cols[2].button(
                     "Detayı aç",
                     key=f"detail_{decision.match_id}",
@@ -237,7 +260,7 @@ else:
 
         others = [decision for decision in decisions if not decision.featured]
         if others:
-            st.markdown("**Diğer maçlar ve Pas gerekçeleri**")
+            st.markdown("**Aksiyon sinyali olmayan maçlar**")
             for decision in others:
                 with st.container(border=True):
                     cols = st.columns([3, 2])
@@ -261,17 +284,24 @@ else:
                             raw_odds,
                         )
                         if value is None:
-                            cols[1].caption("Value hesaplanamadı · geçerli oran yok")
+                            cols[1].caption("Oran avantajı hesaplanamadı · geçerli oran yok")
                         elif value.expected_value >= MIN_VALUE_EV:
                             cols[1].caption(
-                                f"Value bulundu · {value.key} · EV %{value.expected_value * 100:.1f}"
+                                f"Oran avantajı bulundu · {value.key} · fark %{value.expected_value * 100:.1f}"
                             )
                         else:
                             cols[1].caption(
-                                f"Bahis yok · EV eşiği %{MIN_VALUE_EV * 100:.1f}"
+                                f"Avantaj eşiği aşılmadı · minimum %{MIN_VALUE_EV * 100:.1f}"
                             )
                     else:
-                        cols[1].caption("Value hesaplanamadı · oran yok")
+                        cols[1].caption("Oran avantajı hesaplanamadı · oran yok")
+                    watched = st.session_state.setdefault("watched_match_ids", set())
+                    cols[1].button(
+                        "Takipten çıkar" if decision.match_id in watched else "Takibe al",
+                        key=f"watch_{decision.match_id}",
+                        on_click=toggle_watch,
+                        args=(decision.match_id,),
+                    )
                     cols[1].button(
                         "Detayı aç",
                         key=f"detail_{decision.match_id}",
@@ -279,35 +309,35 @@ else:
                         args=(decision.match_id,),
                     )
 
-st.subheader("Tüm maç programı")
-section_intro("Önce temel olasılıkları inceleyin; alternatif pazarları gerektiğinde açın.")
+st.subheader("Maç programı")
+section_intro("Ana akışta yalnızca karar için gerekli özet gösterilir. Ayrıntılı tabloyu gerektiğinde açın.")
 if matches.empty:
     st.info(
         f"Seçili liglerde önümüzdeki {UPCOMING_HORIZON_DAYS} gün için "
-        "planlanmış maç bulunamadı."
+        "planlanmış maç bulunamadı. Filtreyi genişletin veya veri akışının yenilenmesini bekleyin."
     )
 else:
     leagues = ["Tümü", *sorted(matches["league_name"].dropna().unique())]
-    selected = st.selectbox("Lig filtresi", leagues)
+    if st.button("Filtreleri sıfırla", key="reset_dashboard_filters"):
+        st.session_state.pop("dashboard_league", None)
+        st.rerun()
+    saved_league = st.session_state.get("dashboard_league", "Tümü")
+    selected = st.selectbox(
+        "Lig filtresi",
+        leagues,
+        index=leagues.index(saved_league) if saved_league in leagues else 0,
+        key="dashboard_league",
+    )
     filtered = matches if selected == "Tümü" else matches[matches["league_name"] == selected]
-    overview_tab, markets_tab = st.tabs(["Hızlı görünüm", "Tüm pazarlar"])
-    with overview_tab:
+    with st.expander("Tüm maçları tablo olarak göster"):
         st.dataframe(
             compact_dashboard_display(filtered),
             hide_index=True,
             width="stretch",
             height=min(680, 40 + 35 * len(filtered)),
         )
-    with markets_tab:
-        st.dataframe(
-            dashboard_display(filtered),
-            hide_index=True,
-            width="stretch",
-            height=min(680, 40 + 35 * len(filtered)),
-        )
     st.caption(f"{len(filtered)} maç gösteriliyor.")
 
-navigation = st.columns(3)
+navigation = st.columns(2)
 navigation[0].page_link("pages/1_bugunun_maclari.py", label="Tüm maçları filtrele", icon="📅")
 navigation[1].page_link("pages/2_mac_detay.py", label="Maç detayını aç", icon="🔎")
-navigation[2].page_link("pages/3_model_performans.py", label="Model performansı", icon="📈")

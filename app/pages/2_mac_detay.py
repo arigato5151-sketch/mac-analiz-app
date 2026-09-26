@@ -60,8 +60,8 @@ disclaimer()
 
 try:
     matches = load_upcoming_dashboard(7)
-except Exception as exc:
-    st.error(f"Maç listesi yüklenemedi: {exc}")
+except Exception:
+    st.error("Maç listesi şu anda kullanılamıyor. Birkaç dakika sonra tekrar deneyin.")
     st.stop()
 
 if matches.empty:
@@ -107,15 +107,16 @@ else:
 
 production_version = active_production_version()
 selected_version = str(selected.get("model_version") or "").strip()
-if not production_version:
-    st.caption("Üretim modeli bilgisi doğrulanamadı.")
-elif selected_version and selected_version != production_version:
-    st.caption(
-        f"Üretim modeli: `{production_version}` ({status_label_tr(production_version)}) · "
-        f"bu maçın tahmini `{selected_version}` eski bir sürümden."
-    )
-else:
-    st.caption(f"Üretim modeli: {version_label(production_version)}")
+with st.expander("Model ve veri teknik bilgileri"):
+    if not production_version:
+        st.caption("Üretim modeli bilgisi doğrulanamadı.")
+    elif selected_version and selected_version != production_version:
+        st.warning(
+            f"Bu maçın tahmini `{selected_version}` eski bir model sürümünden üretildi. "
+            f"Aktif sürüm: {production_version}."
+        )
+    else:
+        st.caption(f"Üretim modeli: {version_label(production_version)}")
 
 metrics = st.columns(5)
 for column, label, key in zip(
@@ -149,7 +150,7 @@ st.plotly_chart(
 )
 
 st.divider()
-st.markdown("### Maç bağlamı")
+st.markdown("### Kararı etkileyen bilgiler")
 st.subheader("Kadro durumu")
 try:
     availability_rows, availability_snapshots = load_match_availability(
@@ -227,8 +228,8 @@ try:
             "erişilebilirliği olmadığı için kalibre edilmiş model "
             "olasılıklarına doğrudan ağırlık uygulanmaz."
         )
-except Exception as exc:
-    st.warning(f"Kadro durumu şu anda yüklenemedi: {exc}")
+except Exception:
+    st.warning("Kadro bilgisi şu anda kullanılamıyor; tahmin bu bağlam olmadan gösteriliyor.")
 
 try:
     lineups = load_confirmed_lineups(int(selected_id))
@@ -252,8 +253,8 @@ try:
                 width="stretch",
             )
         st.caption("Bu alan yalnızca API’nin onaylı ilk 11 kaydı geldiğinde görünür. Mevcut model, tarihsel ilk-11 verisi henüz olmadığı için olasılıkları sonradan yapay olarak değiştirmez.")
-except Exception as exc:
-    st.warning(f"Onaylı ilk 11 şu anda yüklenemedi: {exc}")
+except Exception:
+    st.warning("Onaylı ilk 11 bilgisi henüz kullanılamıyor.")
 
 try:
     odds_history = load_odds_history(int(selected_id))
@@ -305,7 +306,7 @@ try:
         }
         value_assessments = assess_market_value(model_probabilities, latest_odds)
         if value_assessments:
-            st.subheader("Value analizi")
+            st.subheader("Oran ve olasılık karşılaştırması")
             st.caption(
                 "Piyasa olasılığı bookmaker marjı çıkarılarak normalize edilmiştir. "
                 "EV pozitifse model olasılığı mevcut orana göre avantaj gösterir; "
@@ -337,8 +338,8 @@ try:
             st.dataframe(value_frame, hide_index=True, width="stretch")
         else:
             st.info("Son oran kaydında modelle eşleşen geçerli pazar bulunamadı; value hesaplanmadı.")
-except Exception as exc:
-    st.warning(f"Oran geçmişi şu anda yüklenemedi: {exc}")
+except Exception:
+    st.warning("Oran geçmişi şu anda kullanılamıyor; value hesabı gösterilemiyor.")
 
 st.divider()
 st.markdown("### Teknik analiz")
@@ -360,7 +361,7 @@ try:
         result_probabilities, baseline
     )
 
-    st.subheader("Çeşitlendirilmiş tahminler")
+    st.subheader("Diğer tahminler")
     diversified_lines = format_market_summary(diversified_markets)
     if diversified_lines:
         st.markdown("\n".join(f"- {line}" for line in diversified_lines))
@@ -373,7 +374,7 @@ try:
         "skor dağılımından üretilir ve düşük güvenli sinyaller gösterilmez."
     )
 
-    st.subheader("Poisson skor matrisi")
+    st.subheader("Olası skorlar")
     matrix = baseline.score_matrix[:7, :7]
     heatmap = px.imshow(
         matrix,

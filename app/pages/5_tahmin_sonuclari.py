@@ -18,7 +18,6 @@ from app.components.grid import build_read_only_grid_options
 from app.components.metrics import format_accuracy, summarize_binary_accuracy
 from app.components.model_registry import (
     active_production_version,
-    production_version_for,
     version_label,
 )
 from app.components.ui import (
@@ -41,9 +40,9 @@ from models.value_analysis import (
 
 configure_page("Tahmin Sonuçları")
 page_header(
-    "Tahmin sonuçları",
-    "Tamamlanan maçlarda modelin ne kadar isabetli olduğunu sürüm, lig, tarih ve güven seviyesine göre denetleyin.",
-    eyebrow="ŞEFFAF PERFORMANS",
+    "Tahmin geçmişi",
+    "Geçmiş maçlarda tahminlerin ne kadar isabetli olduğunu ve hangi koşullarda yanıldığını inceleyin.",
+    eyebrow="TAHMİN GEÇMİŞİ",
 )
 disclaimer()
 section_intro("Yalnızca maç başlamadan önce kaydedilmiş ve otomatik değerlendirilmiş tahminler gösterilir.")
@@ -56,12 +55,15 @@ else:
 
 try:
     evaluations = load_evaluated_predictions(limit=1_000)
-except Exception as exc:
-    st.error(f"Tahmin sonuçları yüklenemedi: {exc}")
+except Exception:
+    st.error("Tahmin geçmişi şu anda kullanılamıyor. Birkaç dakika sonra tekrar deneyin.")
     st.stop()
 
 if evaluations.empty:
-    st.info("Henüz değerlendirilmiş tahmin yok. Maçlar tamamlandıkça burada görünür.")
+    st.info(
+        "Henüz değerlendirilmiş tahmin yok. Maç tamamlandıktan sonra sonuçlar "
+        "otomatik olarak burada görünür."
+    )
     st.stop()
 
 if len(evaluations) >= 1_000:
@@ -73,24 +75,10 @@ if len(evaluations) >= 1_000:
 date_bounds = evaluations["match_date"].dt.date
 with st.container(border=True):
     st.markdown("**Sonuçları filtrele**")
-    first_row = st.columns(3)
-    model_versions = evaluations["model_version"].dropna().astype(str).unique().tolist()
-    sample_sizes = evaluations.groupby("model_version").size().to_dict()
-    default_version = production_version_for(model_versions)
-    selected_model = first_row[0].selectbox(
-        "Model sürümü",
-        ["Tümü", *model_versions],
-        index=(["Tümü", *model_versions].index(default_version) if default_version else 0),
-        format_func=lambda value: (
-            value
-            if value == "Tümü"
-            else version_label(value, sample_size=sample_sizes.get(value, 0))
-        ),
-        help="Varsayılan, üretim modelidir; her sürümün rolü ve örneklemi etikette görünür.",
-    )
+    first_row = st.columns(2)
     leagues = ["Tümü", *sorted(evaluations["league_name"].dropna().unique())]
-    selected_league = first_row[1].selectbox("Lig", leagues)
-    status = first_row[2].selectbox("1-X-2 sonucu", ["Tümü", "Doğru", "Yanlış"])
+    selected_league = first_row[0].selectbox("Lig", leagues)
+    status = first_row[1].selectbox("1-X-2 sonucu", ["Tümü", "Doğru", "Yanlış"])
     second_row = st.columns(2)
     confidence = second_row[0].selectbox(
         "1-X-2 güveni", ["Tümü", "Güçlü", "Orta", "Düşük"]
@@ -113,8 +101,6 @@ if len(selected_dates) == 2:
     ]
 if selected_league != "Tümü":
     filtered = filtered[filtered["league_name"] == selected_league]
-if selected_model != "Tümü":
-    filtered = filtered[filtered["model_version"].astype(str) == selected_model]
 if status == "Doğru":
     filtered = filtered[filtered["was_correct"]]
 elif status == "Yanlış":
@@ -187,7 +173,7 @@ AgGrid(
     height=680,
 )
 
-st.subheader("Geçmiş value performansı")
+st.subheader("Geçmiş oran avantajı performansı")
 st.caption(
     "Yalnızca maç öncesi kaydedilmiş oranı ve model olasılığı bulunan seçimler dahil edilir. "
     "Hesaplama 1 birim sabit bahis ve pozitif EV eşiğiyle yapılır; bu gerçekleşmiş yatırım getirisi değildir."

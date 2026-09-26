@@ -34,19 +34,29 @@ disclaimer()
 
 try:
     matches = load_upcoming_dashboard()
-except Exception as exc:
-    st.error(f"Maçlar yüklenemedi: {exc}")
+except Exception:
+    st.error("Maçlar şu anda yüklenemiyor. Birkaç dakika sonra tekrar deneyin.")
     st.stop()
 
 if matches.empty:
-    st.info("Yaklaşan maç bulunamadı.")
+    st.info(
+        "Yaklaşan maç bulunamadı. Takip edilen liglerde veri henüz yenilenmemiş "
+        "veya seçili dönem boş olabilir."
+    )
     st.stop()
 
 with st.container(border=True):
     st.markdown("**Maçları filtrele**")
+    if st.button("Lig filtresini sıfırla", key="reset_fixture_filters"):
+        st.session_state.pop("fixture_leagues", None)
+        st.rerun()
     left, right = st.columns(2)
+    league_options = sorted(matches["league_name"].dropna().unique())
     league = left.multiselect(
-        "Ligler", sorted(matches["league_name"].dropna().unique()), placeholder="Tüm ligler"
+        "Ligler",
+        league_options,
+        placeholder="Tüm ligler",
+        key="fixture_leagues",
     )
     available_days = sorted(matches["match_date"].dt.date.unique())
     istanbul_today = datetime.now(ZoneInfo("Europe/Istanbul")).date()
@@ -63,7 +73,9 @@ if league:
 st.subheader(f"Maçlar · {len(filtered)} sonuç")
 section_intro("Hızlı görünüm karar için gereken temel alanları, ayrıntılı görünüm tüm pazarları gösterir.")
 if filtered.empty:
-    st.info("Seçtiğiniz filtrelerle eşleşen yaklaşan maç bulunamadı.")
+    st.info(
+        "Bu filtrelerle maç bulunamadı. Lig veya gün seçimini genişletip tekrar deneyin."
+    )
 else:
     overview_tab, markets_tab = st.tabs(["Hızlı görünüm", "Ayrıntılı pazarlar"])
     with overview_tab:
