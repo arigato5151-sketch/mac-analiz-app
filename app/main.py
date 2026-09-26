@@ -33,6 +33,7 @@ from app.components.ui import (
     section_intro,
 )
 from models.baselines import detect_upcoming_collapse
+from models.value_analysis import MIN_VALUE_EV, assess_market_value, best_value_assessment
 
 
 configure_page("Ana Sayfa")
@@ -153,12 +154,35 @@ else:
         )
         decisions = build_match_decisions(window, odds_by_match, now=istanbul_now)
 
+        value_only = st.checkbox(
+            "Yalnızca value bulunan maçları göster",
+            help=f"Model-oran EV'si en az %{MIN_VALUE_EV * 100:.1f} olan maçları filtreler.",
+        )
+        if value_only:
+            value_match_ids = set()
+            for _, match_row in window.iterrows():
+                odds_row = odds_by_match.get(int(match_row["id"]), {})
+                raw_odds = odds_row.get("odds") if isinstance(odds_row, dict) else None
+                if not isinstance(raw_odds, dict):
+                    continue
+                assessments = assess_market_value(
+                    {
+                        "home_win": match_row.get("prob_home_win"),
+                        "draw": match_row.get("prob_draw"),
+                        "away_win": match_row.get("prob_away_win"),
+                    },
+                    raw_odds,
+                )
+                if any(item.expected_value >= MIN_VALUE_EV for item in assessments):
+                    value_match_ids.add(int(match_row["id"]))
+            decisions = [decision for decision in decisions if decision.match_id in value_match_ids]
+
         featured = sorted(
             (decision for decision in decisions if decision.featured),
             key=lambda decision: decision.probability or 0.0,
             reverse=True,
         )
-        st.markdown("**En güçlü doğrulanmış sinyaller**")
+        st.markdown("**En güçlü sinyaller ve value durumu**")
         if not featured:
             st.info(
                 "Güven eşiğini geçen doğrulanmış sinyal yok; maçları aşağıdaki "
@@ -177,6 +201,33 @@ else:
                 )
                 if decision.market_gap:
                     cols[2].caption(decision.market_gap)
+                odds_row = odds_by_match.get(int(decision.match_id), {})
+                match_row = window.loc[window["id"] == decision.match_id].iloc[0]
+                model_odds_keys = {
+                    "home_win": "prob_home_win",
+                    "draw": "prob_draw",
+                    "away_win": "prob_away_win",
+                }
+                raw_odds = odds_row.get("odds") if isinstance(odds_row, dict) else None
+                if isinstance(raw_odds, dict):
+                    value = best_value_assessment(
+                        {
+                            odds_key: match_row.get(probability_key)
+                            for odds_key, probability_key in model_odds_keys.items()
+                        },
+                        raw_odds,
+                    )
+                    if value is not None and value.expected_value >= MIN_VALUE_EV:
+                        cols[2].caption(
+                            f"Değer: {value.key} · EV %{value.expected_value * 100:.1f} · "
+                            f"oran {value.odds:.2f}"
+                        )
+                    elif value is not None:
+                        cols[2].caption(
+                            f"Değer eşiği aşılmadı · minimum EV %{MIN_VALUE_EV * 100:.1f}"
+                        )
+                    else:
+                        cols[2].caption("Value hesaplanamadı · geçerli oran yok")
                 cols[2].button(
                     "Detayı aç",
                     key=f"detail_{decision.match_id}",
@@ -197,6 +248,30 @@ else:
                     )
                     if decision.market_gap:
                         cols[1].caption(decision.market_gap)
+                    odds_row = odds_by_match.get(int(decision.match_id), {})
+                    raw_odds = odds_row.get("odds") if isinstance(odds_row, dict) else None
+                    if isinstance(raw_odds, dict):
+                        match_row = window.loc[window["id"] == decision.match_id].iloc[0]
+                        value = best_value_assessment(
+                            {
+                                "home_win": match_row.get("prob_home_win"),
+                                "draw": match_row.get("prob_draw"),
+                                "away_win": match_row.get("prob_away_win"),
+                            },
+                            raw_odds,
+                        )
+                        if value is None:
+                            cols[1].caption("Value hesaplanamadı · geçerli oran yok")
+                        elif value.expected_value >= MIN_VALUE_EV:
+                            cols[1].caption(
+                                f"Value bulundu · {value.key} · EV %{value.expected_value * 100:.1f}"
+                            )
+                        else:
+                            cols[1].caption(
+                                f"Bahis yok · EV eşiği %{MIN_VALUE_EV * 100:.1f}"
+                            )
+                    else:
+                        cols[1].caption("Value hesaplanamadı · oran yok")
                     cols[1].button(
                         "Detayı aç",
                         key=f"detail_{decision.match_id}",

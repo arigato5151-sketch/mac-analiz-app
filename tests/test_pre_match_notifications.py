@@ -13,6 +13,7 @@ from notifications.pre_match import (
     sync_soon_odds,
 )
 from data_pipeline.odds import MatchOdds, MultiBookmakerOdds
+from models.value_analysis import MIN_VALUE_EV, assess_market_value
 
 
 def test_due_matches_uses_the_full_pre_kickoff_window() -> None:
@@ -37,6 +38,33 @@ def test_pre_match_message_shows_every_market() -> None:
 
     assert "1X2 Tahmin: Ev kazanır %60" in message
     assert "Üst 2.5: %55 · KG Var: %45" in message
+
+
+def test_match_odds_snapshot_keys_are_accepted_by_value_filter() -> None:
+    odds = MatchOdds(
+        bookmaker="Bet365",
+        home_win="2.20",
+        draw="3.40",
+        away_win="3.10",
+        over_2_5="2.00",
+        under_2_5="1.80",
+        btts_yes="1.95",
+        btts_no="1.85",
+    )
+    assessments = assess_market_value(
+        {
+            "home_win": 0.50,
+            "draw": 0.25,
+            "away_win": 0.25,
+            "over_2_5": 0.55,
+            "btts_yes": 0.55,
+        },
+        odds.as_snapshot(),
+    )
+    assert {item.key for item in assessments} == {
+        "home_win", "draw", "away_win", "over_2_5", "btts_yes"
+    }
+    assert any(item.expected_value >= MIN_VALUE_EV for item in assessments)
 
 
 def test_pre_match_message_marks_low_confidence_1x2_as_pass() -> None:

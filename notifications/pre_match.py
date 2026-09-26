@@ -30,6 +30,7 @@ from db.db_client import DatabaseError, SupabaseRestClient
 from models.feature_engineering import CausalFeatureState
 from models.decision_policy import minimum_confidence_for_league, select_1x2
 from models.market_forecast import format_telegram_market_lines
+from models.value_analysis import MIN_VALUE_EV, best_value_assessment
 from models.predict import generate_prediction_rows, load_latest_team_forms, persist_predictions, resolve_model_path
 from models.shadow import run_shadow_predictions
 from models.train_model import load_historical_matches
@@ -480,13 +481,6 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
             # snapshot; skip it instead of crashing the whole delivery cycle.
             print(f"Pre-match prediction unavailable for fixture {match_id}")
             continue
-        snapshot = persist_production_snapshot(
-            db,
-            prediction,
-            match_id=match_id,
-            model_version=model_version,
-            captured_at=now.isoformat(),
-        )
         try:
             # Only retry fetching if the fixture previously failed; if odds were explicitly None,
             # that means "no odds available" and we should not retry.
@@ -497,6 +491,29 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
         except Exception as error:  # Odds are optional; never suppress a prediction alert.
             print(f"Odds unavailable for fixture {match_id}: {type(error).__name__}")
             odds = None
+        if odds is None:
+            print(f"Skipped fixture {match_id}: no odds available for value analysis")
+            continue
+        best_value = best_value_assessment(
+            {
+                "home_win": prediction.get("prob_home_win"),
+                "draw": prediction.get("prob_draw"),
+                "away_win": prediction.get("prob_away_win"),
+                "over_2_5": prediction.get("prob_over_2_5"),
+                "btts_yes": prediction.get("prob_btts"),
+            },
+            odds.as_snapshot(),
+        )
+        if best_value is None:
+            print(f"Skipped fixture {match_id}: no value signal at EV >= {MIN_VALUE_EV:.2%}")
+            continue
+        snapshot = persist_production_snapshot(
+            db,
+            prediction,
+            match_id=match_id,
+            model_version=model_version,
+            captured_at=now.isoformat(),
+        )
         if odds is not None:
             record_odds_quote(
                 db, match_id=match_id, odds=odds, captured_at=now.isoformat(),

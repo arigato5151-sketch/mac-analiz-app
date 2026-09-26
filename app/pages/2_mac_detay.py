@@ -43,6 +43,7 @@ from app.components.ui import (
 )
 from data_pipeline.match_commentary import MatchCommentaryError, generate_match_commentary
 from models.market_forecast import derive_market_probabilities, format_market_summary
+from models.value_analysis import assess_market_value
 
 
 LOGGER = logging.getLogger(__name__)
@@ -284,6 +285,58 @@ try:
             "Kapanış oranı, maç başlangıcından önce yakalanabilen son sağlayıcı "
             "kotasyonudur. Veri yoksa veya eskiyse değer hesaplanmaz."
         )
+        latest_odds = odds_history.iloc[-1].get("odds") or {}
+        model_probabilities = {
+            "home_win": selected.get("prob_home_win"),
+            "draw": selected.get("prob_draw"),
+            "away_win": selected.get("prob_away_win"),
+            "over_2_5": selected.get("prob_over_2_5"),
+            "under_2_5": (
+                1 - float(selected.get("prob_over_2_5"))
+                if pd.notna(selected.get("prob_over_2_5"))
+                else None
+            ),
+            "btts_yes": selected.get("prob_btts"),
+            "btts_no": (
+                1 - float(selected.get("prob_btts"))
+                if pd.notna(selected.get("prob_btts"))
+                else None
+            ),
+        }
+        value_assessments = assess_market_value(model_probabilities, latest_odds)
+        if value_assessments:
+            st.subheader("Value analizi")
+            st.caption(
+                "Piyasa olasılığı bookmaker marjı çıkarılarak normalize edilmiştir. "
+                "EV pozitifse model olasılığı mevcut orana göre avantaj gösterir; "
+                "bu sonuç garanti değildir."
+            )
+            labels = {
+                "home_win": "1",
+                "draw": "X",
+                "away_win": "2",
+                "over_2_5": "Üst 2.5",
+                "under_2_5": "Alt 2.5",
+                "btts_yes": "KG Var",
+                "btts_no": "KG Yok",
+            }
+            value_frame = pd.DataFrame(
+                [
+                    {
+                        "Pazar": labels.get(item.key, item.key),
+                        "Oran": f"{item.odds:.2f}",
+                        "Model": f"%{item.model_probability * 100:.1f}",
+                        "Piyasa": f"%{item.fair_market_probability * 100:.1f}",
+                        "Fark": f"{item.probability_edge * 100:+.1f} puan",
+                        "EV": f"%{item.expected_value * 100:+.1f}",
+                        "Durum": "Değer bulundu" if item.has_value else "Bahis yok",
+                    }
+                    for item in value_assessments
+                ]
+            )
+            st.dataframe(value_frame, hide_index=True, width="stretch")
+        else:
+            st.info("Son oran kaydında modelle eşleşen geçerli pazar bulunamadı; value hesaplanmadı.")
 except Exception as exc:
     st.warning(f"Oran geçmişi şu anda yüklenemedi: {exc}")
 

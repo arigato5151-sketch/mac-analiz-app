@@ -307,6 +307,44 @@ def load_recent_odds_for_matches(match_ids: tuple[int, ...]) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
+def load_latest_odds_for_matches(match_ids: tuple[int, ...]) -> pd.DataFrame:
+    """Load the latest captured quote for completed matches before evaluation."""
+    if not match_ids:
+        return pd.DataFrame()
+    ids_filter = "in.(" + ",".join(str(int(match_id)) for match_id in match_ids) + ")"
+    rows = get_db().select_all(
+        "odds_quote_history",
+        columns="match_id,bookmaker,odds,captured_at",
+        filters={"match_id": ids_filter},
+        order="captured_at.desc",
+    )
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame
+    frame["captured_at"] = pd.to_datetime(frame["captured_at"], utc=True)
+    return frame.sort_values("captured_at").drop_duplicates("match_id", keep="last")
+
+
+@st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
+def load_odds_history_for_matches(match_ids: tuple[int, ...]) -> pd.DataFrame:
+    """Load all captured quotes used for opening/closing line analysis."""
+    if not match_ids:
+        return pd.DataFrame()
+    ids_filter = "in.(" + ",".join(str(int(match_id)) for match_id in match_ids) + ")"
+    rows = get_db().select_all(
+        "odds_quote_history",
+        columns="match_id,bookmaker,odds,captured_at",
+        filters={"match_id": ids_filter},
+        order="captured_at.asc",
+    )
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame
+    frame["captured_at"] = pd.to_datetime(frame["captured_at"], utc=True)
+    return frame
+
+
+@st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
 def load_evaluated_predictions(limit: int = 1_000) -> pd.DataFrame:
     """Load evaluated predictions from the RLS-protected database view."""
     if limit < 1 or limit > 1_000:
