@@ -53,7 +53,7 @@ def _rows(db: SupabaseRestClient, now: datetime) -> list[dict[str, Any]]:
         if assessments:
             best = max(assessments, key=lambda item: item.expected_value)
             kickoff = datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00")).astimezone(TZ)
-            result.append({"match": f"{teams.get(int(match['home_team_id']), 'Ev sahibi')} — {teams.get(int(match['away_team_id']), 'Deplasman')}", "time": kickoff.strftime("%H:%M"), "league": leagues.get(int(match["league_id"]), "Lig"), "best": best})
+            result.append({"match_id": int(match["id"]), "match": f"{teams.get(int(match['home_team_id']), 'Ev sahibi')} — {teams.get(int(match['away_team_id']), 'Deplasman')}", "time": kickoff.strftime("%H:%M"), "league": leagues.get(int(match["league_id"]), "Lig"), "best": best})
     return sorted(result, key=lambda row: row["best"].expected_value, reverse=True)
 
 
@@ -79,10 +79,32 @@ def build_daily_coupon_message(rows: list[dict[str, Any]]) -> str:
     return "\n".join(sections)
 
 
+def _coupon_groups(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    return {
+        "low_risk": [r for r in rows if r["best"].model_probability >= 0.55][:2],
+        "balanced": [r for r in rows if r["best"].expected_value >= 0.03][:3],
+        "high_odds": [r for r in rows if r["best"].odds >= 2.50 and r["best"].expected_value >= 0.03][:3],
+    }
+
+
+def _persist_coupon_runs(db: SupabaseRestClient, rows: list[dict[str, Any]], coupon_date: str) -> None:
+    for coupon_type, selected in _coupon_groups(rows).items():
+        if not selected:
+            continue
+        total_odds = 1.0
+        selections = []
+        for row in selected:
+            item = row["best"]
+            total_odds *= item.odds
+            selections.append({"match_id": int(row["match_id"]), "key": item.key, "odds": item.odds, "label": _label(item)})
+        db.upsert("daily_coupon_runs", [{"coupon_date": coupon_date, "coupon_type": coupon_type, "selections": selections, "total_odds": total_odds}], on_conflict="coupon_date,coupon_type")
+
+
 def run_daily_coupon() -> dict[str, int | str]:
     settings = get_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     rows = _rows(db, datetime.now(timezone.utc))
+    _persist_coupon_runs(db, rows, datetime.now(TZ).date().isoformat())
     token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN", "").strip(), os.getenv("TELEGRAM_CHAT_ID", "").strip()
     if not token or not chat_id:
         return {"matches": len(rows), "sent": 0, "skipped": "telegram_not_configured"}

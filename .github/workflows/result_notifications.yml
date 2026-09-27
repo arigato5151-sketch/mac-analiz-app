@@ -37,5 +37,11 @@ jobs:
         run: python -m data_pipeline.fetch_results --lookback-days 0
       - name: Evaluate newly completed predictions
         run: python -m evaluation.track_performance
+      - name: Settle completed daily coupons
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m notifications.daily_coupon_results | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Send one result card per completed match
         run: python -m notifications.final_results
