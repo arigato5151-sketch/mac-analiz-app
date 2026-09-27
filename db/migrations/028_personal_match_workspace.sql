@@ -1,4 +1,6 @@
 -- Personal notes and watchlist for the authenticated single user.
+begin;
+
 create table if not exists public.personal_match_workspace (
     user_id uuid not null references auth.users(id) on delete cascade,
     match_id bigint not null references public.matches(id) on delete cascade,
@@ -33,3 +35,5 @@ create policy personal_match_workspace_delete
 
 create index if not exists personal_match_workspace_user_updated_idx
     on public.personal_match_workspace (user_id, updated_at desc);
+
+commit;
