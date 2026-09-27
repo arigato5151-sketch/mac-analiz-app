@@ -161,6 +161,48 @@ if auth_enabled and st.button("Notu kaydet", key=f"save_note_{int(selected_id)}"
 else:
     st.caption("Notu kalıcılaştırmak için Supabase hesabıyla giriş yapın.")
 
+st.markdown("### Karar günlüğü")
+if not auth_enabled:
+    st.info("Karar kaydetmek için Supabase hesabıyla giriş yapın.")
+else:
+    with st.form(f"decision_form_{int(selected_id)}"):
+        decision = st.radio(
+            "Bu maç için kararınız",
+            ["played", "passed", "ignored"],
+            format_func={
+                "played": "Oyna",
+                "passed": "Pas geç",
+                "ignored": "Daha sonra incele",
+            }.get,
+            horizontal=True,
+        )
+        decision_market = st.text_input(
+            "Seçilen piyasa", value=str(market or "") if confidence_probability is not None else ""
+        )
+        decision_odds = st.number_input(
+            "Karar anındaki oran", min_value=0.0, value=0.0, step=0.01, format="%.2f"
+        )
+        if st.form_submit_button("Kararı kaydet"):
+            try:
+                get_user_db().insert(
+                    "personal_match_decisions",
+                    [
+                        {
+                            "user_id": current_user_id(),
+                            "match_id": int(selected_id),
+                            "decision": decision,
+                            "selected_market": decision_market.strip() or None,
+                            "selected_odds": decision_odds or None,
+                            "model_probability": confidence_probability,
+                            "model_threshold": threshold if confidence_probability is not None else None,
+                            "note": st.session_state.get(note_key, ""),
+                        }
+                    ],
+                )
+                st.success("Karar günlüğüne kaydedildi.")
+            except Exception:
+                st.error("Karar kaydedilemedi.")
+
 metrics = st.columns(5)
 for column, label, key in zip(
     metrics,
