@@ -75,7 +75,9 @@ class MultiBookmakerOdds:
     bookmakers: dict[int, MatchOdds]  # bookmaker_id -> MatchOdds
 
     def get_primary(self) -> MatchOdds | None:
-        return self.bookmakers.get(PRIMARY_BOOKMAKER_ID)
+        return self.bookmakers.get(PRIMARY_BOOKMAKER_ID) or next(
+            iter(self.bookmakers.values()), None
+        )
 
     def get_secondary(self) -> MatchOdds | None:
         return self.bookmakers.get(SECONDARY_BOOKMAKER_ID)
@@ -94,9 +96,9 @@ class MultiBookmakerOdds:
         raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
 
-def _market_values(bets: list[dict[str, Any]], market_name: str) -> dict[str, str]:
+def _market_values(bets: list[dict[str, Any]], market_names: tuple[str, ...]) -> dict[str, str]:
     """Return normalized selection-to-odd values for a named API-Football market."""
-    market = next((item for item in bets if item.get("name") == market_name), None)
+    market = next((item for item in bets if item.get("name") in market_names), None)
     if market is None:
         return {}
     return {
@@ -119,8 +121,8 @@ def parse_match_odds(payload: list[dict[str, Any]]) -> MultiBookmakerOdds | None
         bm_id = bookmaker.get("id")
         bm_name = bookmaker.get("name", "")
         # Match by ID or by name
-        if bm_id not in MULTI_BOOKMAKER_IDS and bm_name not in MULTI_BOOKMAKER_NAMES.values():
-            continue
+        # Keep any bookmaker with valid markets. Restricting this to two providers
+        # made most fixtures appear to have no odds at all.
         # If ID missing but name matches, use the ID from name
         if bm_id not in MULTI_BOOKMAKER_IDS:
             bm_id = next((k for k, v in MULTI_BOOKMAKER_NAMES.items() if v == bm_name), None)
@@ -128,9 +130,9 @@ def parse_match_odds(payload: list[dict[str, Any]]) -> MultiBookmakerOdds | None
                 continue
 
         bets = bookmaker.get("bets", [])
-        winner = _market_values(bets, "Match Winner")
-        totals = _market_values(bets, "Goals Over/Under")
-        btts = _market_values(bets, "Both Teams Score")
+        winner = _market_values(bets, ("Match Winner", "1X2", "Fulltime Result"))
+        totals = _market_values(bets, ("Goals Over/Under", "Over/Under", "Total Goals"))
+        btts = _market_values(bets, ("Both Teams Score", "Both Teams to Score"))
         odds = MatchOdds(
             bookmaker=str(bookmaker.get("name") or MULTI_BOOKMAKER_NAMES.get(bm_id, f"Bookmaker{bm_id}")),
             source_updated_at=str(payload[0].get("update") or "") or None,
