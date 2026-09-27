@@ -168,7 +168,6 @@ def record_odds_quote(
         quote = {
             "match_id": match_id,
             "bookmaker": odds_bm.bookmaker,
-            "bookmaker_id": bm_id,
             "odds": odds_bm.as_snapshot(),
             "source_updated_at": odds_bm.source_updated_at,
             "captured_at": captured_at,
@@ -177,7 +176,7 @@ def record_odds_quote(
         if not notification_reference:
             previous = db.select(
                 "odds_quote_history", columns="odds,source_updated_at",
-                filters={"match_id": f"eq.{match_id}", "bookmaker_id": f"eq.{bm_id}"},
+                filters={"match_id": f"eq.{match_id}", "bookmaker": f"eq.{odds_bm.bookmaker}"},
                 limit=1, order="captured_at.desc",
             )
             if previous and previous[0].get("odds") == quote["odds"] and previous[0].get("source_updated_at") == quote["source_updated_at"]:
