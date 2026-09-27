@@ -85,7 +85,7 @@ def load_upcoming_dashboard(
         db.select_all(
             "predictions",
             columns=(
-                "id,match_id,model_version,prob_home_win,prob_draw,prob_away_win,"
+                "match_id,model_version,prob_home_win,prob_draw,prob_away_win,"
                 "prob_over_2_5,prob_btts,market_probabilities,predicted_at"
             ),
             filters={"match_id": f"in.({match_ids})"},
