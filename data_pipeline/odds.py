@@ -117,7 +117,7 @@ def parse_match_odds(payload: list[dict[str, Any]]) -> MultiBookmakerOdds | None
         return None
 
     parsed: dict[int, MatchOdds] = {}
-    for bookmaker in bookmakers:
+    for bookmaker_index, bookmaker in enumerate(bookmakers):
         bm_id = bookmaker.get("id")
         bm_name = bookmaker.get("name", "")
         # Match by ID or by name
@@ -125,9 +125,10 @@ def parse_match_odds(payload: list[dict[str, Any]]) -> MultiBookmakerOdds | None
         # made most fixtures appear to have no odds at all.
         # If ID missing but name matches, use the ID from name
         if bm_id not in MULTI_BOOKMAKER_IDS:
-            bm_id = next((k for k, v in MULTI_BOOKMAKER_NAMES.items() if v == bm_name), None)
-            if bm_id is None:
-                continue
+            bm_id = next((k for k, v in MULTI_BOOKMAKER_NAMES.items() if v == bm_name), bm_id)
+        if bm_id is None:
+            # Some responses omit bookmaker IDs; retain the quote instead of dropping it.
+            bm_id = 100_000 + bookmaker_index
 
         bets = bookmaker.get("bets", [])
         winner = _market_values(bets, ("Match Winner", "1X2", "Fulltime Result"))
