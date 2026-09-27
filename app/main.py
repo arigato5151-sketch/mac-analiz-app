@@ -348,3 +348,4 @@ else:
 navigation = st.columns(2)
 navigation[0].page_link("pages/1_bugunun_maclari.py", label="Tüm maçları filtrele", icon="📅")
 navigation[1].page_link("pages/2_mac_detay.py", label="Maç detayını aç", icon="🔎")
+st.page_link("pages/6_kisisel_rapor.py", label="Kişisel rapor", icon="📊")
