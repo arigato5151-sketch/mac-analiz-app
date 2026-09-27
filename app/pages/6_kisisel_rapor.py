@@ -11,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.auth import get_user_db, render_auth_panel
-from app.components.personal_report import summarize_decisions
+from app.components.personal_report import settle_outcome_decision, summarize_decisions
 from app.components.ui import configure_page, disclaimer, page_header
 
 
@@ -36,6 +36,28 @@ try:
         ),
         order="created_at.desc",
     )
+    match_ids = sorted({int(row["match_id"]) for row in rows})
+    matches = (
+        get_user_db().select_all(
+            "matches",
+            columns="id,home_score,away_score,status",
+            filters={"id": f"in.({','.join(map(str, match_ids))})"},
+        )
+        if match_ids
+        else []
+    )
+    matches_by_id = {int(row["id"]): row for row in matches}
+    for row in rows:
+        if row.get("was_correct") is not None:
+            continue
+        result = settle_outcome_decision(row, matches_by_id.get(int(row["match_id"]), {}))
+        if result is not None:
+            get_user_db().update(
+                "personal_match_decisions",
+                {"was_correct": result, "result_settled_at": pd.Timestamp.utcnow().isoformat()},
+                filters={"id": f"eq.{int(row['id'])}"},
+            )
+            row["was_correct"] = result
 except Exception:
     st.error("Karar günlüğü yüklenemedi.")
     st.stop()

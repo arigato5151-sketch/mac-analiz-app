@@ -34,3 +34,21 @@ def summarize_decisions(
         "accuracy": len(correct) / len(settled) if settled else None,
         "recent": recent,
     }
+
+
+def settle_outcome_decision(
+    decision: Mapping[str, Any], match: Mapping[str, Any]
+) -> bool | None:
+    """Settle supported 1X2 decisions without pretending to settle other markets."""
+    home_score = match.get("home_score")
+    away_score = match.get("away_score")
+    if home_score is None or away_score is None:
+        return None
+    try:
+        home = int(home_score)
+        away = int(away_score)
+    except (TypeError, ValueError):
+        return None
+    actual = "Ev kazanır" if home > away else "Beraberlik" if home == away else "Deplasman kazanır"
+    market = str(decision.get("selected_market") or "")
+    return market == actual if market in {"Ev kazanır", "Beraberlik", "Deplasman kazanır"} else None

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from app.components.personal_report import summarize_decisions
+from app.components.personal_report import settle_outcome_decision, summarize_decisions
 
 
 def test_summarize_decisions_reports_recent_decision_quality() -> None:
@@ -16,3 +16,10 @@ def test_summarize_decisions_reports_recent_decision_quality() -> None:
     assert summary["played_count"] == 2
     assert summary["passed_count"] == 1
     assert summary["accuracy"] == 0.5
+
+
+def test_settle_outcome_decision_only_supports_1x2() -> None:
+    match = {"home_score": 2, "away_score": 1}
+    assert settle_outcome_decision({"selected_market": "Ev kazanır"}, match) is True
+    assert settle_outcome_decision({"selected_market": "Beraberlik"}, match) is False
+    assert settle_outcome_decision({"selected_market": "Üst 2.5"}, match) is None
