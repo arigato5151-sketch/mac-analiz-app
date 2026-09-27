@@ -23,7 +23,6 @@ from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_injuries import sync_injuries
 from data_pipeline.fetch_lineups import sync_fixture_lineups
 from data_pipeline.fetch_team_stats import sync_team_form
-from data_pipeline.match_commentary import MatchCommentaryError, generate_match_commentary
 from data_pipeline.odds import MatchOdds, fetch_match_odds, record_odds_quote
 from data_pipeline.refresh_context import current_elo_ratings
 from db.db_client import DatabaseError, SupabaseRestClient
@@ -45,7 +44,6 @@ LEGACY_SNAPSHOT_TYPES = ("pre_match_60m",)
 WINDOW_START_MINUTES = 0
 WINDOW_END_MINUTES = 25
 LINEUP_LOOKAHEAD_MINUTES = 90
-MAX_TELEGRAM_COMMENTARY_CHARS = 1_400
 
 
 def _form_summary(form: dict[str, Any] | None) -> str:
@@ -68,52 +66,6 @@ def _absence_summary(rows: list[dict[str, Any]], *, team_id: int) -> list[str]:
         and str(row.get("status")) in labels
         and row.get("player_name")
     ][:12]
-
-
-def _telegram_commentary(text: str | None) -> str | None:
-    """Keep the optional AI section safely below Telegram's message size limit."""
-    if not text or not text.strip():
-        return None
-    normalized = text.strip()
-    if len(normalized) > MAX_TELEGRAM_COMMENTARY_CHARS:
-        truncated = normalized[:MAX_TELEGRAM_COMMENTARY_CHARS]
-        head, sep, _ = truncated.rpartition(" ")
-        # A huge run-on string has no split point; hard cut so the "…" suffix
-        # never pushes the message over Telegram's documented size limit.
-        normalized = (head if sep else truncated[: MAX_TELEGRAM_COMMENTARY_CHARS - 1]) + "…"
-    return normalized
-
-
-def generate_notification_commentary(
-    *,
-    match: dict[str, Any],
-    prediction: dict[str, Any],
-    historical: list[dict[str, Any]],
-    team_forms: dict[int, dict[str, Any]],
-    availability_rows: list[dict[str, Any]],
-    home_team: str,
-    away_team: str,
-) -> str:
-    """Generate one pre-kickoff commentary using the same refreshed model context."""
-    state = CausalFeatureState()
-    for completed_match in historical:
-        state.update(completed_match)
-    baseline = state.poisson_baseline(match)
-    home_id = int(match["home_team_id"])
-    away_id = int(match["away_team_id"])
-    return generate_match_commentary(
-        home_team=home_team,
-        away_team=away_team,
-        home_xg=baseline.home_expected_goals,
-        away_xg=baseline.away_expected_goals,
-        home_absences=_absence_summary(availability_rows, team_id=home_id),
-        away_absences=_absence_summary(availability_rows, team_id=away_id),
-        home_form=_form_summary(team_forms.get(home_id)),
-        away_form=_form_summary(team_forms.get(away_id)),
-        home_win_probability=float(prediction["prob_home_win"]),
-        draw_probability=float(prediction["prob_draw"]),
-        away_win_probability=float(prediction["prob_away_win"]),
-    )
 
 
 def persist_production_snapshot(
@@ -198,7 +150,6 @@ def pre_match_message(
     away_team: str,
     league_name: str,
     odds: MatchOdds | None = None,
-    commentary: str | None = None,
 ) -> str:
     kickoff = datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
     outcome_labels = ("Ev kazanır", "Beraberlik", "Deplasman kazanır")
@@ -234,9 +185,6 @@ def pre_match_message(
     )
     if market_lines:
         lines.extend(("", "📊 Yeni tahminler", *market_lines))
-    safe_commentary = _telegram_commentary(commentary)
-    if safe_commentary:
-        lines.extend(("", "🧠 Maç yorumu", safe_commentary))
     return "\n".join(lines)
 
 
@@ -471,8 +419,6 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
         filters={"team_id": f"in.({','.join(map(str, team_ids))})"},
     )
     sent = 0
-    commentary_sent = 0
-    commentary_skipped = 0
     for match in matches:
         match_id = int(match["id"])
         prediction = predictions_by_match.get(match_id)
@@ -531,30 +477,6 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
                 }],
                 on_conflict="prediction_id",
             )
-        try:
-            commentary = generate_notification_commentary(
-                match=match,
-                prediction=prediction,
-                historical=historical,
-                team_forms=team_forms,
-                availability_rows=[
-                    row
-                    for row in availability_rows
-                    if int(row.get("match_id") or -1) == match_id
-                ],
-                home_team=teams.get(int(match["home_team_id"]), "Ev sahibi"),
-                away_team=teams.get(int(match["away_team_id"]), "Deplasman"),
-            )
-        except MatchCommentaryError as error:
-            # An optional LLM must never suppress the time-sensitive model alert.
-            print(
-                f"Gemini commentary skipped for fixture {match_id}: "
-                f"reason={error.reason}"
-            )
-            commentary_skipped += 1
-            commentary = None
-        else:
-            commentary_sent += 1
         send_telegram_message(
             pre_match_message(
                 match,
@@ -563,7 +485,6 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
                 away_team=teams.get(int(match["away_team_id"]), "Deplasman"),
                 league_name=leagues.get(int(match["league_id"]), "Lig"),
                 odds=odds,
-                commentary=commentary,
             ),
             bot_token=bot_token,
             chat_id=chat_id,
@@ -577,8 +498,6 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
     return {
         "due_matches": len(matches),
         "sent": sent,
-        "commentary_sent": commentary_sent,
-        "commentary_skipped": commentary_skipped,
         "lineup_rows": lineup_rows,
         "odds_history_rows": odds_history_written,
         "api": api.diagnostics(),

@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 
 from notifications.pre_match import (
     _absence_summary,
-    _telegram_commentary,
     due_matches,
     persist_production_snapshot,
     pre_match_message,
@@ -137,31 +136,6 @@ def test_pre_match_message_ignores_malformed_diversified_markets() -> None:
     )
 
     assert "📊 Yeni tahminler" not in message
-
-
-def test_pre_match_message_adds_a_bounded_ai_commentary_section() -> None:
-    message = pre_match_message(
-        {"match_date": "2026-08-29T16:00:00+00:00"},
-        {"prob_home_win": 0.6, "prob_draw": 0.2, "prob_away_win": 0.2, "prob_over_2_5": 0.55, "prob_btts": 0.45},
-        home_team="Ev",
-        away_team="Deplasman",
-        league_name="Lig",
-        commentary="İlk paragraf.\n\nİkinci paragraf.",
-    )
-
-    assert "🧠 Maç yorumu" in message
-    assert message.endswith("İkinci paragraf.")
-    assert len(_telegram_commentary("kelime " * 500) or "") <= 1_401
-
-
-def test_telegram_commentary_hard_cuts_a_run_on_string() -> None:
-    text = "x" * 5_000
-
-    result = _telegram_commentary(text)
-
-    assert result is not None
-    assert len(result) <= 1_401
-    assert result.endswith("…")
 
 
 def test_absence_summary_keeps_only_relevant_confirmed_absences() -> None:
