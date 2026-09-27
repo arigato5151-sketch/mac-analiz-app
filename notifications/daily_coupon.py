@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from config.settings import get_settings
 from db.db_client import SupabaseRestClient
 from models.value_analysis import ValueAssessment, assess_market_value
+from models.coupon_policy import diversified_coupon_rows
 from notifications.telegram import send_telegram_message
 
 
@@ -60,9 +61,8 @@ def _rows(db: SupabaseRestClient, now: datetime) -> list[dict[str, Any]]:
 def build_daily_coupon_message(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return "🎟️ Günlük kupon\nBugünün kalan maçlarında eşleşen oran ve model tahmini bulunamadı."
-    low = [r for r in rows if r["best"].model_probability >= 0.55][:2]
-    balanced = [r for r in rows if r["best"].expected_value >= 0.03][:3]
-    high = [r for r in rows if r["best"].odds >= 2.50 and r["best"].expected_value >= 0.03][:3]
+    groups = _coupon_groups(rows)
+    low, balanced, high = groups["low_risk"], groups["balanced"], groups["high_odds"]
     sections = [f"🎟️ Günlük kupon · {len(rows)} oranlı maç"]
     for title, selected in (("🟢 Düşük risk", low), ("🟡 Dengeli", balanced), ("🔴 Yüksek oran", high)):
         sections.append(f"\n{title}")
@@ -81,9 +81,9 @@ def build_daily_coupon_message(rows: list[dict[str, Any]]) -> str:
 
 def _coupon_groups(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     return {
-        "low_risk": [r for r in rows if r["best"].model_probability >= 0.55][:2],
-        "balanced": [r for r in rows if r["best"].expected_value >= 0.03][:3],
-        "high_odds": [r for r in rows if r["best"].odds >= 2.50 and r["best"].expected_value >= 0.03][:3],
+        "low_risk": diversified_coupon_rows(rows, max_items=2, min_probability=0.55, min_ev=0.0),
+        "balanced": diversified_coupon_rows(rows, max_items=3, min_ev=0.03),
+        "high_odds": diversified_coupon_rows(rows, max_items=3, min_ev=0.03, high_odds=True),
     }
 
 

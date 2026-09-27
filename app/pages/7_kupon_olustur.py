@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.components.data import load_recent_odds_for_matches, load_upcoming_dashboard
 from app.components.ui import configure_page, disclaimer, page_header
 from models.value_analysis import ValueAssessment, assess_market_value
+from models.coupon_policy import diversified_coupon_rows
 
 
 configure_page("Günlük kupon")
@@ -99,9 +100,9 @@ def render_coupon(title: str, selected: list[dict[str, object]], color: str) -> 
     st.caption(f"Yaklaşık toplam oran: **{total:.2f}** · Garanti değildir.")
 
 st.caption(f"Bugünün oranlı ve tahminli maç sayısı: {len(rows)}")
-render_coupon("Düşük riskli kupon", [row for row in rows if float(row["probability"]) >= 0.55][:2], "🟢")
-render_coupon("Dengeli kupon", [row for row in rows if row["best"].expected_value >= 0.03][:3], "🟡")
-render_coupon("Yüksek oranlı kupon", [row for row in rows if row["best"].odds >= 2.50 and row["best"].expected_value >= 0.03][:3], "🔴")
+render_coupon("Düşük riskli kupon", diversified_coupon_rows(rows, max_items=2, min_probability=0.55, min_ev=0.0), "🟢")
+render_coupon("Dengeli kupon", diversified_coupon_rows(rows, max_items=3, min_ev=0.03), "🟡")
+render_coupon("Yüksek oranlı kupon", diversified_coupon_rows(rows, max_items=3, min_ev=0.03, high_odds=True), "🔴")
 
 st.divider()
 st.subheader("Kupona uygun maçların value tablosu")
