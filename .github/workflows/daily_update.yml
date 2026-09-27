@@ -45,12 +45,19 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Install browser runtime for optional Nesine collector
+        run: python -m playwright install chromium
       - name: Verify production migration ledger
         run: python -m db.migrations --verify-production | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Sync next seven days
         run: python -m data_pipeline.fetch_fixtures --days 7
       - name: Sync upcoming bookmaker odds
         run: python -m data_pipeline.sync_odds --days 7 --max-matches 120 | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Collect visible Nesine odds
+        continue-on-error: true
+        run: |
+          python -m data_pipeline.nesine_odds | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "Nesine collector tamamlandı; eşleşmeyen maçlar kupona alınmadı." >> "$GITHUB_STEP_SUMMARY"
       - name: Refresh team form, Elo, and availability
         run: python -m data_pipeline.refresh_context --days 7
       - name: Generate upcoming predictions

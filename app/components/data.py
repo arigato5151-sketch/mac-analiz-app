@@ -287,7 +287,7 @@ def load_odds_history(match_id: int) -> pd.DataFrame:
 
 @st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
 def load_recent_odds_for_matches(match_ids: tuple[int, ...]) -> pd.DataFrame:
-    """Latest odds quote per match for a small, visible match window."""
+    """Latest quote per match, preferring Nesine when it is available."""
     if not match_ids:
         return pd.DataFrame()
     ids_filter = "in.(" + ",".join(str(int(match_id)) for match_id in match_ids) + ")"
@@ -303,7 +303,12 @@ def load_recent_odds_for_matches(match_ids: tuple[int, ...]) -> pd.DataFrame:
     frame["captured_at"] = pd.to_datetime(frame["captured_at"], utc=True).dt.tz_convert(
         "Europe/Istanbul"
     )
-    return frame.drop_duplicates("match_id", keep="first")
+    frame["_provider_priority"] = frame["bookmaker"].eq("Nesine").astype(int)
+    return (
+        frame.sort_values(["match_id", "_provider_priority", "captured_at"], ascending=[True, False, False])
+        .drop_duplicates("match_id", keep="first")
+        .drop(columns="_provider_priority")
+    )
 
 
 @st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)

@@ -46,6 +46,10 @@ odds_by_match = {
     for _, row in odds.iterrows()
     if isinstance(row.get("odds"), dict)
 }
+odds_source_by_match = {
+    int(row["match_id"]): str(row.get("bookmaker") or "Bilinmiyor")
+    for _, row in odds.iterrows()
+}
 
 rows: list[dict[str, object]] = []
 for _, match in matches.iterrows():
@@ -72,6 +76,7 @@ for _, match in matches.iterrows():
         "assessments": assessments,
         "best": best,
         "probability": best.model_probability,
+        "bookmaker": odds_source_by_match.get(match_id, "Bilinmiyor"),
     })
 
 if not rows:
