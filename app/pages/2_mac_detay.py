@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.availability import summarize_availability
+from app.components.analysis_report import build_match_analysis_report
 from app.components.auth import current_user_id, get_user_db, render_auth_panel
 from app.components.commentary import summarize_absences, summarize_form
 from app.components.data import load_confirmed_lineups, load_match_availability, load_match_baseline, load_odds_history, load_upcoming_dashboard
@@ -473,6 +474,20 @@ try:
     st.plotly_chart(heatmap, width="stretch", config=CHART_CONFIG)
     home_state = detail["home_state"]
     away_state = detail["away_state"]
+
+    st.subheader("Yapılandırılmış maç analiz raporu")
+    st.markdown(
+        build_match_analysis_report(
+            home_team=str(selected["home_team"]),
+            away_team=str(selected["away_team"]),
+            league_name=str(selected["league_name"]),
+            expected_goals=expected_goals,
+            probabilities=tuple(float(value) for value in result_probabilities),
+            over_25=float(baseline.prob_over_2_5),
+            btts=float(baseline.prob_btts),
+            confidence_threshold=minimum_confidence_for_league(selected.get("league_id")),
+        )
+    )
 
     st.subheader("İsteğe bağlı yapay zekâ yorumu")
     st.caption(
