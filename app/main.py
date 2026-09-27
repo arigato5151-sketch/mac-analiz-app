@@ -48,22 +48,6 @@ except Exception:  # Streamlit must remain usable during upstream outages.
     st.error("Maç verileri şu anda kullanılamıyor. Birkaç dakika sonra tekrar deneyin.")
     st.stop()
 
-col1, col2 = st.columns(2)
-ready_count = (
-    int(matches["model_version"].notna().sum())
-    if not matches.empty and "model_version" in matches
-    else 0
-)
-col1.metric(
-    "Yak\u0131la\u015fan ma\u00e7",
-    len(matches),
-    help=f"Önümüzdeki {UPCOMING_HORIZON_DAYS} gündeki maç sayısı",
-)
-col2.metric(
-    "Analiz hazır",
-    f"{ready_count}/{len(matches)}",
-    help="Model olasılıkları hazırlanmış maçlar",
-)
 st.caption(
     "Analiz ekran\u0131 yaln\u0131zca incelemeye de\u011fer ma\u00e7lar\u0131 \\u00f6ne \\u00e7\u0131kar\u0131r. "
     "Olas\u0131l\u0131klar kesin sonu\u00e7 de\u011fildir."
@@ -166,6 +150,7 @@ else:
             help=f"Model olasılığı ile oran arasındaki farkı en az %{MIN_VALUE_EV * 100:.1f} olan maçları filtreler.",
         )
         watched_only = st.checkbox("Yalnızca takip ettiklerimi göster")
+        show_passes = st.checkbox("Aksiyon sinyali olmayan maçları göster")
         watched_count = len(st.session_state.setdefault("watched_match_ids", set()))
         st.caption(f"Takipteki maç: {watched_count}")
         st.caption("Takip listesi bu tarayıcı oturumu boyunca korunur.")
@@ -259,7 +244,7 @@ else:
                 )
 
         others = [decision for decision in decisions if not decision.featured]
-        if others:
+        if others and show_passes:
             st.markdown("**Aksiyon sinyali olmayan maçlar**")
             for decision in others:
                 with st.container(border=True):

@@ -43,6 +43,7 @@ from app.components.ui import (
 )
 from data_pipeline.match_commentary import MatchCommentaryError, generate_match_commentary
 from models.market_forecast import derive_market_probabilities, format_market_summary
+from models.decision_policy import minimum_confidence_for_league
 from models.value_analysis import assess_market_value
 
 
@@ -100,10 +101,18 @@ market, confidence_probability, confidence = prediction_signal(selected)
 if confidence_probability is None:
     st.info("Bu maç için model tahmini henüz hazırlanmadı.")
 else:
-    st.info(
-        f"En güçlü model sinyali: **{market}** ({probability_percent(confidence_probability)}) · "
-        f"güven seviyesi: **{confidence}**. Bu, kesin sonuç değil istatistiksel olasılıktır."
-    )
+    threshold = minimum_confidence_for_league(selected.get("league_id"))
+    if confidence_probability >= threshold:
+        st.success(
+            f"Aksiyon eşiğini geçen sinyal: **{market}** "
+            f"({probability_percent(confidence_probability)}) · güven: **{confidence}**."
+        )
+    else:
+        st.info(
+            f"Aksiyon sinyali yok. En yüksek olasılık **{market}** "
+            f"({probability_percent(confidence_probability)}); gerekli eşik "
+            f"%{threshold * 100:.0f}."
+        )
 
 production_version = active_production_version()
 selected_version = str(selected.get("model_version") or "").strip()
