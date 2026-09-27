@@ -127,6 +127,15 @@ with st.expander("Model ve veri teknik bilgileri"):
     else:
         st.caption(f"Üretim modeli: {version_label(production_version)}")
 
+note_key = f"match_note_{int(selected_id)}"
+st.text_area(
+    "Kişisel maç notu",
+    key=note_key,
+    placeholder="Bu maçı neden takip ettiğini veya hangi riski gördüğünü yaz...",
+    height=100,
+)
+st.caption("Not bu tarayıcı oturumu boyunca korunur.")
+
 metrics = st.columns(5)
 for column, label, key in zip(
     metrics,
