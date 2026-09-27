@@ -8,7 +8,19 @@ import requests
 import streamlit as st
 
 from config.settings import get_public_supabase_settings
-from db.db_client import AuthenticatedSupabaseRestClient
+from db.db_client import SupabaseRestClient
+
+try:
+    from db.db_client import AuthenticatedSupabaseRestClient
+except ImportError:  # Supports a stale Streamlit Cloud build during redeploy.
+    class AuthenticatedSupabaseRestClient(SupabaseRestClient):
+        """RLS-scoped client fallback for deployments with an older db module."""
+
+        def __init__(self, url: str, anon_key: str, access_token: str, **kwargs: Any) -> None:
+            super().__init__(url, anon_key, **kwargs)
+            if not access_token:
+                raise ValueError("Supabase access token is required")
+            self._headers["Authorization"] = f"Bearer {access_token}"
 
 
 def current_access_token() -> str | None:
