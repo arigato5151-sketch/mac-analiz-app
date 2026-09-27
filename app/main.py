@@ -21,6 +21,7 @@ from app.components.data import (
     load_recent_odds_for_matches,
     load_upcoming_dashboard,
 )
+from app.components.auth import current_user_id, get_user_db, render_auth_panel
 from app.components.decision_board import build_match_decisions
 from app.components.model_registry import active_production_version, version_label
 from app.components.ui import (
@@ -41,6 +42,7 @@ page_header(
     eyebrow="25 LİG · GÜNCEL TAHMİNLER",
 )
 disclaimer()
+auth_enabled = render_auth_panel()
 
 try:
     matches = load_upcoming_dashboard()
@@ -109,7 +111,23 @@ def toggle_watch(match_id: int) -> None:
         watched.remove(match_id)
     else:
         watched.add(match_id)
+    db = get_user_db()
+    if db:
+        db.upsert(
+            "personal_match_workspace",
+            [{"user_id": current_user_id(), "match_id": match_id, "is_watched": match_id in watched}],
+            on_conflict="user_id,match_id",
+        )
 
+
+if auth_enabled:
+    try:
+        rows = get_user_db().select_all("personal_match_workspace", columns="match_id,is_watched")
+        st.session_state["watched_match_ids"] = {
+            int(row["match_id"]) for row in rows if row.get("is_watched")
+        }
+    except Exception:
+        st.warning("Kalıcı takip listesi yüklenemedi; geçici liste kullanılıyor.")
 
 istanbul_now = datetime.now(ZoneInfo("Europe/Istanbul"))
 if matches.empty:
@@ -153,7 +171,11 @@ else:
         show_passes = st.checkbox("Aksiyon sinyali olmayan maçları göster")
         watched_count = len(st.session_state.setdefault("watched_match_ids", set()))
         st.caption(f"Takipteki maç: {watched_count}")
-        st.caption("Takip listesi bu tarayıcı oturumu boyunca korunur.")
+        st.caption(
+            "Takip listesi Supabase hesabına kaydedilir."
+            if auth_enabled
+            else "Kalıcı kayıt için Supabase hesabıyla giriş yapın."
+        )
         if value_only:
             value_match_ids = set()
             for _, match_row in window.iterrows():

@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.availability import summarize_availability
+from app.components.auth import current_user_id, get_user_db, render_auth_panel
 from app.components.commentary import summarize_absences, summarize_form
 from app.components.data import load_confirmed_lineups, load_match_availability, load_match_baseline, load_odds_history, load_upcoming_dashboard
 from app.components.decision_board import requested_match_id
@@ -58,6 +59,7 @@ page_header(
     eyebrow="DERİNLEMESİNE ANALİZ",
 )
 disclaimer()
+auth_enabled = render_auth_panel()
 
 try:
     matches = load_upcoming_dashboard(7)
@@ -128,13 +130,36 @@ with st.expander("Model ve veri teknik bilgileri"):
         st.caption(f"Üretim modeli: {version_label(production_version)}")
 
 note_key = f"match_note_{int(selected_id)}"
+if auth_enabled:
+    try:
+        saved_note = get_user_db().select(
+            "personal_match_workspace",
+            columns="note",
+            filters={"match_id": f"eq.{int(selected_id)}"},
+            limit=1,
+        )
+        if saved_note and note_key not in st.session_state:
+            st.session_state[note_key] = saved_note[0].get("note") or ""
+    except Exception:
+        st.warning("Kişisel not yüklenemedi; bu oturumda düzenleyebilirsiniz.")
 st.text_area(
     "Kişisel maç notu",
     key=note_key,
     placeholder="Bu maçı neden takip ettiğini veya hangi riski gördüğünü yaz...",
     height=100,
 )
-st.caption("Not bu tarayıcı oturumu boyunca korunur.")
+if auth_enabled and st.button("Notu kaydet", key=f"save_note_{int(selected_id)}"):
+    try:
+        get_user_db().upsert(
+            "personal_match_workspace",
+            [{"user_id": current_user_id(), "match_id": int(selected_id), "note": st.session_state.get(note_key, "")}],
+            on_conflict="user_id,match_id",
+        )
+        st.success("Not kaydedildi.")
+    except Exception:
+        st.error("Not kaydedilemedi.")
+else:
+    st.caption("Notu kalıcılaştırmak için Supabase hesabıyla giriş yapın.")
 
 metrics = st.columns(5)
 for column, label, key in zip(

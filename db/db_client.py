@@ -206,3 +206,13 @@ class PublicSupabaseRestClient(SupabaseRestClient):
 
     def delete(self, *args: Any, **kwargs: Any) -> None:
         raise PermissionError("Public Supabase client is read-only")
+
+
+class AuthenticatedSupabaseRestClient(SupabaseRestClient):
+    """RLS-scoped client using a user's Supabase access token."""
+
+    def __init__(self, url: str, anon_key: str, access_token: str, **kwargs: Any) -> None:
+        super().__init__(url, anon_key, **kwargs)
+        if not access_token:
+            raise ValueError("Supabase access token is required")
+        self._headers["Authorization"] = f"Bearer {access_token}"
