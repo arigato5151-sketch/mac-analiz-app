@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -30,6 +32,9 @@ if st.button("Verileri yenile", key="refresh_daily_coupon"):
     st.rerun()
 
 matches = load_upcoming_dashboard(1)
+if not matches.empty:
+    today = datetime.now(timezone.utc).astimezone(ZoneInfo("Europe/Istanbul")).date()
+    matches = matches[matches["match_date"].dt.date == today].reset_index(drop=True)
 if matches.empty:
     st.info("Bugünün kalan planlanmış maçı bulunamadı.")
     st.stop()
