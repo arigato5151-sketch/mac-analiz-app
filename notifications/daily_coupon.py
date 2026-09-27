@@ -54,7 +54,7 @@ def _rows(db: SupabaseRestClient, now: datetime) -> list[dict[str, Any]]:
         if assessments:
             best = max(assessments, key=lambda item: item.expected_value)
             kickoff = datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00")).astimezone(TZ)
-            result.append({"match_id": int(match["id"]), "match": f"{teams.get(int(match['home_team_id']), 'Ev sahibi')} — {teams.get(int(match['away_team_id']), 'Deplasman')}", "time": kickoff.strftime("%H:%M"), "league": leagues.get(int(match["league_id"]), "Lig"), "best": best})
+            result.append({"match_id": int(match["id"]), "match": f"{teams.get(int(match['home_team_id']), 'Ev sahibi')} — {teams.get(int(match['away_team_id']), 'Deplasman')}", "time": kickoff.strftime("%H:%M"), "league": leagues.get(int(match["league_id"]), "Lig"), "best": best, "assessments": assessments})
     return sorted(result, key=lambda row: row["best"].expected_value, reverse=True)
 
 
