@@ -108,12 +108,18 @@ odds_source_by_match = {
     int(row["match_id"]): str(row.get("bookmaker") or "Bilinmiyor")
     for _, row in odds.iterrows()
 }
+odds_captured_by_match = {
+    int(row["match_id"]): row.get("captured_at")
+    for _, row in odds.iterrows()
+}
 
 rows: list[dict[str, object]] = []
+filter_counts = {"no_odds": 0, "sanity": 0, "below_probability": 0}
 for _, match in matches.iterrows():
     match_id = int(match["id"])
     raw_odds = odds_by_match.get(match_id)
     if not isinstance(raw_odds, dict):
+        filter_counts["no_odds"] += 1
         continue
     probabilities = {
         "home_win": match.get("prob_home_win"),
@@ -128,6 +134,7 @@ for _, match in matches.iterrows():
     if isinstance(persisted_markets, dict):
         probabilities.update(persisted_markets)
     if fails_prediction_sanity_check(probabilities):
+        filter_counts["sanity"] += 1
         continue
     probabilities.update(derive_combo_probabilities(probabilities))
     assessments = assess_market_value(probabilities, raw_odds)
@@ -138,6 +145,7 @@ for _, match in matches.iterrows():
         if item.model_probability >= 0.50
     ]
     if not assessments:
+        filter_counts["below_probability"] += 1
         continue
     best = max(assessments, key=lambda item: item.expected_value)
     rows.append({
@@ -149,6 +157,7 @@ for _, match in matches.iterrows():
         "best": best,
         "probability": best.model_probability,
         "bookmaker": odds_source_by_match.get(match_id, "Bilinmiyor"),
+        "odds_captured_at": odds_captured_by_match.get(match_id),
     })
 
 if not rows:
@@ -156,6 +165,12 @@ if not rows:
     st.stop()
 
 rows.sort(key=lambda row: (float(row["best"].expected_value), float(row["probability"])), reverse=True)
+
+with st.expander("Filtreleme özeti"):
+    st.write(
+        f"İncelenen maç: {len(matches)} · Oranı olmayan: {filter_counts['no_odds']} · "
+        f"Model tutarsızlığı: {filter_counts['sanity']} · %50 altı: {filter_counts['below_probability']}"
+    )
 
 def label(item: ValueAssessment) -> str:
     names = {
