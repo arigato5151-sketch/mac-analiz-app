@@ -56,13 +56,23 @@ if st.button("Verileri yenile", key="refresh_daily_coupon"):
     st.cache_data.clear()
     st.rerun()
 
-matches = load_upcoming_dashboard(1)
+matches = load_upcoming_dashboard(7)
+selected_coupon_date = None
 if not matches.empty:
     today = datetime.now(timezone.utc).astimezone(ZoneInfo("Europe/Istanbul")).date()
-    matches = matches[matches["match_date"].dt.date == today].reset_index(drop=True)
+    available_dates = sorted(matches["match_date"].dt.date.dropna().unique())
+    selected_coupon_date = today if today in available_dates else (available_dates[0] if available_dates else None)
+    if selected_coupon_date is not None:
+        matches = matches[matches["match_date"].dt.date == selected_coupon_date].reset_index(drop=True)
 if matches.empty:
     st.info("Bugünün kalan planlanmış maçı bulunamadı.")
     st.stop()
+
+if selected_coupon_date != today:
+    st.warning(
+        f"Bugün ({today:%d.%m.%Y}) kalan maç yok. Kupon ilk sonraki maç gününe "
+        f"({selected_coupon_date:%d.%m.%Y}) göre oluşturuldu."
+    )
 
 odds = load_recent_odds_for_matches(tuple(int(value) for value in matches["id"]))
 odds_by_match = {
