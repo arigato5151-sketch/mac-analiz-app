@@ -16,8 +16,32 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.components.data import load_recent_odds_for_matches, load_upcoming_dashboard
 from app.components.ui import configure_page, disclaimer, page_header
-from models.value_analysis import ValueAssessment, assess_market_value, derive_combo_probabilities
+from models.value_analysis import ValueAssessment, assess_market_value
 from models.coupon_policy import diversified_coupon_rows
+
+
+def derive_combo_probabilities(probabilities: dict[str, object]) -> dict[str, float]:
+    """Keep the coupon page compatible with older deployed model modules."""
+    combos = {
+        "home_win_over_2_5": ("home_win", "over_2_5"),
+        "home_win_under_2_5": ("home_win", "under_2_5"),
+        "draw_over_2_5": ("draw", "over_2_5"),
+        "draw_under_2_5": ("draw", "under_2_5"),
+        "away_win_over_2_5": ("away_win", "over_2_5"),
+        "away_win_under_2_5": ("away_win", "under_2_5"),
+        "home_win_btts_yes": ("home_win", "btts_yes"),
+        "draw_btts_yes": ("draw", "btts_yes"),
+        "away_win_btts_yes": ("away_win", "btts_yes"),
+    }
+    result: dict[str, float] = {}
+    for key, (left, right) in combos.items():
+        try:
+            left_value, right_value = float(probabilities[left]), float(probabilities[right])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if 0 <= left_value <= 1 and 0 <= right_value <= 1:
+            result[key] = left_value * right_value
+    return result
 
 
 configure_page("Günlük kupon")
