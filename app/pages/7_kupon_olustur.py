@@ -146,7 +146,7 @@ for _, match in matches.iterrows():
     assessments = [
         item
         for item in assessments
-        if item.model_probability >= 0.50
+        if item.model_probability >= 0.50 and item.odds <= 20.0
     ]
     if not assessments:
         filter_counts["below_probability"] += 1

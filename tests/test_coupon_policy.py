@@ -22,3 +22,9 @@ def test_coupon_rejects_probability_below_fifty_percent():
 
     rows = [{"match_id": 1, "assessments": [item(.49)], "best": item(.49)}]
     assert diversified_coupon_rows(rows, min_ev=0.0) == []
+
+
+def test_coupon_rejects_absurd_odds():
+    item = SimpleNamespace(key="away_win", expected_value=20.0, model_probability=.6, odds=46.0)
+    rows = [{"match_id": 1, "assessments": [item], "best": item}]
+    assert diversified_coupon_rows(rows, min_ev=0.0) == []
