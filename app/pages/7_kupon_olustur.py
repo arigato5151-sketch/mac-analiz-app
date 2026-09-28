@@ -135,9 +135,9 @@ def render_coupon(title: str, selected: list[dict[str, object]], color: str) -> 
     st.caption(f"Yaklaşık toplam oran: **{total:.2f}** · Garanti değildir.")
 
 st.caption(f"Bugünün oranlı ve tahminli maç sayısı: {len(rows)}")
-render_coupon("Düşük riskli kupon", diversified_coupon_rows(rows, max_items=2, min_probability=0.55, min_ev=0.0), "🟢")
-render_coupon("Dengeli kupon", diversified_coupon_rows(rows, max_items=3, min_ev=0.03), "🟡")
-render_coupon("Yüksek oranlı kupon", diversified_coupon_rows(rows, max_items=3, min_ev=0.03, high_odds=True), "🔴")
+render_coupon("Düşük riskli kupon", diversified_coupon_rows(rows, max_items=None, min_probability=0.55, min_ev=0.0), "🟢")
+render_coupon("Dengeli kupon", diversified_coupon_rows(rows, max_items=None, min_ev=0.03), "🟡")
+render_coupon("Yüksek oranlı kupon", diversified_coupon_rows(rows, max_items=None, min_ev=0.03, high_odds=True), "🔴")
 
 st.divider()
 st.subheader("Kupona uygun maçların value tablosu")

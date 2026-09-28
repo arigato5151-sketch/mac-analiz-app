@@ -19,7 +19,7 @@ def _market_family(key: str) -> str:
     return "other"
 
 
-def diversified_coupon_rows(rows: list[dict[str, Any]], *, max_items: int, min_probability: float = 0.0, min_ev: float = 0.03, high_odds: bool = False) -> list[dict[str, Any]]:
+def diversified_coupon_rows(rows: list[dict[str, Any]], *, max_items: int | None = None, min_probability: float = 0.0, min_ev: float = 0.03, high_odds: bool = False) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for row in rows:
         for assessment in row.get("assessments", [row["best"]]):
@@ -43,6 +43,6 @@ def diversified_coupon_rows(rows: list[dict[str, Any]], *, max_items: int, min_p
         selected.append(row)
         used_keys.add(key)
         used_matches.add(int(row["match_id"]))
-        if len(selected) >= max_items:
+        if max_items is not None and len(selected) >= max_items:
             break
     return selected
