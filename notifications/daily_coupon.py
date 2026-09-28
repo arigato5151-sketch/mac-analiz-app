@@ -36,7 +36,7 @@ def _rows(db: SupabaseRestClient, now: datetime) -> list[dict[str, Any]]:
     league_ids = ",".join(str(int(m["league_id"])) for m in matches)
     teams = {int(r["id"]): r["name"] for r in db.select_all("teams", columns="id,name", filters={"id": f"in.({team_ids})"})}
     leagues = {int(r["id"]): r["name"] for r in db.select_all("leagues", columns="id,name", filters={"id": f"in.({league_ids})"})}
-    predictions = db.select_all("predictions", columns="match_id,prob_home_win,prob_draw,prob_away_win,prob_over_2_5,prob_btts,predicted_at", filters={"match_id": f"in.({ids})"}, order="predicted_at.desc")
+    predictions = db.select_all("predictions", columns="match_id,prob_home_win,prob_draw,prob_away_win,prob_over_2_5,prob_btts,market_probabilities,predicted_at", filters={"match_id": f"in.({ids})"}, order="predicted_at.desc")
     odds = db.select_all("odds_quote_history", columns="match_id,odds,captured_at", filters={"match_id": f"in.({ids})"}, order="captured_at.desc")
     latest_predictions: dict[int, dict[str, Any]] = {}
     latest_odds: dict[int, dict[str, Any]] = {}
@@ -50,7 +50,10 @@ def _rows(db: SupabaseRestClient, now: datetime) -> list[dict[str, Any]]:
         quote = latest_odds.get(int(match["id"]))
         if not prediction or not isinstance(quote.get("odds") if quote else None, dict):
             continue
-        assessments = assess_market_value({"home_win": prediction["prob_home_win"], "draw": prediction["prob_draw"], "away_win": prediction["prob_away_win"], "over_2_5": prediction["prob_over_2_5"], "btts_yes": prediction["prob_btts"]}, quote["odds"])
+        probabilities = {"home_win": prediction["prob_home_win"], "draw": prediction["prob_draw"], "away_win": prediction["prob_away_win"], "over_2_5": prediction["prob_over_2_5"], "btts_yes": prediction["prob_btts"]}
+        if isinstance(prediction.get("market_probabilities"), dict):
+            probabilities.update(prediction["market_probabilities"])
+        assessments = assess_market_value(probabilities, quote["odds"])
         if assessments:
             best = max(assessments, key=lambda item: item.expected_value)
             kickoff = datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00")).astimezone(TZ)
@@ -81,9 +84,9 @@ def build_daily_coupon_message(rows: list[dict[str, Any]]) -> str:
 
 def _coupon_groups(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     return {
-        "low_risk": diversified_coupon_rows(rows, max_items=2, min_probability=0.55, min_ev=0.0),
-        "balanced": diversified_coupon_rows(rows, max_items=3, min_ev=0.03),
-        "high_odds": diversified_coupon_rows(rows, max_items=3, min_ev=0.03, high_odds=True),
+        "low_risk": diversified_coupon_rows(rows, max_items=None, min_probability=0.55, min_ev=0.0),
+        "balanced": diversified_coupon_rows(rows, max_items=None, min_ev=0.03),
+        "high_odds": diversified_coupon_rows(rows, max_items=None, min_ev=0.03, high_odds=True),
     }
 
 
