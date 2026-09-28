@@ -7,6 +7,7 @@ from typing import Any
 RESULT_KEYS = {"home_win", "draw", "away_win"}
 TOTAL_KEYS = {"over_2_5", "under_2_5"}
 BTTS_KEYS = {"btts_yes", "btts_no"}
+MIN_COUPON_PROBABILITY = 0.50
 
 
 def _market_family(key: str) -> str:
@@ -31,7 +32,7 @@ def diversified_coupon_rows(rows: list[dict[str, Any]], *, max_items: int | None
                 odds = float(assessment.odds)
             except Exception:
                 continue
-            if probability < min_probability or expected_value < min_ev:
+            if probability < max(min_probability, MIN_COUPON_PROBABILITY) or expected_value < min_ev:
                 continue
             if high_odds and odds < 2.5:
                 continue

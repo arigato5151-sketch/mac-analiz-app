@@ -14,3 +14,11 @@ def test_coupon_does_not_require_every_market_family():
     ]
     selected = diversified_coupon_rows(rows, max_items=3, min_ev=0.0)
     assert {row["best"].key for row in selected} == {"home_win", "away_win", "under_2_5"}
+
+
+def test_coupon_rejects_probability_below_fifty_percent():
+    def item(probability):
+        return SimpleNamespace(key="home_win", expected_value=.40, model_probability=probability, odds=3.0)
+
+    rows = [{"match_id": 1, "assessments": [item(.49)], "best": item(.49)}]
+    assert diversified_coupon_rows(rows, min_ev=0.0) == []

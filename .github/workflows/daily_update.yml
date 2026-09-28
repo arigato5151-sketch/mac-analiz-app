@@ -63,7 +63,6 @@ jobs:
       - name: Generate upcoming predictions
         run: python -m models.predict --days 7
       - name: Send daily coupon to Telegram
-        continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -80,14 +79,12 @@ jobs:
         run: python -m evaluation.track_performance
       - name: Send Telegram final result notifications
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'full'
-        continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m notifications.final_results | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Send Telegram performance summary
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'full'
-        continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -127,14 +124,12 @@ jobs:
       - name: Evaluate completed predictions
         run: python -m evaluation.track_performance
       - name: Send Telegram final result notifications
-        continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m notifications.final_results | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Send Telegram performance summary
         id: night_summary
-        continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
