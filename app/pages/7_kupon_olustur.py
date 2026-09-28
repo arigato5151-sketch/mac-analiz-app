@@ -131,11 +131,11 @@ for _, match in matches.iterrows():
         continue
     probabilities.update(derive_combo_probabilities(probabilities))
     assessments = assess_market_value(probabilities, raw_odds)
-    # Do not publish extreme longshots that the model itself rates as weak.
+    # Never publish selections below the user's minimum 50% model probability.
     assessments = [
         item
         for item in assessments
-        if not (item.odds >= 20.0 and item.model_probability < 0.35)
+        if item.model_probability >= 0.50
     ]
     if not assessments:
         continue
