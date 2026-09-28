@@ -23,6 +23,7 @@ from models.feature_engineering import (
     estimate_league_dixon_coles_rhos,
 )
 from models.market_forecast import derive_market_probabilities
+from models.half_time_model import predict_half_time_markets
 from models.train_model import load_historical_matches, normalize_multiclass_probabilities
 from monitoring.feature_snapshot import (
     CURRENT_SNAPSHOT_NAME,
@@ -360,6 +361,13 @@ def generate_prediction_rows(
         result_values = result_probabilities[index]
         market_probabilities = derive_market_probabilities(
             result_values, poisson_by_match[int(match["id"])]
+        )
+        poisson_prediction = poisson_by_match[int(match["id"])]
+        market_probabilities.update(
+            predict_half_time_markets(
+                poisson_prediction.home_expected_goals,
+                poisson_prediction.away_expected_goals,
+            )
         )
         rows.append(
             {

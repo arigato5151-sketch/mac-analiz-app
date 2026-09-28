@@ -64,6 +64,11 @@ for _, match in matches.iterrows():
         "over_2_5": match.get("prob_over_2_5"),
         "btts_yes": match.get("prob_btts"),
     }
+    # Half-time probabilities are persisted in market_probabilities by the
+    # prediction job; only use them when the bookmaker supplies matching odds.
+    persisted_markets = match.get("market_probabilities")
+    if isinstance(persisted_markets, dict):
+        probabilities.update(persisted_markets)
     probabilities.update(derive_combo_probabilities(probabilities))
     assessments = assess_market_value(probabilities, raw_odds)
     if not assessments:
