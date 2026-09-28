@@ -44,6 +44,27 @@ def derive_combo_probabilities(probabilities: dict[str, object]) -> dict[str, fl
     return result
 
 
+def fails_prediction_sanity_check(probabilities: dict[str, object]) -> bool:
+    """Reject internally contradictory extreme-goal predictions from coupons."""
+    market_probabilities = probabilities.get("market_probabilities")
+    if not isinstance(market_probabilities, dict):
+        return False
+    expected_goals = market_probabilities.get("expected_goals")
+    if not isinstance(expected_goals, dict):
+        return False
+    try:
+        home_goals = float(expected_goals.get("home"))
+        away_goals = float(expected_goals.get("away"))
+        home_win = float(probabilities["home_win"])
+        away_win = float(probabilities["away_win"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    # Extreme expected goals must agree with a strong 1X2 signal.
+    return (away_goals >= 3.5 and away_win < 0.55) or (
+        home_goals >= 3.5 and home_win < 0.55
+    )
+
+
 configure_page("Günlük kupon")
 page_header(
     "Günlük kupon oluştur",
@@ -103,6 +124,8 @@ for _, match in matches.iterrows():
     persisted_markets = match.get("market_probabilities")
     if isinstance(persisted_markets, dict):
         probabilities.update(persisted_markets)
+    if fails_prediction_sanity_check(probabilities):
+        continue
     probabilities.update(derive_combo_probabilities(probabilities))
     assessments = assess_market_value(probabilities, raw_odds)
     if not assessments:
