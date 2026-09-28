@@ -10,6 +10,33 @@ from typing import Mapping
 MIN_VALUE_EV = 0.03
 MIN_VALUE_SAMPLE = 30
 
+COMBO_MARKETS = {
+    "home_win_over_2_5": ("home_win", "over_2_5"),
+    "home_win_under_2_5": ("home_win", "under_2_5"),
+    "draw_over_2_5": ("draw", "over_2_5"),
+    "draw_under_2_5": ("draw", "under_2_5"),
+    "away_win_over_2_5": ("away_win", "over_2_5"),
+    "away_win_under_2_5": ("away_win", "under_2_5"),
+    "home_win_btts_yes": ("home_win", "btts_yes"),
+    "draw_btts_yes": ("draw", "btts_yes"),
+    "away_win_btts_yes": ("away_win", "btts_yes"),
+    "over_2_5_btts_yes": ("over_2_5", "btts_yes"),
+    "under_2_5_btts_no": ("under_2_5", "btts_no"),
+}
+
+
+def derive_combo_probabilities(probabilities: Mapping[str, object]) -> dict[str, float]:
+    """Derive supported full-match combos using an explicit independence approximation."""
+    derived: dict[str, float] = {}
+    for combo, (left, right) in COMBO_MARKETS.items():
+        try:
+            left_value, right_value = float(probabilities[left]), float(probabilities[right])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if 0 <= left_value <= 1 and 0 <= right_value <= 1:
+            derived[combo] = left_value * right_value
+    return derived
+
 
 @dataclass(frozen=True)
 class ValueAssessment:

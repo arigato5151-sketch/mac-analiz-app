@@ -1,4 +1,10 @@
-from models.value_analysis import MIN_VALUE_EV, assess_market_value, best_value_assessment, evaluate_flat_stakes, fractional_kelly_stake, value_confidence_status
+from models.value_analysis import MIN_VALUE_EV, assess_market_value, best_value_assessment, derive_combo_probabilities, evaluate_flat_stakes, fractional_kelly_stake, value_confidence_status
+
+
+def test_derive_full_match_combo_probabilities():
+    result = derive_combo_probabilities({"home_win": .5, "over_2_5": .6, "btts_yes": .4})
+    assert result["home_win_over_2_5"] == .3
+    assert result["home_win_btts_yes"] == .2
 
 
 def test_normalizes_bookmaker_margin_and_calculates_positive_value():

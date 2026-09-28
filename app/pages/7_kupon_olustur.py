@@ -16,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.components.data import load_recent_odds_for_matches, load_upcoming_dashboard
 from app.components.ui import configure_page, disclaimer, page_header
-from models.value_analysis import ValueAssessment, assess_market_value
+from models.value_analysis import ValueAssessment, assess_market_value, derive_combo_probabilities
 from models.coupon_policy import diversified_coupon_rows
 
 
@@ -64,6 +64,7 @@ for _, match in matches.iterrows():
         "over_2_5": match.get("prob_over_2_5"),
         "btts_yes": match.get("prob_btts"),
     }
+    probabilities.update(derive_combo_probabilities(probabilities))
     assessments = assess_market_value(probabilities, raw_odds)
     if not assessments:
         continue
