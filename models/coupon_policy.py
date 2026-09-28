@@ -28,25 +28,14 @@ def diversified_coupon_rows(rows: list[dict[str, Any]], *, max_items: int, min_p
             if high_odds and assessment.odds < 2.5:
                 continue
             candidates.append({**row, "best": assessment})
-    # Rotate market families first so a coupon does not become three variants
-    # of the same market merely because that family has the highest EV.
+    # Rank by value first. Market diversity is a tie-breaker only; no market
+    # family is mandatory and a coupon may legitimately contain one family.
     candidates.sort(key=lambda row: (-row["best"].expected_value, row["best"].key))
     selected: list[dict[str, Any]] = []
     used_keys: set[str] = set()
     used_matches: set[int] = set()
-    # First pass: one selection from each available family.
-    for family in ("result", "totals", "btts", "other"):
-        for row in candidates:
-            key = str(row["best"].key)
-            if (_market_family(key) != family or int(row["match_id"]) in used_matches or key in used_keys):
-                continue
-            selected.append(row)
-            used_keys.add(key)
-            used_matches.add(int(row["match_id"]))
-            break
-        if len(selected) >= max_items:
-            return selected[:max_items]
-    # Second pass: fill remaining slots by EV, still avoiding duplicate keys.
+    # Select the strongest eligible outcomes. Only duplicate match/key entries
+    # are blocked; no requirement exists to fill result/total/BTTS families.
     for row in candidates:
         key = str(row["best"].key)
         if int(row["match_id"]) in used_matches or key in used_keys:
