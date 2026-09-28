@@ -164,14 +164,37 @@ grid_options = build_read_only_grid_options(display_df)
 
 st.subheader("Maç bazlı sonuçlar")
 section_intro("✓ doğru, ✕ yanlış tahmini gösterir; Brier skorunda daha düşük değer daha iyidir.")
-AgGrid(
-    display_df,
-    gridOptions=grid_options,
-    fit_columns_on_grid_load=True,
-    theme="streamlit",
-    enable_enterprise_modules=False,
-    height=680,
-)
+results_column, messages_column = st.columns([2.7, 1], gap="large")
+with results_column:
+    AgGrid(
+        display_df,
+        gridOptions=grid_options,
+        fit_columns_on_grid_load=True,
+        theme="streamlit",
+        enable_enterprise_modules=False,
+        height=680,
+    )
+
+with messages_column:
+    st.subheader("Sonuç mesajları")
+    st.caption("En yeni değerlendirmeler sağ panelde ayrı gösterilir.")
+    for _, result_row in filtered.head(8).iterrows():
+        is_correct = bool(result_row["was_correct"])
+        status_label = "✓ Doğru" if is_correct else "✕ Yanlış"
+        status_color = "#35C48D" if is_correct else "#FF6B6B"
+        st.markdown(
+            (
+                '<div style="border:1px solid rgba(120,120,120,.22);border-radius:.8rem;'
+                'padding:.7rem .8rem;margin-bottom:.65rem;background:rgba(23,28,36,.72);">'
+                f'<div style="font-size:.76rem;color:rgba(242,245,247,.62);">{result_row["match_date"].strftime("%d.%m.%Y %H:%M")}</div>'
+                f'<div style="font-weight:700;margin:.25rem 0;">{result_row["home_team"]} — {result_row["away_team"]}</div>'
+                f'<div style="font-size:1.15rem;font-weight:800;">{int(result_row["home_score"])} — {int(result_row["away_score"])} '
+                f'<span style="float:right;color:{status_color};font-size:.82rem;">{status_label}</span></div>'
+                f'<div style="font-size:.78rem;color:rgba(242,245,247,.62);">{result_row["league_name"]}</div>'
+                '</div>'
+            ),
+            unsafe_allow_html=True,
+        )
 
 st.subheader("Geçmiş oran avantajı performansı")
 st.caption(
