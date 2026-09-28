@@ -22,6 +22,8 @@ def _market_family(key: str) -> str:
 def diversified_coupon_rows(rows: list[dict[str, Any]], *, max_items: int | None = None, min_probability: float = 0.0, min_ev: float = 0.03, high_odds: bool = False) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for row in rows:
+        if not isinstance(row, dict):
+            continue
         for assessment in row.get("assessments", [row["best"]]):
             if assessment.model_probability < min_probability or assessment.expected_value < min_ev:
                 continue
