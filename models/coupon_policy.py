@@ -25,14 +25,20 @@ def diversified_coupon_rows(rows: list[dict[str, Any]], *, max_items: int | None
         if not isinstance(row, dict):
             continue
         for assessment in row.get("assessments", [row["best"]]):
-            if assessment.model_probability < min_probability or assessment.expected_value < min_ev:
+            try:
+                probability = float(assessment.model_probability)
+                expected_value = float(assessment.expected_value)
+                odds = float(assessment.odds)
+            except (AttributeError, TypeError, ValueError):
                 continue
-            if high_odds and assessment.odds < 2.5:
+            if probability < min_probability or expected_value < min_ev:
+                continue
+            if high_odds and odds < 2.5:
                 continue
             candidates.append({**row, "best": assessment})
     # Rank by value first. Market diversity is a tie-breaker only; no market
     # family is mandatory and a coupon may legitimately contain one family.
-    candidates.sort(key=lambda row: (-row["best"].expected_value, row["best"].key))
+    candidates.sort(key=lambda row: (-float(row["best"].expected_value), row["best"].key))
     selected: list[dict[str, Any]] = []
     used_keys: set[str] = set()
     used_matches: set[int] = set()
