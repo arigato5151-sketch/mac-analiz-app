@@ -1,10 +1,17 @@
 from models.value_analysis import MIN_VALUE_EV, assess_market_value, best_value_assessment, derive_combo_probabilities, evaluate_flat_stakes, fractional_kelly_stake, value_confidence_status
+from models.half_time_model import predict_half_time_markets
 
 
 def test_derive_full_match_combo_probabilities():
     result = derive_combo_probabilities({"home_win": .5, "over_2_5": .6, "btts_yes": .4})
     assert result["home_win_over_2_5"] == .3
     assert result["home_win_btts_yes"] == .2
+
+
+def test_half_time_model_returns_normalized_result_markets():
+    result = predict_half_time_markets(1.4, 1.0)
+    assert abs(sum(result[key] for key in ("first_half_home_win", "first_half_draw", "first_half_away_win")) - 1) < 1e-9
+    assert 0 < result["second_half_over_0_5"] < 1
 
 
 def test_normalizes_bookmaker_margin_and_calculates_positive_value():
