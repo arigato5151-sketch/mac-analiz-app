@@ -71,8 +71,14 @@ def final_result_message(
             f"(<%{publish_threshold * 100:.0f})"
         )
     )
+    card_header = (
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"MAÇ SONUCU | {home_team} {home_score} - {away_score} {away_team}\n"
+        f"Lig: {league_name}"
+    )
     return "\n".join(
         (
+            card_header,
             f"🏁 {home_team} {home_score} — {away_score} {away_team}",
             "Tahmin sonuçları",
             outcome_line,
