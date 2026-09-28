@@ -14,7 +14,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.components.data import load_recent_odds_for_matches, load_upcoming_dashboard
+from app.components.data import (
+    load_prediction_performance,
+    load_recent_odds_for_matches,
+    load_upcoming_dashboard,
+)
 from app.components.ui import configure_page, disclaimer, page_header
 from models.value_analysis import ValueAssessment, assess_market_value
 from models.coupon_policy import diversified_coupon_rows
@@ -171,6 +175,30 @@ with st.expander("Filtreleme özeti"):
         f"İncelenen maç: {len(matches)} · Oranı olmayan: {filter_counts['no_odds']} · "
         f"Model tutarsızlığı: {filter_counts['sanity']} · %50 altı: {filter_counts['below_probability']}"
     )
+
+try:
+    performance = load_prediction_performance()
+except Exception:
+    performance = pd.DataFrame()
+if not performance.empty:
+    performance_rows = []
+    for label_name, correct_column in (
+        ("1-X-2", "was_correct"),
+        ("Üst/Alt 2.5", "over_2_5_was_correct"),
+        ("KG Var/Yok", "btts_was_correct"),
+    ):
+        values = performance[correct_column].dropna().astype(bool)
+        if not values.empty:
+            performance_rows.append(
+                {
+                    "Market": label_name,
+                    "Örneklem": len(values),
+                    "Geçmiş isabet": f"%{values.mean() * 100:.1f}",
+                }
+            )
+    if performance_rows:
+        with st.expander("Geçmiş market performansı"):
+            st.dataframe(pd.DataFrame(performance_rows), hide_index=True, width="stretch")
 
 def label(item: ValueAssessment) -> str:
     names = {
