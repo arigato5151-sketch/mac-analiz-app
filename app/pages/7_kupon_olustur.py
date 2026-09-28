@@ -131,6 +131,12 @@ for _, match in matches.iterrows():
         continue
     probabilities.update(derive_combo_probabilities(probabilities))
     assessments = assess_market_value(probabilities, raw_odds)
+    # Do not publish extreme longshots that the model itself rates as weak.
+    assessments = [
+        item
+        for item in assessments
+        if not (item.odds >= 20.0 and item.model_probability < 0.35)
+    ]
     if not assessments:
         continue
     best = max(assessments, key=lambda item: item.expected_value)
