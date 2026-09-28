@@ -29,7 +29,7 @@ def diversified_coupon_rows(rows: list[dict[str, Any]], *, max_items: int | None
                 probability = float(assessment.model_probability)
                 expected_value = float(assessment.expected_value)
                 odds = float(assessment.odds)
-            except (AttributeError, TypeError, ValueError):
+            except Exception:
                 continue
             if probability < min_probability or expected_value < min_ev:
                 continue
