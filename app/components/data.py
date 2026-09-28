@@ -304,11 +304,50 @@ def load_recent_odds_for_matches(match_ids: tuple[int, ...]) -> pd.DataFrame:
         "Europe/Istanbul"
     )
     frame["_provider_priority"] = frame["bookmaker"].eq("Nesine").astype(int)
-    return (
+    selected = (
         frame.sort_values(["match_id", "_provider_priority", "captured_at"], ascending=[True, False, False])
         .drop_duplicates("match_id", keep="first")
         .drop(columns="_provider_priority")
     )
+    # Merge normalized Nesine detail markets into the same odds mapping used by
+    # value analysis. This is additive and leaves other providers untouched.
+    nesine_rows = get_db().select_all(
+        "nesine_market_quotes",
+        columns="match_id,market_code,market_name,selection_code,selection_name,odd,captured_at",
+        filters={"match_id": ids_filter}, order="captured_at.desc",
+    )
+    if nesine_rows:
+        detail_by_match: dict[int, dict[str, str]] = {}
+        for detail in nesine_rows:
+            key = _nesine_market_key(detail)
+            if key:
+                detail_by_match.setdefault(int(detail["match_id"]), {}).setdefault(key, str(detail["odd"]))
+        selected["odds"] = selected.apply(
+            lambda row: {**(row["odds"] if isinstance(row["odds"], dict) else {}), **detail_by_match.get(int(row["match_id"]), {})},
+            axis=1,
+        )
+    return selected
+
+
+def _nesine_market_key(row: dict[str, Any]) -> str | None:
+    """Map normalized Nesine labels to prediction-market keys."""
+    market = f"{row.get('market_name', '')} {row.get('market_code', '')}".lower()
+    selection = f"{row.get('selection_name', '')} {row.get('selection_code', '')}".lower()
+    first = "1. yarı" in market or "ilk yarı" in market
+    second = "2. yarı" in market or "ikinci yarı" in market
+    prefix = "first_half" if first else "second_half" if second else None
+    if prefix and "sonuç" in market:
+        if selection.startswith("1"):
+            return f"{prefix}_home_win"
+        if selection.startswith("x"):
+            return f"{prefix}_draw"
+        if selection.startswith("2"):
+            return f"{prefix}_away_win"
+        return None
+    if prefix and ("alt" in market or "üst" in market):
+        line = "1_5" if "1.5" in market or "1,5" in market else "0_5"
+        return f"{prefix}_{'over' if 'üst' in selection else 'under'}_{line}"
+    return None
 
 
 @st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
