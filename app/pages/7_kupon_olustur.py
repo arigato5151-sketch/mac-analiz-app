@@ -20,6 +20,9 @@ from models.value_analysis import ValueAssessment, assess_market_value
 from models.coupon_policy import diversified_coupon_rows
 
 
+EXCLUDED_COUPON_TEAM_NAMES = {"san marino"}
+
+
 def derive_combo_probabilities(probabilities: dict[str, object]) -> dict[str, float]:
     """Keep the coupon page compatible with older deployed model modules."""
     combos = {
@@ -109,6 +112,12 @@ odds_source_by_match = {
 rows: list[dict[str, object]] = []
 for _, match in matches.iterrows():
     match_id = int(match["id"])
+    team_names = {
+        str(match.get("home_team", "")).strip().casefold(),
+        str(match.get("away_team", "")).strip().casefold(),
+    }
+    if team_names & EXCLUDED_COUPON_TEAM_NAMES:
+        continue
     raw_odds = odds_by_match.get(match_id)
     if not isinstance(raw_odds, dict):
         continue
