@@ -202,7 +202,14 @@ st.dataframe(
     pd.DataFrame([
         {
             "Saat": row["time"], "Karşılaşma": row["match"], "Seçim": label(row["best"]),
-            "Value": f"%{row['best'].expected_value * 100:+.1f}", "Lig": row["league"],
+            "Value": f"%{row['best'].expected_value * 100:+.1f}",
+            "Oran kaynağı": row["bookmaker"],
+            "Oran güncelleme": (
+                row["odds_captured_at"].strftime("%d.%m.%Y %H:%M")
+                if hasattr(row.get("odds_captured_at"), "strftime")
+                else "Bilinmiyor"
+            ),
+            "Lig": row["league"],
         }
         for row in rows
     ]),
