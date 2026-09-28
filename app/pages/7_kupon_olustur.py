@@ -20,9 +20,6 @@ from models.value_analysis import ValueAssessment, assess_market_value
 from models.coupon_policy import diversified_coupon_rows
 
 
-EXCLUDED_COUPON_TEAM_NAMES = {"san marino"}
-
-
 def derive_combo_probabilities(probabilities: dict[str, object]) -> dict[str, float]:
     """Keep the coupon page compatible with older deployed model modules."""
     combos = {
@@ -63,8 +60,11 @@ def fails_prediction_sanity_check(probabilities: dict[str, object]) -> bool:
     except (KeyError, TypeError, ValueError):
         return False
     # Extreme expected goals must agree with a strong 1X2 signal.
-    return (away_goals >= 3.5 and away_win < 0.55) or (
-        home_goals >= 3.5 and home_win < 0.55
+    total_goals = home_goals + away_goals
+    return (
+        (away_goals >= 3.5 and away_win < 0.55)
+        or (home_goals >= 3.5 and home_win < 0.55)
+        or (total_goals >= 4.5 and float(probabilities.get("over_2_5", 0)) < 0.65)
     )
 
 
@@ -112,12 +112,6 @@ odds_source_by_match = {
 rows: list[dict[str, object]] = []
 for _, match in matches.iterrows():
     match_id = int(match["id"])
-    team_names = {
-        str(match.get("home_team", "")).strip().casefold(),
-        str(match.get("away_team", "")).strip().casefold(),
-    }
-    if team_names & EXCLUDED_COUPON_TEAM_NAMES:
-        continue
     raw_odds = odds_by_match.get(match_id)
     if not isinstance(raw_odds, dict):
         continue
