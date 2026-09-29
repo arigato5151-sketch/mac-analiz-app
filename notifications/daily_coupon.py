@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from config.settings import get_settings
 from db.db_client import SupabaseRestClient
 from models.value_analysis import ValueAssessment, assess_market_value
-from models.coupon_policy import diversified_coupon_rows
+from models.coupon_policy import diversified_coupon_rows, _market_family
 from notifications.telegram import send_telegram_message
 
 
@@ -83,11 +83,20 @@ def build_daily_coupon_message(rows: list[dict[str, Any]]) -> str:
 
 
 def _coupon_groups(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    return {
-        "low_risk": diversified_coupon_rows(rows, max_items=None, min_probability=0.55, min_ev=0.0),
-        "balanced": diversified_coupon_rows(rows, max_items=None, min_ev=0.03),
-        "high_odds": diversified_coupon_rows(rows, max_items=None, min_ev=0.03, high_odds=True),
-    }
+    low = diversified_coupon_rows(rows, max_items=None, min_probability=0.55, min_ev=0.0)
+    blocked = {(int(row["match_id"]), _market_family(str(row["best"].key))) for row in low}
+    balanced = diversified_coupon_rows(
+        rows, max_items=None, min_ev=0.03, excluded_match_families=blocked
+    )
+    blocked.update(
+        (int(row["match_id"]), _market_family(str(row["best"].key)))
+        for row in balanced
+    )
+    high = diversified_coupon_rows(
+        rows, max_items=None, min_ev=0.03, high_odds=True,
+        excluded_match_families=blocked,
+    )
+    return {"low_risk": low, "balanced": balanced, "high_odds": high}
 
 
 def _persist_coupon_runs(db: SupabaseRestClient, rows: list[dict[str, Any]], coupon_date: str) -> None:

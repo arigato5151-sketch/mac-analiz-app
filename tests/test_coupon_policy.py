@@ -24,6 +24,12 @@ def test_coupon_rejects_probability_below_fifty_percent():
     assert diversified_coupon_rows(rows, min_ev=0.0) == []
 
 
+def test_coupon_requires_stronger_confidence_for_result_markets():
+    item = SimpleNamespace(key="home_win", expected_value=.40, model_probability=.57, odds=3.0)
+    rows = [{"match_id": 1, "assessments": [item], "best": item}]
+    assert diversified_coupon_rows(rows, min_ev=0.0) == []
+
+
 def test_coupon_rejects_absurd_odds():
     item = SimpleNamespace(key="away_win", expected_value=20.0, model_probability=.6, odds=46.0)
     rows = [{"match_id": 1, "assessments": [item], "best": item}]
@@ -34,3 +40,25 @@ def test_coupon_requires_higher_threshold_for_btts():
     item = SimpleNamespace(key="btts_yes", expected_value=.40, model_probability=.52, odds=3.5)
     rows = [{"match_id": 1, "assessments": [item], "best": item}]
     assert diversified_coupon_rows(rows, min_ev=0.0) == []
+
+
+def test_same_match_can_use_different_market_families():
+    def item(key):
+        return SimpleNamespace(key=key, expected_value=.40, model_probability=.6, odds=2.0)
+
+    rows = [
+        {"match_id": 1, "assessments": [item("home_win"), item("btts_yes")], "best": item("home_win")},
+    ]
+    selected = diversified_coupon_rows(rows, min_ev=0.0)
+    assert {row["best"].key for row in selected} == {"home_win", "btts_yes"}
+
+
+def test_excluded_match_family_allows_other_market_for_same_match():
+    def item(key):
+        return SimpleNamespace(key=key, expected_value=.40, model_probability=.6, odds=3.0)
+
+    rows = [{"match_id": 1, "assessments": [item("home_win"), item("btts_yes")], "best": item("home_win")}]
+    selected = diversified_coupon_rows(
+        rows, min_ev=0.0, excluded_match_families={(1, "result")}
+    )
+    assert [row["best"].key for row in selected] == ["btts_yes"]
