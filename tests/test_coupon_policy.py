@@ -28,3 +28,9 @@ def test_coupon_rejects_absurd_odds():
     item = SimpleNamespace(key="away_win", expected_value=20.0, model_probability=.6, odds=46.0)
     rows = [{"match_id": 1, "assessments": [item], "best": item}]
     assert diversified_coupon_rows(rows, min_ev=0.0) == []
+
+
+def test_coupon_requires_higher_threshold_for_btts():
+    item = SimpleNamespace(key="btts_yes", expected_value=.40, model_probability=.52, odds=3.5)
+    rows = [{"match_id": 1, "assessments": [item], "best": item}]
+    assert diversified_coupon_rows(rows, min_ev=0.0) == []
