@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from math import isfinite
-from typing import Mapping
-
 
 MIN_VALUE_EV = 0.03
 MIN_VALUE_SAMPLE = 30
@@ -25,17 +24,47 @@ COMBO_MARKETS = {
 }
 
 
-def derive_combo_probabilities(probabilities: Mapping[str, object]) -> dict[str, float]:
-    """Derive supported full-match combos using an explicit independence approximation."""
-    derived: dict[str, float] = {}
-    for combo, (left, right) in COMBO_MARKETS.items():
-        try:
-            left_value, right_value = float(probabilities[left]), float(probabilities[right])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if 0 <= left_value <= 1 and 0 <= right_value <= 1:
-            derived[combo] = left_value * right_value
-    return derived
+def derive_combo_probabilities(
+    probabilities: Mapping[str, object],
+    *,
+    score_matrix: object | None = None,
+) -> dict[str, float]:
+    """Derive combos from the joint Poisson score matrix, never by independence."""
+    if score_matrix is None:
+        return {}
+    try:
+        import numpy as np
+
+        matrix = np.asarray(score_matrix, dtype=float)
+        if matrix.ndim != 2 or matrix.size == 0 or not np.isfinite(matrix).all():
+            return {}
+        total = float(matrix.sum())
+        if total <= 0 or not np.isclose(total, 1.0, atol=1e-6):
+            return {}
+        matrix = matrix / total
+        home, away = np.indices(matrix.shape)
+        result = home > away
+        draw = home == away
+        away_win = home < away
+        over = home + away >= 3
+        under = ~over
+        btts = (home >= 1) & (away >= 1)
+        masks = {
+            "home_win_over_2_5": result & over,
+            "home_win_under_2_5": result & under,
+            "draw_over_2_5": draw & over,
+            "draw_under_2_5": draw & under,
+            "away_win_over_2_5": away_win & over,
+            "away_win_under_2_5": away_win & under,
+            "home_win_btts_yes": result & btts,
+            "draw_btts_yes": draw & btts,
+            "away_win_btts_yes": away_win & btts,
+            "over_2_5_btts_yes": over & btts,
+            "under_2_5_btts_no": under & ~btts,
+        }
+        return {key: float(matrix[mask].sum()) for key, mask in masks.items()}
+    except (TypeError, ValueError):
+        return {}
 
 
 @dataclass(frozen=True)
@@ -97,39 +126,41 @@ def assess_market_value(
     Expected value is calculated as ``model_probability * decimal_odds - 1``.
     Outcomes without both a valid model probability and odds are skipped.
     """
-    candidates: list[tuple[str, float, float]] = []
-    for key, raw_odds in odds.items():
-        if key not in model_probabilities:
-            continue
-        try:
-            price = _odds(raw_odds, f"odds[{key}]")
-            probability = _probability(model_probabilities[key], f"probability[{key}]")
-        except (TypeError, ValueError):
-            continue
-        candidates.append((str(key), price, probability))
-
-    if not candidates:
-        return []
-
-    raw_implied = [1.0 / price for _, price, _ in candidates]
-    implied_total = sum(raw_implied)
-    if implied_total <= 0:
-        return []
-
     assessments = []
-    for (key, price, probability), implied in zip(candidates, raw_implied):
-        fair_market = implied / implied_total
-        assessments.append(
-            ValueAssessment(
-                key=key,
-                odds=price,
-                model_probability=probability,
-                implied_probability=implied,
-                fair_market_probability=fair_market,
-                probability_edge=probability - fair_market,
-                expected_value=probability * price - 1.0,
+    market_sets = (
+        ("home_win", "draw", "away_win"),
+        ("over_2_5", "under_2_5"),
+        ("btts_yes", "btts_no"),
+    )
+    for market_set in market_sets:
+        if not all(key in odds and key in model_probabilities for key in market_set):
+            continue
+        candidates: list[tuple[str, float, float]] = []
+        for key in market_set:
+            try:
+                candidates.append((key, _odds(odds[key], f"odds[{key}]"), _probability(model_probabilities[key], f"probability[{key}]")))
+            except (TypeError, ValueError):
+                candidates = []
+                break
+        if not candidates:
+            continue
+        raw_implied = [1.0 / price for _, price, _ in candidates]
+        implied_total = sum(raw_implied)
+        if implied_total <= 0:
+            continue
+        for (key, price, probability), implied in zip(candidates, raw_implied):
+            fair_market = implied / implied_total
+            assessments.append(
+                ValueAssessment(
+                    key=key,
+                    odds=price,
+                    model_probability=probability,
+                    implied_probability=implied,
+                    fair_market_probability=fair_market,
+                    probability_edge=probability - fair_market,
+                    expected_value=probability * price - 1.0,
+                )
             )
-        )
     return assessments
 
 

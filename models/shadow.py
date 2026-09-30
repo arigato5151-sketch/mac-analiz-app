@@ -6,16 +6,22 @@ import argparse
 import json
 import shutil
 from datetime import datetime, timedelta, timezone
+from math import log
 from pathlib import Path
 from typing import Any
 
-import joblib
+import numpy as np
 
 from config.settings import PROJECT_ROOT, UPCOMING_HORIZON_DAYS, get_settings
 from data_pipeline.isotime import parse_iso_datetime
+from data_pipeline.odds import vig_free_market_probabilities
 from db.db_client import DatabaseError, SupabaseRestClient
 from evaluation.track_performance import EVALUATION_LOOKBACK_DAYS
-from models.artifact_store import ArtifactStoreError, download_model
+from models.artifact_store import (
+    ArtifactStoreError,
+    download_model,
+    load_verified_joblib,
+)
 from models.predict import (
     generate_prediction_rows,
     load_latest_team_forms,
@@ -23,7 +29,6 @@ from models.predict import (
     newest_versioned_model,
 )
 from models.train_model import load_historical_matches
-
 
 MINIMUM_PROMOTION_SAMPLE = 100
 MINIMUM_BRIER_IMPROVEMENT = 0.005
@@ -33,6 +38,10 @@ MAXIMUM_PROMOTION_BRIER = 0.62
 # production-ready, and its calibration must not regress beyond production's.
 MINIMUM_BASELINE_ADVANTAGE = 0.01
 MAXIMUM_ECE_REGRESSION = 1.25
+MINIMUM_MARKET_SAMPLE = 200
+MARKET_BOOTSTRAP_SAMPLES = 10_000
+MARKET_REQUIRED_MEAN_ADVANTAGE = -0.010
+MARKET_REQUIRED_CI_UPPER = -0.005
 
 
 def candidate_path(model_version: str) -> Path:
@@ -41,7 +50,9 @@ def candidate_path(model_version: str) -> Path:
         # A fresh clone or CI checkout may not carry the binary. Re-hydrate it
         # from Supabase Storage rather than failing shadow evaluation.
         try:
-            return download_model(f"{model_version}.joblib", dest_dir=path.parent)
+            result = download_model(f"{model_version}.joblib", dest_dir=path.parent)
+            download_model("artifact_manifest.json", dest_dir=path.parent)
+            return result
         except ArtifactStoreError as error:
             raise FileNotFoundError(
                 f"Candidate model artifact is missing: {model_version}"
@@ -55,7 +66,7 @@ def register_newest_candidate(db: SupabaseRestClient) -> dict[str, Any]:
     path = newest_versioned_model(model_dir)
     if path is None:
         raise FileNotFoundError("No versioned model artifact was found")
-    bundle = joblib.load(path)
+    bundle = load_verified_joblib(path)
     version = str(bundle.get("model_version", path.stem))
     existing = db.select(
         "model_candidates",
@@ -88,12 +99,13 @@ def run_shadow_predictions(
         "model_candidates",
         columns="model_version",
         filters={"status": "eq.shadow"},
+        order="registered_at.asc",
     )
     written = 0
     for candidate in candidates:
         model_version = str(candidate["model_version"])
         try:
-            bundle = joblib.load(candidate_path(model_version))
+            bundle = load_verified_joblib(candidate_path(model_version))
         except FileNotFoundError:
             # Never allow a stale candidate artifact to block a user-facing alert.
             print(f"Shadow candidate artifact unavailable: {model_version}")
@@ -251,12 +263,70 @@ def promotion_decision(
     return True, "Aday model gölge karşılaştırmasını geçti"
 
 
+def paired_market_comparison(
+    samples: list[tuple[float, float]],
+    *,
+    minimum_sample: int = MINIMUM_MARKET_SAMPLE,
+    bootstrap_samples: int = MARKET_BOOTSTRAP_SAMPLES,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Compare candidate and vig-free market log-loss on identical matches."""
+    if len(samples) < minimum_sample:
+        return {"status": "insufficient_evidence", "sample_size": len(samples)}
+    if bootstrap_samples < 1:
+        raise ValueError("bootstrap_samples must be positive")
+    differences = np.asarray([candidate - market for candidate, market in samples], dtype=float)
+    rng = np.random.default_rng(seed)
+    draws = rng.integers(0, len(differences), size=(bootstrap_samples, len(differences)))
+    bootstrap_means = differences[draws].mean(axis=1)
+    mean_difference = float(differences.mean())
+    lower, upper = np.quantile(bootstrap_means, [0.025, 0.975])
+    passed = mean_difference <= MARKET_REQUIRED_MEAN_ADVANTAGE and float(upper) <= MARKET_REQUIRED_CI_UPPER
+    return {
+        "status": "passed" if passed else "failed",
+        "sample_size": len(samples),
+        "candidate_log_loss": float(np.mean([item[0] for item in samples])),
+        "market_log_loss": float(np.mean([item[1] for item in samples])),
+        "mean_difference": mean_difference,
+        "bootstrap_ci_lower": float(lower),
+        "bootstrap_ci_upper": float(upper),
+        "bootstrap_samples": bootstrap_samples,
+    }
+
+
+def _market_log_loss_sample(
+    shadow: dict[str, Any], match: dict[str, Any], quote: dict[str, Any]
+) -> tuple[float, float] | None:
+    market = vig_free_market_probabilities(quote.get("odds") or {})
+    if not market or match.get("home_score") is None or match.get("away_score") is None:
+        return None
+    actual = (
+        "market_implied_home_win"
+        if int(match["home_score"]) > int(match["away_score"])
+        else "market_implied_away_win"
+        if int(match["home_score"]) < int(match["away_score"])
+        else "market_implied_draw"
+    )
+    try:
+        candidate_key = {
+            "market_implied_home_win": "prob_home_win",
+            "market_implied_draw": "prob_draw",
+            "market_implied_away_win": "prob_away_win",
+        }[actual]
+        return (
+            -log(max(float(shadow[candidate_key]), 1e-15)),
+            -log(max(float(market[actual]), 1e-15)),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _production_offline_metrics() -> dict[str, Any]:
     """Offline metrics of the current production artifact, when available."""
     latest = PROJECT_ROOT / "models" / "saved_models" / "latest.joblib"
     if not latest.is_file():
         return {}
-    bundle = joblib.load(latest)
+    bundle = load_verified_joblib(latest)
     return dict(bundle.get("metrics", {}))
 
 
@@ -271,7 +341,7 @@ def promote_candidate(db: SupabaseRestClient, model_version: str) -> str:
     if not candidate or candidate[0]["status"] != "shadow":
         raise ValueError("Candidate must exist and be in shadow status")
     shadows = db.select_all(
-        "shadow_predictions", columns="id,match_id", filters={"model_version": f"eq.{model_version}"}
+        "shadow_predictions", columns="id,match_id,predicted_at", filters={"model_version": f"eq.{model_version}"}
     )
     if not shadows:
         raise RuntimeError("Candidate has no shadow predictions")
@@ -300,7 +370,41 @@ def promote_candidate(db: SupabaseRestClient, model_version: str) -> str:
     ]
     if not paired:
         raise RuntimeError("No same-match production baseline is available")
+    completed_matches = db.select_all(
+        "matches", columns="id,home_score,away_score", filters={"id": f"in.({','.join(map(str, sorted(match_ids)))})"}
+    )
+    matches_by_id = {int(row["id"]): row for row in completed_matches}
+    odds_rows = db.select_all(
+        "odds_quote_history", columns="match_id,odds,captured_at",
+        filters={"match_id": f"in.({','.join(map(str, sorted(match_ids)))})"},
+        order="captured_at.desc",
+    )
+    shadows_by_match = {int(row["match_id"]): row for row in shadows}
+    market_samples: list[tuple[float, float]] = []
+    market_matches_seen: set[int] = set()
+    for quote in odds_rows:
+        match_id = int(quote["match_id"])
+        if match_id in market_matches_seen:
+            continue
+        shadow = shadows_by_match.get(match_id)
+        match = matches_by_id.get(match_id)
+        if not shadow or not match:
+            continue
+        if parse_iso_datetime(str(quote["captured_at"])) > parse_iso_datetime(str(shadow["predicted_at"])):
+            continue
+        market_matches_seen.add(match_id)
+        sample = _market_log_loss_sample(shadow, match, quote)
+        if sample is not None:
+            market_samples.append(sample)
+    market_comparison = paired_market_comparison(market_samples)
     candidate_offline = dict(candidate[0].get("offline_metrics") or {})
+    candidate_offline["market_comparison"] = market_comparison
+    db.upsert("model_candidates", [{**candidate[0], "offline_metrics": candidate_offline}], on_conflict="model_version")
+    if market_comparison["status"] != "passed":
+        raise RuntimeError(
+            "Piyasa karşılaştırması terfi için yeterli değil: "
+            f"{market_comparison['status']} ({market_comparison['sample_size']}/{MINIMUM_MARKET_SAMPLE})"
+        )
     production_offline = _production_offline_metrics()
     accepted, reason = promotion_decision(
         candidate_brier=sum(float(row[0]["brier_score"]) for row in paired) / len(paired),
@@ -347,7 +451,9 @@ def shadow_report(db: SupabaseRestClient) -> dict[str, Any]:
         ),
     }
     candidates = db.select_all(
-        "model_candidates", columns="model_version,status,offline_metrics"
+        "model_candidates",
+        columns="model_version,status,offline_metrics",
+        order="registered_at.asc",
     )
     version_by_shadow_id = {
         int(row["id"]): str(row["model_version"])

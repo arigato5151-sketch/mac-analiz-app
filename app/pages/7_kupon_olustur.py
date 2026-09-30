@@ -20,32 +20,12 @@ from app.components.data import (
     load_upcoming_dashboard,
 )
 from app.components.ui import configure_page, disclaimer, page_header
-from models.value_analysis import ValueAssessment, assess_market_value
 from models.coupon_policy import diversified_coupon_rows
-
-
-def derive_combo_probabilities(probabilities: dict[str, object]) -> dict[str, float]:
-    """Keep the coupon page compatible with older deployed model modules."""
-    combos = {
-        "home_win_over_2_5": ("home_win", "over_2_5"),
-        "home_win_under_2_5": ("home_win", "under_2_5"),
-        "draw_over_2_5": ("draw", "over_2_5"),
-        "draw_under_2_5": ("draw", "under_2_5"),
-        "away_win_over_2_5": ("away_win", "over_2_5"),
-        "away_win_under_2_5": ("away_win", "under_2_5"),
-        "home_win_btts_yes": ("home_win", "btts_yes"),
-        "draw_btts_yes": ("draw", "btts_yes"),
-        "away_win_btts_yes": ("away_win", "btts_yes"),
-    }
-    result: dict[str, float] = {}
-    for key, (left, right) in combos.items():
-        try:
-            left_value, right_value = float(probabilities[left]), float(probabilities[right])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if 0 <= left_value <= 1 and 0 <= right_value <= 1:
-            result[key] = left_value * right_value
-    return result
+from models.value_analysis import (
+    ValueAssessment,
+    assess_market_value,
+    derive_combo_probabilities,
+)
 
 
 def fails_prediction_sanity_check(probabilities: dict[str, object]) -> bool:
@@ -140,7 +120,14 @@ for _, match in matches.iterrows():
     if fails_prediction_sanity_check(probabilities):
         filter_counts["sanity"] += 1
         continue
-    probabilities.update(derive_combo_probabilities(probabilities))
+    probabilities.update(
+        derive_combo_probabilities(
+            probabilities,
+            score_matrix=(persisted_markets or {}).get("score_matrix")
+            if isinstance(persisted_markets, dict)
+            else None,
+        )
+    )
     assessments = assess_market_value(probabilities, raw_odds)
     # Never publish selections below the user's minimum 50% model probability.
     assessments = [

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from math import isfinite, log
 from math import factorial as math_factorial
+from math import isfinite, log
 from typing import Any
 
 import numpy as np
@@ -12,6 +13,8 @@ import pandas as pd
 from numpy.typing import NDArray
 from scipy.optimize import minimize_scalar
 from scipy.stats import poisson
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +139,7 @@ def estimate_dixon_coles_rho(
     al_arr = np.asarray(away_lambdas, dtype=float)
 
     if len(hg_arr) < 30:
+        LOGGER.warning("Dixon-Coles rho skipped: only %d observations", len(hg_arr))
         return 0.0
 
     try:
@@ -148,7 +152,7 @@ def estimate_dixon_coles_rho(
         if result.success and isfinite(result.x):
             return float(np.clip(result.x, -0.5, 0.5))
     except Exception:
-        pass
+        LOGGER.exception("Dixon-Coles rho optimization failed")
     return 0.0
 
 
@@ -184,11 +188,13 @@ def estimate_league_dixon_coles_rhos(
             # Fallback: use simple goal averages as proxy
             missing = required_cols - set(df.columns)
             if missing:
+                LOGGER.warning("Dixon-Coles rho skipped; missing columns: %s", sorted(missing))
                 return {int(lid): 0.0 for lid in df["league_id"].unique()}
 
     rhos: dict[int, float] = {}
     for league_id, group in df.groupby("league_id"):
         if len(group) < 30:
+            LOGGER.warning("League %s has insufficient data for Dixon-Coles rho: %d", league_id, len(group))
             rhos[int(league_id)] = 0.0
             continue
         rho = estimate_dixon_coles_rho(

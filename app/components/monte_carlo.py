@@ -5,7 +5,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-
 OUTCOME_COLUMNS = ("prob_home_win", "prob_draw", "prob_away_win")
 
 

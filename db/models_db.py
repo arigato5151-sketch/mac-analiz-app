@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
 
 from sqlalchemy import (
-    BigInteger,
     Boolean,
-    Column,
     DateTime,
     Float,
     ForeignKey,
@@ -24,7 +21,6 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 class Base(DeclarativeBase):
     """Base class for all ORM models."""
-    pass
 
 
 class League(Base):
@@ -34,14 +30,14 @@ class League(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(100), nullable=True)
     season: Mapped[int] = mapped_column(Integer, nullable=False)
-    logo_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), onupdate=func.now())
 
-    teams: Mapped[list["Team"]] = relationship(back_populates="league")
-    matches: Mapped[list["Match"]] = relationship(back_populates="league")
+    teams: Mapped[list[Team]] = relationship(back_populates="league")
+    matches: Mapped[list[Match]] = relationship(back_populates="league")
 
     def __repr__(self) -> str:
         return f"<League(id={self.id}, name='{self.name}', season={self.season})>"
@@ -54,21 +50,21 @@ class Team(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    short_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    short_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
     league_id: Mapped[int] = mapped_column(Integer, ForeignKey("leagues.id"), nullable=False)
-    country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    founded_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    stadium: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
-    logo_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    founded_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stadium: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), onupdate=func.now())
 
-    league: Mapped["League"] = relationship(back_populates="teams")
-    home_matches: Mapped[list["Match"]] = relationship(foreign_keys="Match.home_team_id", back_populates="home_team")
-    away_matches: Mapped[list["Match"]] = relationship(foreign_keys="Match.away_team_id", back_populates="away_team")
-    form_entries: Mapped[list["TeamForm"]] = relationship(back_populates="team")
-    availabilities: Mapped[list["PlayerAvailability"]] = relationship(back_populates="team")
-    lineups: Mapped[list["FixtureLineup"]] = relationship(back_populates="team")
+    league: Mapped[League] = relationship(back_populates="teams")
+    home_matches: Mapped[list[Match]] = relationship(foreign_keys="Match.home_team_id", back_populates="home_team")
+    away_matches: Mapped[list[Match]] = relationship(foreign_keys="Match.away_team_id", back_populates="away_team")
+    form_entries: Mapped[list[TeamForm]] = relationship(back_populates="team")
+    availabilities: Mapped[list[PlayerAvailability]] = relationship(back_populates="team")
+    lineups: Mapped[list[FixtureLineup]] = relationship(back_populates="team")
 
     __table_args__ = (
         Index("ix_teams_league_id", "league_id"),
@@ -90,24 +86,24 @@ class Match(Base):
     away_team_id: Mapped[int] = mapped_column(Integer, ForeignKey("teams.id"), nullable=False)
     match_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="scheduled")
-    home_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    away_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    home_xg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    away_xg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    referee: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
-    venue: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    home_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    away_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    home_xg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    away_xg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    referee: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    venue: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), onupdate=func.now())
 
-    league: Mapped["League"] = relationship(back_populates="matches")
-    home_team: Mapped["Team"] = relationship(foreign_keys=[home_team_id], back_populates="home_matches")
-    away_team: Mapped["Team"] = relationship(foreign_keys=[away_team_id], back_populates="away_matches")
-    predictions: Mapped[list["Prediction"]] = relationship(back_populates="match")
-    odds_history: Mapped[list["OddsQuoteHistory"]] = relationship(back_populates="match")
-    lineups: Mapped[list["FixtureLineup"]] = relationship(back_populates="match")
-    snapshots: Mapped[list["PredictionSnapshot"]] = relationship(back_populates="match")
-    commentary: Mapped[Optional["MatchCommentary"]] = relationship(back_populates="match", uselist=False)
-    player_availability: Mapped[list["PlayerAvailability"]] = relationship(back_populates="match")
+    league: Mapped[League] = relationship(back_populates="matches")
+    home_team: Mapped[Team] = relationship(foreign_keys=[home_team_id], back_populates="home_matches")
+    away_team: Mapped[Team] = relationship(foreign_keys=[away_team_id], back_populates="away_matches")
+    predictions: Mapped[list[Prediction]] = relationship(back_populates="match")
+    odds_history: Mapped[list[OddsQuoteHistory]] = relationship(back_populates="match")
+    lineups: Mapped[list[FixtureLineup]] = relationship(back_populates="match")
+    snapshots: Mapped[list[PredictionSnapshot]] = relationship(back_populates="match")
+    commentary: Mapped[MatchCommentary | None] = relationship(back_populates="match", uselist=False)
+    player_availability: Mapped[list[PlayerAvailability]] = relationship(back_populates="match")
 
     __table_args__ = (
         Index("ix_matches_league_date", "league_id", "match_date"),
@@ -132,13 +128,13 @@ class Prediction(Base):
     prob_away_win: Mapped[float] = mapped_column(Float, nullable=False)
     prob_over_2_5: Mapped[float] = mapped_column(Float, nullable=False)
     prob_btts: Mapped[float] = mapped_column(Float, nullable=False)
-    market_probabilities: Mapped[Optional[dict]] = mapped_column(Text, nullable=True)  # JSON
+    market_probabilities: Mapped[dict | None] = mapped_column(Text, nullable=True)  # JSON
     predicted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    match: Mapped["Match"] = relationship(back_populates="predictions")
-    snapshots: Mapped[list["PredictionSnapshot"]] = relationship(back_populates="prediction")
-    performance: Mapped[Optional["PredictionPerformance"]] = relationship(back_populates="prediction", uselist=False)
+    match: Mapped[Match] = relationship(back_populates="predictions")
+    snapshots: Mapped[list[PredictionSnapshot]] = relationship(back_populates="prediction")
+    performance: Mapped[PredictionPerformance | None] = relationship(back_populates="prediction", uselist=False)
 
     __table_args__ = (
         Index("ix_predictions_match_id", "match_id"),
@@ -165,13 +161,13 @@ class PredictionSnapshot(Base):
     prob_away_win: Mapped[float] = mapped_column(Float, nullable=False)
     prob_over_2_5: Mapped[float] = mapped_column(Float, nullable=False)
     prob_btts: Mapped[float] = mapped_column(Float, nullable=False)
-    market_probabilities: Mapped[Optional[dict]] = mapped_column(Text, nullable=True)
+    market_probabilities: Mapped[dict | None] = mapped_column(Text, nullable=True)
     source_predicted_at: Mapped[str] = mapped_column(String(50), nullable=False)
-    context: Mapped[Optional[dict]] = mapped_column(Text, nullable=True)
+    context: Mapped[dict | None] = mapped_column(Text, nullable=True)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    prediction: Mapped["Prediction"] = relationship(back_populates="snapshots")
-    match: Mapped["Match"] = relationship(back_populates="snapshots")
+    prediction: Mapped[Prediction] = relationship(back_populates="snapshots")
+    match: Mapped[Match] = relationship(back_populates="snapshots")
 
     __table_args__ = (
         Index("ix_prediction_snapshots_match_type", "match_id", "snapshot_type"),
@@ -188,14 +184,14 @@ class PredictionPerformance(Base):
     prediction_id: Mapped[int] = mapped_column(Integer, ForeignKey("predictions.id"), nullable=False)
     match_id: Mapped[int] = mapped_column(Integer, ForeignKey("matches.id"), nullable=False)
     was_correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    over_2_5_was_correct: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    btts_was_correct: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    over_2_5_was_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    btts_was_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     brier_score: Mapped[float] = mapped_column(Float, nullable=False)
     log_loss: Mapped[float] = mapped_column(Float, nullable=False)
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    prediction: Mapped["Prediction"] = relationship(back_populates="performance")
-    match: Mapped["Match"] = relationship()
+    prediction: Mapped[Prediction] = relationship(back_populates="performance")
+    match: Mapped[Match] = relationship()
 
     __table_args__ = (
         Index("ix_prediction_performance_prediction_id", "prediction_id"),
@@ -212,13 +208,13 @@ class OddsQuoteHistory(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     match_id: Mapped[int] = mapped_column(Integer, ForeignKey("matches.id"), nullable=False)
     bookmaker: Mapped[str] = mapped_column(String(100), nullable=False)
-    bookmaker_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    bookmaker_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     odds: Mapped[dict] = mapped_column(Text, nullable=False)  # JSON
-    source_updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    source_updated_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     is_notification_reference: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    match: Mapped["Match"] = relationship(back_populates="odds_history")
+    match: Mapped[Match] = relationship(back_populates="odds_history")
 
     __table_args__ = (
         Index("ix_odds_quote_history_match_captured", "match_id", "captured_at"),
@@ -235,12 +231,12 @@ class TeamForm(Base):
     team_id: Mapped[int] = mapped_column(Integer, ForeignKey("teams.id"), nullable=False)
     calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     elo_rating: Mapped[float] = mapped_column(Float, nullable=False)
-    avg_goals_scored_last5: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    avg_goals_conceded_last5: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    win_rate_last5: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    home_away_split: Mapped[Optional[dict]] = mapped_column(Text, nullable=True)  # JSON
+    avg_goals_scored_last5: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_goals_conceded_last5: Mapped[float | None] = mapped_column(Float, nullable=True)
+    win_rate_last5: Mapped[float | None] = mapped_column(Float, nullable=True)
+    home_away_split: Mapped[dict | None] = mapped_column(Text, nullable=True)  # JSON
 
-    team: Mapped["Team"] = relationship(back_populates="form_entries")
+    team: Mapped[Team] = relationship(back_populates="form_entries")
 
     __table_args__ = (
         Index("ix_team_form_team_calculated", "team_id", "calculated_at"),
@@ -254,15 +250,15 @@ class PlayerAvailability(Base):
     __tablename__ = "player_availability"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    match_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("matches.id"), nullable=True)
+    match_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("matches.id"), nullable=True)
     team_id: Mapped[int] = mapped_column(Integer, ForeignKey("teams.id"), nullable=False)
     player_name: Mapped[str] = mapped_column(String(200), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False)  # injured, suspended, doubtful
-    source: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(100), nullable=True)
     refreshed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    team: Mapped["Team"] = relationship(back_populates="availabilities")
-    match: Mapped[Optional["Match"]] = relationship(back_populates="player_availability")
+    team: Mapped[Team] = relationship(back_populates="availabilities")
+    match: Mapped[Match | None] = relationship(back_populates="player_availability")
 
     __table_args__ = (
         Index("ix_player_availability_team_refreshed", "team_id", "refreshed_at"),
@@ -278,12 +274,12 @@ class FixtureLineup(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     match_id: Mapped[int] = mapped_column(Integer, ForeignKey("matches.id"), nullable=False)
     team_id: Mapped[int] = mapped_column(Integer, ForeignKey("teams.id"), nullable=False)
-    formation: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    formation: Mapped[str | None] = mapped_column(String(20), nullable=True)
     confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    coach_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    coach_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
-    match: Mapped["Match"] = relationship(back_populates="lineups")
-    team: Mapped["Team"] = relationship(back_populates="lineups")
+    match: Mapped[Match] = relationship(back_populates="lineups")
+    team: Mapped[Team] = relationship(back_populates="lineups")
 
     __table_args__ = (
         Index("ix_fixture_lineups_match", "match_id"),
@@ -303,7 +299,7 @@ class MatchCommentary(Base):
     model_name: Mapped[str] = mapped_column(String(100), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    match: Mapped["Match"] = relationship(back_populates="commentary")
+    match: Mapped[Match] = relationship(back_populates="commentary")
 
     __table_args__ = (
         UniqueConstraint("match_id", name="uq_commentary_match"),
@@ -335,7 +331,7 @@ class PreMatchTelegramQueue(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     match_id: Mapped[int] = mapped_column(Integer, ForeignKey("matches.id"), nullable=False)
     message_text: Mapped[str] = mapped_column(Text, nullable=False)
-    delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -373,7 +369,7 @@ class ShadowPrediction(Base):
     prob_away_win: Mapped[float] = mapped_column(Float, nullable=False)
     prob_over_2_5: Mapped[float] = mapped_column(Float, nullable=False)
     prob_btts: Mapped[float] = mapped_column(Float, nullable=False)
-    market_probabilities: Mapped[Optional[dict]] = mapped_column(Text, nullable=True)
+    market_probabilities: Mapped[dict | None] = mapped_column(Text, nullable=True)
     predicted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
@@ -390,8 +386,8 @@ class ShadowPredictionPerformance(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     shadow_prediction_id: Mapped[int] = mapped_column(Integer, ForeignKey("shadow_predictions.id"), nullable=False)
     was_correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    over_2_5_was_correct: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    btts_was_correct: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    over_2_5_was_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    btts_was_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     brier_score: Mapped[float] = mapped_column(Float, nullable=False)
     log_loss: Mapped[float] = mapped_column(Float, nullable=False)
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -412,9 +408,9 @@ class OperationalEvent(Base):
     severity: Mapped[str] = mapped_column(String(20), nullable=False)  # info, warning, critical
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
-    context: Mapped[Optional[dict]] = mapped_column(Text, nullable=True)  # JSON
+    context: Mapped[dict | None] = mapped_column(Text, nullable=True)  # JSON
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("ix_operational_events_component_time", "component", "created_at"),

@@ -24,6 +24,10 @@ def test_coupon_rejects_probability_below_fifty_percent():
     assert diversified_coupon_rows(rows, min_ev=0.0) == []
 
 
+def test_coupon_handles_empty_assessments_without_key_error():
+    assert diversified_coupon_rows([{"match_id": 1, "assessments": []}], min_ev=0.0) == []
+
+
 def test_coupon_requires_stronger_confidence_for_result_markets():
     item = SimpleNamespace(key="home_win", expected_value=.40, model_probability=.57, odds=3.0)
     rows = [{"match_id": 1, "assessments": [item], "best": item}]

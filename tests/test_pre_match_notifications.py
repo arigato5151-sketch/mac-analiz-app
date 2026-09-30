@@ -1,18 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 
+from data_pipeline.odds import MatchOdds, MultiBookmakerOdds
+from models.value_analysis import MIN_VALUE_EV, assess_market_value
 from notifications.pre_match import (
     _absence_summary,
     due_matches,
     persist_production_snapshot,
     pre_match_message,
-    sync_soon_odds,
 )
-from data_pipeline.odds import MatchOdds, MultiBookmakerOdds
-from models.value_analysis import MIN_VALUE_EV, assess_market_value
 
 
 def test_due_matches_uses_the_full_pre_kickoff_window() -> None:
@@ -60,9 +57,7 @@ def test_match_odds_snapshot_keys_are_accepted_by_value_filter() -> None:
         },
         odds.as_snapshot(),
     )
-    assert {item.key for item in assessments} == {
-        "home_win", "draw", "away_win", "over_2_5", "btts_yes"
-    }
+    assert {item.key for item in assessments} == {"home_win", "draw", "away_win"}
     assert any(item.expected_value >= MIN_VALUE_EV for item in assessments)
 
 
@@ -239,7 +234,7 @@ class _MockDb:
 def test_sync_soon_odds_no_retry_when_odds_available() -> None:
     """When sync_soon_odds returns odds, the main loop should not call fetch_match_odds again for that fixture."""
     # This test verifies the logic: sync_soon_odds returns odds, so no retry needed
-    from data_pipeline.odds import MatchOdds, MultiBookmakerOdds
+    from data_pipeline.odds import MatchOdds
 
     # Create a mock MultiBookmakerOdds with Bet365 odds
     primary_odds = MatchOdds(
@@ -278,7 +273,7 @@ def test_sync_soon_odds_retries_on_exception() -> None:
     """When sync_soon_odds fails for a fixture (exception), the main loop should retry fetch_match_odds."""
     # This test verifies the logic: failed_match_ids triggers retry
     # The actual integration is tested via the sync_soon_odds return value structure
-    from data_pipeline.odds import MatchOdds, MultiBookmakerOdds
+    from data_pipeline.odds import MatchOdds
 
     # Verify the sync_soon_odds return structure for retry case
     primary_odds = MatchOdds(
@@ -291,7 +286,7 @@ def test_sync_soon_odds_retries_on_exception() -> None:
         btts_yes="1.70",
         btts_no="2.10",
     )
-    multi_odds = MultiBookmakerOdds(bookmakers={8: primary_odds})
+    MultiBookmakerOdds(bookmakers={8: primary_odds})
 
     # sync_soon_odds returns empty odds but failed_match_ids contains match_id=1
     sync_result = (0, {1: None}, {1})

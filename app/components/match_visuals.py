@@ -10,7 +10,6 @@ import pandas as pd
 
 from models.feature_engineering import TeamState
 
-
 RADAR_METRICS = ("Form", "Hücum", "Savunma", "Elo", "Dinlenme")
 
 

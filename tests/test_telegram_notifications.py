@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from notifications.daily_summary import build_morning_messages, build_night_message
-from notifications.telegram import TelegramError, send_many_from_environment, send_telegram_message
+from notifications.telegram import (
+    TelegramError,
+    send_many_from_environment,
+    send_telegram_message,
+)
 
 
 class FakeResponse:

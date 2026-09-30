@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
-from dataclasses import asdict, dataclass
 from bisect import bisect_right
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.base import clone
 from sklearn.metrics import accuracy_score, log_loss
 from xgboost import XGBClassifier
 
@@ -29,15 +31,17 @@ from config.settings import (
     PROJECT_ROOT,
     get_settings,
 )
-from db.db_client import DatabaseError, SupabaseRestClient
 from data_pipeline.odds import attach_pre_match_odds
+from db.db_client import DatabaseError, SupabaseRestClient
 from models.calibration import (
     apply_binary_temperature,
     apply_multiclass_temperature,
     expected_calibration_error,
     guarded_binary_temperature,
     guarded_multiclass_temperature,
+    multiclass_brier_score,
 )
+from models.decision_policy import select_threshold_from_calibration
 from models.feature_engineering import (
     BINARY_FEATURE_COLUMNS,
     FEATURE_COLUMNS,
@@ -49,6 +53,8 @@ from monitoring.feature_snapshot import (
     save_feature_snapshot,
     snapshot_filename,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,11 +73,6 @@ class EvaluationMetrics:
     calibration_size: int
     test_start: str
     test_end: str
-
-
-def multiclass_brier_score(y_true: np.ndarray, probabilities: np.ndarray) -> float:
-    one_hot = np.eye(probabilities.shape[1], dtype=float)[y_true]
-    return float(np.mean(np.sum((probabilities - one_hot) ** 2, axis=1)))
 
 
 def normalize_multiclass_probabilities(probabilities: np.ndarray) -> np.ndarray:
@@ -171,7 +172,7 @@ def _segment_metrics(
     y_true: np.ndarray,
     probabilities: np.ndarray,
     league_ids: np.ndarray,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], str]:
     rows: list[dict[str, Any]] = []
     for league_id in sorted(np.unique(league_ids)):
         mask = league_ids == league_id
@@ -345,7 +346,7 @@ def _fit_best_model(
         raise RuntimeError("No model candidate was evaluated")
 
     if optimize_hyperparams:
-        baseline_model, baseline_preset, baseline_loss = best
+        baseline_model, _baseline_preset, baseline_loss = best
         opt_result = optimize_xgb_hyperparameters(
             binary=binary,
             x_fit=x_fit,
@@ -358,7 +359,7 @@ def _fit_best_model(
             seed=seed,
         )
         chosen_model = opt_result.best_model
-        setattr(chosen_model, "optuna_report", opt_result.to_dict())
+        chosen_model.optuna_report = opt_result.to_dict()
         return (
             chosen_model,
             opt_result.selected_strategy,
@@ -366,6 +367,27 @@ def _fit_best_model(
         )
 
     return best
+
+
+def refit_production_model(
+    selected_model: XGBClassifier,
+    *,
+    features: pd.DataFrame,
+    labels: np.ndarray,
+    weights: np.ndarray,
+) -> XGBClassifier:
+    """Refit the selected model on all pre-test rows with frozen stopping."""
+    try:
+        best_iteration = int(selected_model.best_iteration) + 1
+    except (AttributeError, TypeError, ValueError):
+        best_iteration = int(selected_model.get_params().get("n_estimators", 1))
+    production_model = clone(selected_model)
+    production_model.set_params(
+        n_estimators=max(1, best_iteration),
+        early_stopping_rounds=None,
+    )
+    production_model.fit(features, labels, sample_weight=weights, verbose=False)
+    return production_model
 
 
 def walk_forward_report(
@@ -422,11 +444,10 @@ def _compute_shap_importance(
 ) -> list[dict[str, Any]]:
     """Compute mean absolute SHAP values for a trained XGBoost model.
 
-    Returns a list of dicts with 'feature' and 'mean_abs_shap', sorted by importance.
-    Returns empty list if SHAP is unavailable or computation fails.
+    Returns importance rows and an explicit status for the training bundle.
     """
     if not SHAP_AVAILABLE:
-        return []
+        return [], "unavailable"
 
     try:
         # Use a sample for efficiency
@@ -440,22 +461,26 @@ def _compute_shap_importance(
         explainer = shap.TreeExplainer(model)
         shap_values = explainer.shap_values(features_sample)
 
-        # For multiclass, shap_values is list of arrays; for binary, single array
+        # SHAP versions return either a list or (rows, features, classes).
         if isinstance(shap_values, list):
-            # Multiclass: average absolute SHAP across classes
             mean_abs_shap = np.mean([np.abs(sv).mean(axis=0) for sv in shap_values], axis=0)
+        elif np.asarray(shap_values).ndim == 3:
+            mean_abs_shap = np.abs(np.asarray(shap_values)).mean(axis=(0, 2))
         else:
-            # Binary
             mean_abs_shap = np.abs(shap_values).mean(axis=0)
+
+        if len(mean_abs_shap) != len(feature_names):
+            raise ValueError("SHAP feature dimension does not match feature names")
 
         importance_df = pd.DataFrame({
             "feature": feature_names,
             "mean_abs_shap": mean_abs_shap,
         }).sort_values("mean_abs_shap", ascending=False)
 
-        return importance_df.to_dict("records")
-    except Exception:
-        return []
+        return importance_df.to_dict("records"), "ok"
+    except Exception as exc:
+        LOGGER.exception("SHAP importance computation failed")
+        return [], f"error:{type(exc).__name__}"
 
 
 def train_models(
@@ -638,15 +663,58 @@ def train_models(
 test_start=test_dates.iloc[0].isoformat(),
     test_end=test_dates.iloc[-1].isoformat(),
     )
+    decision_threshold, decision_threshold_metrics = select_threshold_from_calibration(
+        y_result[calibration_slice],
+        apply_multiclass_temperature(calibration_result_probabilities, result_temperature),
+    )
+
+    selected_training = {
+        "result": {
+            "n_estimators": max(1, int(getattr(result_model, "best_iteration", -1)) + 1),
+            "optuna_report": getattr(result_model, "optuna_report", None),
+        },
+        "over_2_5": {
+            "n_estimators": max(1, int(getattr(over_model, "best_iteration", -1)) + 1),
+            "optuna_report": getattr(over_model, "optuna_report", None),
+        },
+        "btts": {
+            "n_estimators": max(1, int(getattr(btts_model, "best_iteration", -1)) + 1),
+            "optuna_report": getattr(btts_model, "optuna_report", None),
+        },
+    }
+    # Freeze validation-selected hyperparameters, stopping rounds, blend weights,
+    # and temperatures before fitting the production bundle on all pre-test data.
+    production_features = features.iloc[: test_slice.start]
+    production_weights = recency_sample_weights(
+        labels.iloc[: test_slice.start]["match_date"]
+    )
+    result_model = refit_production_model(
+        result_model,
+        features=production_features,
+        labels=y_result[: test_slice.start],
+        weights=production_weights,
+    )
+    over_model = refit_production_model(
+        over_model,
+        features=production_features.loc[:, BINARY_FEATURE_COLUMNS],
+        labels=y_over[: test_slice.start],
+        weights=production_weights,
+    )
+    btts_model = refit_production_model(
+        btts_model,
+        features=production_features.loc[:, BINARY_FEATURE_COLUMNS],
+        labels=y_btts[: test_slice.start],
+        weights=production_weights,
+    )
 
     # Compute SHAP feature importance (best effort, optional)
-    result_shap = _compute_shap_importance(
+    result_shap, result_shap_status = _compute_shap_importance(
         result_model, x_fit, list(FEATURE_COLUMNS)
     )
-    over_shap = _compute_shap_importance(
+    over_shap, over_shap_status = _compute_shap_importance(
         over_model, x_fit.loc[:, BINARY_FEATURE_COLUMNS], list(BINARY_FEATURE_COLUMNS)
     )
-    btts_shap = _compute_shap_importance(
+    btts_shap, btts_shap_status = _compute_shap_importance(
         btts_model, x_fit.loc[:, BINARY_FEATURE_COLUMNS], list(BINARY_FEATURE_COLUMNS)
     )
 
@@ -657,13 +725,27 @@ test_start=test_dates.iloc[0].isoformat(),
         "feature_columns": list(FEATURE_COLUMNS),
         "binary_feature_columns": list(BINARY_FEATURE_COLUMNS),
         "class_labels": ["home_win", "draw", "away_win"],
-        "trained_rows": len(features),
-        "training_end": labels["match_date"].iloc[-1].isoformat(),
+        "trained_rows": int(test_slice.start),
+        "training_end": labels["match_date"].iloc[test_slice.start - 1].isoformat(),
+        "fit_rows": int(test_slice.start),
+        "fit_end": labels["match_date"].iloc[test_slice.start - 1].isoformat(),
+        "evaluation_rows": len(x_test),
+        "test_start": labels["match_date"].iloc[test_slice.start].isoformat(),
+        "test_end": labels["match_date"].iloc[-1].isoformat(),
         "metrics": asdict(metrics),
+        "metric_conventions": {
+            "multiclass_brier": "sum_squared_class_errors_per_row_v2",
+            "legacy_note": "Older artifacts may contain element-wise mean Brier values; do not compare them numerically without conversion.",
+        },
         "shap_importance": {
             "result": result_shap,
             "over_2_5": over_shap,
             "btts": btts_shap,
+        },
+        "shap_status": {
+            "result": result_shap_status,
+            "over_2_5": over_shap_status,
+            "btts": btts_shap_status,
         },
         "calibration": {
             "method": "guarded_chronological_temperature_scaling",
@@ -681,17 +763,17 @@ test_start=test_dates.iloc[0].isoformat(),
             "result": {
                 "preset": result_preset,
                 "validation_log_loss": result_validation_loss,
-                "optuna_report": getattr(result_model, "optuna_report", None),
+                **selected_training["result"],
             },
             "over_2_5": {
                 "preset": over_preset,
                 "validation_log_loss": over_validation_loss,
-                "optuna_report": getattr(over_model, "optuna_report", None),
+                **selected_training["over_2_5"],
             },
             "btts": {
                 "preset": btts_preset,
                 "validation_log_loss": btts_validation_loss,
-                "optuna_report": getattr(btts_model, "optuna_report", None),
+                **selected_training["btts"],
             },
         },
         "blend": {
@@ -710,6 +792,13 @@ test_start=test_dates.iloc[0].isoformat(),
         "confidence_coverage": confidence_coverage_report(
             evaluated_labels, result_probabilities
         ),
+        "decision_policy": {
+            "source": "calibration_split",
+            "global_threshold": decision_threshold,
+            "league_overrides": {},
+            "calibration_metrics": decision_threshold_metrics,
+            "note": "Threshold selection is restricted to validation/calibration data; no test-set league overrides.",
+        },
         "_x_fit_snapshot": x_fit,
         "_x_val_snapshot": x_validation,
         "_x_fit_snapshot_meta": {

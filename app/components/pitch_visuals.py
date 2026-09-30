@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 import matplotlib
 
@@ -263,23 +262,23 @@ def render_player_radar(
         inner_circle_size=5,
     )
 
-    fig, ax = baker.make_pizza(
+    fig, _ax = baker.make_pizza(
         values,
         figsize=(7, 7),
         slice_colors=slice_colors,
-        kwargs_slices=dict(edgecolor="#222222", zorder=2, linewidth=1),
-        kwargs_params=dict(color="#e2e8f0", fontsize=10, va="center"),
-        kwargs_values=dict(
-            color="#ffffff",
-            fontsize=9,
-            zorder=3,
-            bbox=dict(
-                edgecolor="#222222",
-                facecolor="#1e293b",
-                boxstyle="round,pad=0.2",
-                lw=1,
-            ),
-        ),
+        kwargs_slices={"edgecolor": "#222222", "zorder": 2, "linewidth": 1},
+        kwargs_params={"color": "#e2e8f0", "fontsize": 10, "va": "center"},
+        kwargs_values={
+            "color": "#ffffff",
+            "fontsize": 9,
+            "zorder": 3,
+            "bbox": {
+                "edgecolor": "#222222",
+                "facecolor": "#1e293b",
+                "boxstyle": "round,pad=0.2",
+                "lw": 1,
+            },
+        },
     )
 
     fig.text(

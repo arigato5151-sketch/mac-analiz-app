@@ -4,32 +4,41 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-import joblib
 import numpy as np
+import pandas as pd
 
 from config.settings import PROJECT_ROOT, UPCOMING_HORIZON_DAYS, get_settings
-from db.db_client import DatabaseError, SupabaseRestClient
 from data_pipeline.odds import attach_pre_match_odds
-from models.artifact_store import ArtifactStoreError, download_model_artifacts
+from db.db_client import DatabaseError, SupabaseRestClient
+from models.artifact_store import (
+    ArtifactStoreError,
+    download_model_artifacts,
+    load_verified_joblib,
+)
 from models.calibration import apply_binary_temperature, apply_multiclass_temperature
 from models.feature_engineering import (
     FEATURE_COLUMNS,
     build_upcoming_features,
     build_upcoming_poisson_predictions,
-    estimate_league_dixon_coles_rhos,
 )
-from models.market_forecast import derive_market_probabilities
 from models.half_time_model import predict_half_time_markets
-from models.train_model import load_historical_matches, normalize_multiclass_probabilities
+from models.market_forecast import derive_market_probabilities
+from models.train_model import (
+    load_historical_matches,
+    normalize_multiclass_probabilities,
+)
 from monitoring.feature_snapshot import (
     CURRENT_SNAPSHOT_NAME,
     save_feature_snapshot,
     snapshot_filename,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _availability_at(
@@ -301,8 +310,8 @@ def generate_prediction_rows(
                 model_version=model_version,
                 output_dir=output_dir,
             )
-        except Exception:
-            pass  # Non-blocking: never fail live predictions due to telemetry write
+        except Exception as exc:
+            LOGGER.warning("Inference feature snapshot skipped: %s", type(exc).__name__)
 
     binary_columns = list(bundle.get("binary_feature_columns") or expected_columns)
     if not binary_columns or not set(binary_columns).issubset(FEATURE_COLUMNS):
@@ -425,7 +434,7 @@ def main() -> None:
     settings = get_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     model_path = resolve_model_path(args.model)
-    bundle = joblib.load(model_path)
+    bundle = load_verified_joblib(model_path)
     now = datetime.now(timezone.utc)
     historical = load_historical_matches(db)
     upcoming = load_upcoming_matches(db, now=now, horizon_days=args.days)

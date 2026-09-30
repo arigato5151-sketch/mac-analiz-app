@@ -7,6 +7,8 @@ __pycache__/
 .ruff_cache/
 .playwright-mcp/
 .auto_loop/
+opencode.json
+auto_loop.ps1
 .venv/
 venv/
 dist/

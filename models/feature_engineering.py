@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -10,9 +11,17 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from models.poisson_model import PoissonPrediction, predict_score_probabilities, estimate_league_dixon_coles_rhos
-from data_pipeline.odds import vig_free_market_probabilities, multi_bookmaker_vig_free_probabilities, MultiBookmakerOdds
 from config.leagues import home_advantage_for_league
+from data_pipeline.odds import (
+    vig_free_market_probabilities,
+)
+from models.poisson_model import (
+    PoissonPrediction,
+    estimate_league_dixon_coles_rhos,
+    predict_score_probabilities,
+)
+
+LOGGER = logging.getLogger(__name__)
 
 
 FEATURE_COLUMNS: tuple[str, ...] = (
@@ -292,10 +301,28 @@ def _result_label(home_score: int, away_score: int) -> int:
     return 2
 
 
+def _month_key(value: object) -> tuple[int, int]:
+    timestamp = _match_datetime_utc(value)
+    return timestamp.year, timestamp.month
+
+
+def _season_key(row: dict[str, Any]) -> str:
+    explicit = row.get("season")
+    if explicit not in (None, ""):
+        return str(explicit)
+    match_at = _match_datetime_utc(row["match_date"])
+    # European-style seasons roll over in July; explicit season values take precedence.
+    return f"{match_at.year if match_at.month >= 7 else match_at.year - 1}-{match_at.year + 1 if match_at.month >= 7 else match_at.year}"
+
+
 class CausalFeatureState:
     """Mutable chronological state shared by training and live inference."""
 
-    def __init__(self, league_rhos: dict[int, float] | None = None) -> None:
+    def __init__(
+        self,
+        league_rhos: dict[int, float] | None = None,
+        league_initial_elos: dict[int, float] | None = None,
+    ) -> None:
         self.states: defaultdict[int, TeamState] = defaultdict(TeamState)
         self.h2h: defaultdict[tuple[int, int], deque[tuple[int, int]]] = defaultdict(
             lambda: deque(maxlen=5)
@@ -303,7 +330,32 @@ class CausalFeatureState:
         self.league_results: defaultdict[int, deque[int]] = defaultdict(
             lambda: deque(maxlen=200)
         )
+        self.league_goals: defaultdict[int, deque[tuple[int, int]]] = defaultdict(
+            lambda: deque(maxlen=200)
+        )
         self.league_rhos: dict[int, float] = league_rhos or {}
+        self.league_initial_elos = league_initial_elos or {}
+        self._league_seasons: dict[int, str] = {}
+        self._team_leagues: dict[int, int] = {}
+
+    def _prepare_season(self, row: dict[str, Any]) -> None:
+        league_id = int(row["league_id"])
+        season = _season_key(row)
+        previous = self._league_seasons.get(league_id)
+        initial = float(self.league_initial_elos.get(league_id, 1500.0))
+        for side in ("home", "away"):
+            team_id = int(row[f"{side}_team_id"])
+            if team_id not in self._team_leagues:
+                self.states[team_id].elo = initial
+                self._team_leagues[team_id] = league_id
+        if previous == season:
+            return
+        for team_id, team_league in self._team_leagues.items():
+            if team_league == league_id:
+                self.states[team_id].elo = regress_elo_to_league_mean(
+                    self.states[team_id].elo, initial
+                )
+        self._league_seasons[league_id] = season
 
     def poisson_baseline(self, row: dict[str, Any]):
         """Return the causal Poisson baseline available before a target match."""
@@ -316,10 +368,19 @@ class CausalFeatureState:
         home_lambda = float(np.clip((home_for + away_against) / 2, 0.05, 6.0))
         away_lambda = float(np.clip((away_for + home_against) / 2, 0.05, 6.0))
         league_id = int(row.get("league_id", 0))
+        goals = self.league_goals[league_id]
+        if goals:
+            league_home = _safe_mean([float(home) for home, _ in goals], 1.25)
+            league_away = _safe_mean([float(away) for _, away in goals], 1.25)
+            # Stabilize sparse team histories without letting the league mean dominate.
+            shrinkage = min(0.35, 8.0 / (8.0 + len(goals)))
+            home_lambda = (1.0 - shrinkage) * home_lambda + shrinkage * league_home
+            away_lambda = (1.0 - shrinkage) * away_lambda + shrinkage * league_away
         rho = self.league_rhos.get(league_id, 0.0)
         return predict_score_probabilities(home_lambda, away_lambda, dixon_coles_rho=rho)
 
     def feature_row(self, row: dict[str, Any]) -> dict[str, float]:
+        self._prepare_season(row)
         home_id = int(row["home_team_id"])
         away_id = int(row["away_team_id"])
         match_at = _match_datetime_utc(row["match_date"])
@@ -345,12 +406,13 @@ class CausalFeatureState:
             opening_raw = row.get("market_opening_odds")
             opening_blended = vig_free_market_probabilities(opening_raw) if opening_raw else None
 
+        # Keep market features neutral when no quote exists; Poisson is exposed separately.
         market_features = market_blended or {
-            "market_implied_home_win": poisson.prob_home_win,
-            "market_implied_draw": poisson.prob_draw,
-            "market_implied_away_win": poisson.prob_away_win,
-            "market_implied_over_2_5": poisson.prob_over_2_5,
-            "market_implied_btts": poisson.prob_btts,
+            "market_implied_home_win": 1 / 3,
+            "market_implied_draw": 1 / 3,
+            "market_implied_away_win": 1 / 3,
+            "market_implied_over_2_5": 0.5,
+            "market_implied_btts": 0.5,
         }
 
         # Also update opening_market to use blended opening odds for market move features
@@ -478,6 +540,7 @@ class CausalFeatureState:
         }
 
     def update(self, row: dict[str, Any]) -> None:
+        self._prepare_season(row)
         home_id = int(row["home_team_id"])
         away_id = int(row["away_team_id"])
         home_score = int(row["home_score"])
@@ -485,6 +548,9 @@ class CausalFeatureState:
         match_at = datetime.fromisoformat(str(row["match_date"]).replace("Z", "+00:00"))
         home = self.states[home_id]
         away = self.states[away_id]
+        league_id = int(row["league_id"])
+        self._team_leagues[home_id] = league_id
+        self._team_leagues[away_id] = league_id
 
         home_points = 3 if home_score > away_score else 1 if home_score == away_score else 0
         away_points = 3 if away_score > home_score else 1 if home_score == away_score else 0
@@ -499,7 +565,7 @@ class CausalFeatureState:
         score = 1.0 if home_score > away_score else 0.5 if home_score == away_score else 0.0
         _update_elo(
             home, away, score, goal_diff=abs(home_score - away_score),
-            home_advantage=home_advantage_for_league(int(row["league_id"])),
+            home_advantage=home_advantage_for_league(league_id),
         )
         home.last_match_at = match_at
         away.last_match_at = match_at
@@ -507,9 +573,30 @@ class CausalFeatureState:
         self.h2h[tuple(sorted((home_id, away_id)))].append(
             (winner, int(home_score == away_score))
         )
-        self.league_results[int(row["league_id"])].append(
+        self.league_results[league_id].append(
             _result_label(home_score, away_score)
         )
+        self.league_goals[league_id].append((home_score, away_score))
+
+
+def _causal_league_rhos(matches: list[dict[str, Any]]) -> dict[int, float]:
+    """Estimate rho from the same causal lambdas used by Poisson inference."""
+    state = CausalFeatureState()
+    observed: list[dict[str, Any]] = []
+    last_month: tuple[int, int] | None = None
+    for row in matches:
+        month = _month_key(row["match_date"])
+        if last_month != month and observed:
+            state.league_rhos = estimate_league_dixon_coles_rhos(observed)
+        baseline = state.poisson_baseline(row)
+        state.update(row)
+        observed.append({
+            **row,
+            "home_expected_goals": baseline.home_expected_goals,
+            "away_expected_goals": baseline.away_expected_goals,
+        })
+        last_month = month
+    return estimate_league_dixon_coles_rhos(observed) if observed else {}
 
 
 def build_training_dataset(
@@ -532,12 +619,17 @@ def build_training_dataset(
     feature_rows: list[dict[str, float]] = []
     label_rows: list[dict[str, Any]] = []
     observed_matches: list[dict[str, Any]] = []
+    last_rho_month: tuple[int, int] | None = None
     for row in valid:
         home_score = int(row["home_score"])
         away_score = int(row["away_score"])
         match_at = datetime.fromisoformat(str(row["match_date"]).replace("Z", "+00:00"))
         if league_rhos is None:
-            state.league_rhos = estimate_league_dixon_coles_rhos(observed_matches)
+            current_month = _month_key(row["match_date"])
+            if current_month != last_rho_month and observed_matches:
+                state.league_rhos = estimate_league_dixon_coles_rhos(observed_matches)
+            last_rho_month = current_month
+        baseline = state.poisson_baseline(row)
         feature_rows.append(state.feature_row(row))
         label_rows.append(
             {
@@ -549,7 +641,11 @@ def build_training_dataset(
             }
         )
         state.update(row)
-        observed_matches.append(row)
+        observed_matches.append({
+            **row,
+            "home_expected_goals": baseline.home_expected_goals,
+            "away_expected_goals": baseline.away_expected_goals,
+        })
 
     features = pd.DataFrame(feature_rows, columns=FEATURE_COLUMNS)
     labels = pd.DataFrame(label_rows)
@@ -580,7 +676,7 @@ def build_upcoming_features(
         raise ValueError("Completed history and upcoming matches are required")
 
     if league_rhos is None:
-        league_rhos = estimate_league_dixon_coles_rhos(completed)
+        league_rhos = _causal_league_rhos(completed)
 
     state = CausalFeatureState(league_rhos=league_rhos)
     for row in completed:
@@ -614,7 +710,7 @@ def build_upcoming_poisson_predictions(
         raise ValueError("Completed history and upcoming matches are required")
 
     if league_rhos is None:
-        league_rhos = estimate_league_dixon_coles_rhos(completed)
+        league_rhos = _causal_league_rhos(completed)
 
     state = CausalFeatureState(league_rhos=league_rhos)
     for row in completed:

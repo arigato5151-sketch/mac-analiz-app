@@ -14,6 +14,8 @@ artifacts without any repository write permission.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -23,7 +25,6 @@ import requests
 
 from config.settings import get_settings
 
-
 LOGGER = logging.getLogger(__name__)
 STORAGE_BUCKET = "models"
 DEFAULT_PREFIX = "model_artifacts"
@@ -31,6 +32,50 @@ DEFAULT_PREFIX = "model_artifacts"
 
 class ArtifactStoreError(RuntimeError):
     """Raised when a storage operation fails and no local fallback exists."""
+
+
+class ArtifactIntegrityError(ArtifactStoreError):
+    """Raised when an artifact lacks a trusted manifest or fails verification."""
+
+
+MANIFEST_NAME = "artifact_manifest.json"
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_artifact_manifest(directory: Path | str) -> dict[str, object]:
+    root = Path(directory)
+    return {
+        "version": 1,
+        "artifacts": {
+            path.name: _sha256(path)
+            for path in sorted(root.glob("*.joblib"))
+            if path.is_file()
+        },
+    }
+
+
+def load_verified_joblib(path: Path | str, *, manifest_path: Path | str | None = None) -> dict[str, Any]:
+    """Verify a joblib against its manifest before deserializing it."""
+    artifact_path = Path(path)
+    manifest = Path(manifest_path) if manifest_path else artifact_path.parent / MANIFEST_NAME
+    if not manifest.is_file():
+        raise ArtifactIntegrityError(f"Artifact manifest is missing: {manifest}")
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        expected = payload["artifacts"][artifact_path.name]
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        raise ArtifactIntegrityError(f"No valid manifest entry for {artifact_path.name}") from exc
+    actual = _sha256(artifact_path)
+    if actual != expected:
+        raise ArtifactIntegrityError(f"Artifact checksum mismatch for {artifact_path.name}")
+    return joblib.load(artifact_path)
 
 
 def _storage_url() -> str:
@@ -147,6 +192,11 @@ def list_models(prefix: str = DEFAULT_PREFIX) -> list[str]:
 def push_local_models(*, dest_dir: Path | str) -> list[str]:
     """Upload model artifacts, metadata, and feature snapshots from this directory."""
     directory = Path(dest_dir)
+    manifest_path = directory / MANIFEST_NAME
+    manifest_path.write_text(
+        json.dumps(build_artifact_manifest(directory), indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
     uploads: list[str] = []
     # 1. Joblib models and sibling JSON metadata
     for path in sorted(directory.glob("*.joblib")):
@@ -161,6 +211,8 @@ def push_local_models(*, dest_dir: Path | str) -> list[str]:
         sibling = path.with_suffix(".json")
         if sibling.is_file():
             uploads.append(upload_model(sibling, name=sibling.name))
+
+    uploads.append(upload_model(manifest_path, name=MANIFEST_NAME))
 
     return uploads
 
@@ -196,10 +248,15 @@ def download_model_artifacts(
         )
         raise
 
+    try:
+        downloaded["manifest"] = download_model(MANIFEST_NAME, dest_dir=directory)
+    except ArtifactStoreError as exc:
+        raise ArtifactIntegrityError(f"Artifact manifest '{MANIFEST_NAME}' is unavailable") from exc
+
     snapshot_version = base_name
     if base_name == "latest":
         try:
-            bundle = joblib.load(downloaded["model"])
+            bundle = load_verified_joblib(downloaded["model"], manifest_path=downloaded["manifest"])
             stored_version = str(bundle.get("model_version", "")).strip()
             if stored_version:
                 snapshot_version = stored_version

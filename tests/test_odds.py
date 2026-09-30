@@ -4,7 +4,11 @@ from datetime import datetime, timezone
 
 import pytest
 
-from data_pipeline.odds import attach_pre_match_odds, closing_line_value, parse_match_odds
+from data_pipeline.odds import (
+    attach_pre_match_odds,
+    closing_line_value,
+    parse_match_odds,
+)
 from data_pipeline.value_bets import analyze_value_bets
 from notifications.pre_match import pre_match_message
 

@@ -7,7 +7,6 @@ from typing import Any
 
 from models.feature_engineering import TeamState
 
-
 STATUS_LABELS = {
     "injured": "sakat",
     "suspended": "cezalı",

@@ -5,6 +5,7 @@ from models.shadow import (
     MINIMUM_PROMOTION_ACCURACY,
     MINIMUM_PROMOTION_SAMPLE,
     evaluate_shadow_predictions,
+    paired_market_comparison,
     promotion_decision,
 )
 
@@ -150,3 +151,10 @@ def test_new_gate_checks_stay_silent_when_metrics_are_unavailable() -> None:
         production_accuracy=0.55,
         sample_size=MINIMUM_PROMOTION_SAMPLE,
     )[0] is True
+
+
+def test_paired_market_comparison_requires_evidence_and_bootstrap_advantage() -> None:
+    assert paired_market_comparison([(0.5, 0.5)] * 199)["status"] == "insufficient_evidence"
+    result = paired_market_comparison([(0.40, 0.42)] * 200, bootstrap_samples=100)
+    assert result["status"] == "passed"
+    assert result["bootstrap_ci_upper"] < 0

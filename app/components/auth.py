@@ -2,30 +2,57 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import requests
 import streamlit as st
 
 from config.settings import get_public_supabase_settings
-from db.db_client import SupabaseRestClient
-
-try:
-    from db.db_client import AuthenticatedSupabaseRestClient
-except ImportError:  # Supports a stale Streamlit Cloud build during redeploy.
-    class AuthenticatedSupabaseRestClient(SupabaseRestClient):
-        """RLS-scoped client fallback for deployments with an older db module."""
-
-        def __init__(self, url: str, anon_key: str, access_token: str, **kwargs: Any) -> None:
-            super().__init__(url, anon_key, **kwargs)
-            if not access_token:
-                raise ValueError("Supabase access token is required")
-            self._headers["Authorization"] = f"Bearer {access_token}"
+from db.db_client import AuthenticatedSupabaseRestClient
 
 
 def current_access_token() -> str | None:
+    refresh_session()
     token = st.session_state.get("supabase_access_token")
     return str(token) if token else None
+
+
+def _store_session(payload: dict[str, Any]) -> bool:
+    access_token = str(payload.get("access_token") or "")
+    refresh_token = str(payload.get("refresh_token") or "")
+    if not access_token or not refresh_token:
+        return False
+    st.session_state["supabase_access_token"] = access_token
+    st.session_state["supabase_refresh_token"] = refresh_token
+    expires_in = int(payload.get("expires_in") or 3600)
+    st.session_state["supabase_access_expires_at"] = time.time() + max(60, expires_in - 30)
+    user = payload.get("user") or {}
+    if isinstance(user, dict) and user.get("id"):
+        st.session_state["supabase_user_id"] = str(user["id"])
+    return True
+
+
+def refresh_session() -> bool:
+    refresh_token = st.session_state.get("supabase_refresh_token")
+    expires_at = float(st.session_state.get("supabase_access_expires_at") or 0)
+    if not refresh_token or time.time() < expires_at:
+        return bool(st.session_state.get("supabase_access_token"))
+    settings = get_public_supabase_settings()
+    try:
+        response = requests.post(
+            f"{settings.supabase_url}/auth/v1/token?grant_type=refresh_token",
+            headers={"apikey": settings.supabase_anon_key},
+            json={"refresh_token": str(refresh_token)},
+            timeout=settings.request_timeout_seconds,
+        )
+        if not response.ok or not _store_session(response.json()):
+            sign_out()
+            return False
+        return True
+    except (requests.RequestException, ValueError, TypeError):
+        sign_out()
+        return False
 
 
 def sign_in(email: str, password: str) -> tuple[bool, str]:
@@ -43,11 +70,9 @@ def sign_in(email: str, password: str) -> tuple[bool, str]:
         access_token = str(payload.get("access_token") or "")
         if not access_token:
             return False, "Giriş yanıtı geçersiz."
-        st.session_state["supabase_access_token"] = access_token
+        if not _store_session(payload):
+            return False, "GiriÅŸ yanÄ±tÄ± geÃ§ersiz."
         st.session_state["supabase_user_email"] = email.strip()
-        user = payload.get("user") or {}
-        if isinstance(user, dict) and user.get("id"):
-            st.session_state["supabase_user_id"] = str(user["id"])
         return True, "Giriş yapıldı."
     except requests.RequestException:
         return False, "Kimlik doğrulama servisine ulaşılamadı."
@@ -55,6 +80,8 @@ def sign_in(email: str, password: str) -> tuple[bool, str]:
 
 def sign_out() -> None:
     st.session_state.pop("supabase_access_token", None)
+    st.session_state.pop("supabase_refresh_token", None)
+    st.session_state.pop("supabase_access_expires_at", None)
     st.session_state.pop("supabase_user_email", None)
     st.session_state.pop("supabase_user_id", None)
 

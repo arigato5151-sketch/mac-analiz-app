@@ -15,7 +15,6 @@ from models.optimizer import (
     OptimizationResult,
     _clean_probabilities,
     binary_brier_score,
-    build_candidate_xgb,
     compute_composite_score,
     multiclass_brier_score,
     optimize_xgb_hyperparameters,
@@ -117,7 +116,7 @@ def test_probability_normalization_eliminates_sklearn_warning():
 
     with warnings.catch_warnings(record=True) as recorded:
         warnings.simplefilter("always")
-        score, metrics = compute_composite_score(y_true, unnormalized_probs, binary=False)
+        score, _metrics = compute_composite_score(y_true, unnormalized_probs, binary=False)
         assert score > 0
 
     sum_to_one_warnings = [

@@ -1,7 +1,7 @@
 """Upcoming fixtures with league and day filters."""
 
-from datetime import datetime
 import sys
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -22,7 +22,6 @@ from app.components.ui import (
     page_header,
     section_intro,
 )
-
 
 configure_page("Bugünün Maçları")
 page_header(

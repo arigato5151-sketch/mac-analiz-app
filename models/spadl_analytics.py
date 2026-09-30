@@ -14,7 +14,6 @@ main prediction pipeline and therefore cannot degrade live accuracy.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -211,9 +210,6 @@ def aggregate_player_ratings(
         )
 
     df = actions_with_xt.copy()
-    agg: dict[str, Any] = {
-        "xt_gain": ["sum", "count", "mean"],
-    }
     grouped = df.groupby(["player_id", "team_id"])["xt_gain"].agg(
         total_xt="sum",
         action_count="count",

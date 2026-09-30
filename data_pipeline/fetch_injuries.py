@@ -11,7 +11,6 @@ from config.settings import get_settings
 from data_pipeline.api_client import ApiFootballClient
 from db.db_client import SupabaseRestClient
 
-
 MAX_PLAUSIBLE_UNAVAILABLE = 15
 
 

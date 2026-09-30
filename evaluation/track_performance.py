@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import json
-from math import log
 from datetime import datetime, timedelta, timezone
+from math import log
 from typing import Any
 
 from config.settings import get_settings
 from data_pipeline.isotime import parse_iso_datetime
 from db.db_client import SupabaseRestClient
 from models.market_forecast import evaluate_market_probabilities
-
 
 RESULT_LABELS = ("home_win", "draw", "away_win")
 PROBABILITY_COLUMNS = ("prob_home_win", "prob_draw", "prob_away_win")
@@ -168,7 +167,7 @@ def _select_rows_for_match_ids(
         raise ValueError("batch_size must be positive")
 
     rows: list[dict[str, Any]] = []
-    unique_match_ids = sorted(set(int(match_id) for match_id in match_ids))
+    unique_match_ids = sorted({int(match_id) for match_id in match_ids})
     for start in range(0, len(unique_match_ids), batch_size):
         batch = unique_match_ids[start : start + batch_size]
         batch_filter = f"in.({','.join(str(match_id) for match_id in batch)})"
@@ -218,7 +217,7 @@ def evaluate_pending_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]
         ),
         match_ids=pending_match_ids,
     )
-    from notifications.pre_match import SNAPSHOT_TYPE, LEGACY_SNAPSHOT_TYPES
+    from notifications.pre_match import LEGACY_SNAPSHOT_TYPES, SNAPSHOT_TYPE
 
     snapshots = _select_rows_for_match_ids(
         db,

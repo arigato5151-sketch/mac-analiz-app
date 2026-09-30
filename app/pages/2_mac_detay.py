@@ -13,11 +13,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.components.availability import summarize_availability
 from app.components.analysis_report import build_match_analysis_report
 from app.components.auth import current_user_id, get_user_db, render_auth_panel
+from app.components.availability import summarize_availability
 from app.components.commentary import summarize_absences, summarize_form
-from app.components.data import load_confirmed_lineups, load_match_availability, load_match_baseline, load_odds_history, load_upcoming_dashboard
+from app.components.data import (
+    load_confirmed_lineups,
+    load_match_availability,
+    load_match_baseline,
+    load_odds_history,
+    load_upcoming_dashboard,
+)
 from app.components.decision_board import requested_match_id
 from app.components.freshness import (
     FRESHNESS_CURRENT,
@@ -27,7 +33,6 @@ from app.components.freshness import (
 from app.components.match_visuals import build_form_comparison, build_radar_comparison
 from app.components.model_registry import (
     active_production_version,
-    status_label_tr,
     version_label,
 )
 from app.components.pitch_visuals import (
@@ -43,11 +48,13 @@ from app.components.ui import (
     prediction_signal,
     probability_percent,
 )
-from data_pipeline.match_commentary import MatchCommentaryError, generate_match_commentary
-from models.market_forecast import derive_market_probabilities, format_market_summary
+from data_pipeline.match_commentary import (
+    MatchCommentaryError,
+    generate_match_commentary,
+)
 from models.decision_policy import minimum_confidence_for_league
+from models.market_forecast import derive_market_probabilities, format_market_summary
 from models.value_analysis import assess_market_value
-
 
 LOGGER = logging.getLogger(__name__)
 CHART_CONFIG = {"displayModeBar": False, "displaylogo": False}

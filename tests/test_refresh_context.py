@@ -6,8 +6,8 @@ from typing import Any
 import pytest
 
 from data_pipeline.fetch_injuries import (
-    AvailabilityDataQualityError,
     MAX_PLAUSIBLE_UNAVAILABLE,
+    AvailabilityDataQualityError,
     sync_injuries,
     transform_injuries,
 )

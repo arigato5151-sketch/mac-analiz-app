@@ -16,8 +16,6 @@ from config.settings import PROJECT_ROOT, get_settings
 from db.db_client import SupabaseRestClient
 from monitoring.drift_service import DriftMonitoringService, DriftReportSummary
 from monitoring.feature_snapshot import (
-    CURRENT_SNAPSHOT_NAME,
-    REFERENCE_SNAPSHOT_NAME,
     extract_snapshot_metadata,
     load_feature_snapshot,
     resolve_snapshot_path,
@@ -139,8 +137,8 @@ def run_drift_check(
             "current_period": cur_period,
             "critical_alerts": (
                 [
-                    f"Feature snapshots missing: ref={'found' if ref_df is not None else 'missing'}, "
-                    f"cur={'found' if cur_df is not None else 'missing'}"
+                    (f"Feature snapshots missing: ref={'found' if ref_df is not None else 'missing'}, "
+                    f"cur={'found' if cur_df is not None else 'missing'}")
                 ]
                 if status_label == "FAILED"
                 else []

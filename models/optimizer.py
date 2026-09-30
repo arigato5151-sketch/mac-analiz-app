@@ -13,6 +13,9 @@ from sklearn.metrics import accuracy_score, log_loss
 from xgboost import XGBClassifier
 
 from models.calibration import expected_calibration_error
+from models.calibration import (
+    multiclass_brier_score as _canonical_multiclass_brier_score,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -101,8 +104,7 @@ def _clean_probabilities(probabilities: np.ndarray, *, binary: bool) -> np.ndarr
 def multiclass_brier_score(y_true: np.ndarray, probabilities: np.ndarray) -> float:
     """Compute multiclass Brier score sum((p - y)^2)."""
     clean_p = _clean_probabilities(probabilities, binary=False)
-    one_hot = np.eye(clean_p.shape[1], dtype=float)[y_true]
-    return float(np.mean(np.sum((clean_p - one_hot) ** 2, axis=1)))
+    return _canonical_multiclass_brier_score(y_true, clean_p)
 
 
 def binary_brier_score(y_true: np.ndarray, probabilities: np.ndarray) -> float:

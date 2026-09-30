@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-from html import escape
 import json
+from html import escape
 
 import pandas as pd
 import streamlit as st
 
+from models.decision_policy import MINIMUM_ACTIONABLE_1X2_CONFIDENCE
 from models.market_forecast import (
     MINIMUM_DOUBLE_CHANCE_CONFIDENCE,
     MINIMUM_GOAL_MARKET_CONFIDENCE,
 )
-from models.decision_policy import MINIMUM_ACTIONABLE_1X2_CONFIDENCE
-
 
 OUTCOME_COLUMNS: tuple[tuple[str, str], ...] = (
     ("prob_home_win", "Ev kazanır"),
@@ -144,7 +143,6 @@ def prediction_signal(row: pd.Series) -> tuple[str, float | None, str]:
         return "Tahmin bekleniyor", None, "—"
 
     market, probability = max(candidates, key=lambda item: item[1])
-    confidence = "Güçlü" if probability >= 0.60 else "Orta" if probability >= 0.50 else "Düşük"
     return market, probability, confidence_label(probability)
 
 
@@ -205,7 +203,7 @@ def diversified_prediction_cells(row: pd.Series) -> dict[str, str]:
 
         for index, score in enumerate((raw_markets.get("correct_scores") or [])[:3], 1):
             cells[f"Skor {index}"] = (
-                f"{str(score['score'])} · {probability_percent(float(score['probability']))}"
+                f"{score['score']!s} · {probability_percent(float(score['probability']))}"
             )
     except (KeyError, TypeError, ValueError):
         # A malformed historical row must not break the entire dashboard.
@@ -224,7 +222,6 @@ def outcome_prediction_signal(row: pd.Series) -> tuple[str, float | None, str]:
         return "Tahmin bekleniyor", None, "—"
 
     market, probability = max(candidates, key=lambda item: item[1])
-    confidence = "Güçlü" if probability >= 0.60 else "Orta" if probability >= 0.50 else "Düşük"
     return market, probability, confidence_label(probability)
 
 

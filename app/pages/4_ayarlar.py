@@ -13,7 +13,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.components.ui import configure_page, page_header, section_intro
 from config.leagues import TRACKED_LEAGUES
 
-
 configure_page("Ayarlar")
 page_header(
     "Ayarlar ve veri kapsamı",

@@ -45,7 +45,7 @@ def diversified_coupon_rows(
     for row in rows:
         if not isinstance(row, dict):
             continue
-        for assessment in row.get("assessments", [row["best"]]):
+        for assessment in row.get("assessments") or ([row["best"]] if "best" in row else []):
             try:
                 probability = float(assessment.model_probability)
                 expected_value = float(assessment.expected_value)

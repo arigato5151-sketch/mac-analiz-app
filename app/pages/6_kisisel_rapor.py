@@ -14,7 +14,6 @@ from app.components.auth import get_user_db, render_auth_panel
 from app.components.personal_report import settle_outcome_decision, summarize_decisions
 from app.components.ui import configure_page, disclaimer, page_header
 
-
 configure_page("Kişisel Rapor")
 page_header(
     "Kişisel karar raporu",

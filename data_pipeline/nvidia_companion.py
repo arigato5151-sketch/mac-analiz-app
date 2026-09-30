@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ FALLBACK_NVIDIA_MODELS = ("nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-
 NVIDIA_REQUEST_TIMEOUT = 60.0
 NVIDIA_MAX_RETRIES = 2
 NVIDIA_RETRY_DELAY_S = 2.0
+LOGGER = logging.getLogger(__name__)
 
 
 class NvidiaCompanionError(RuntimeError):
@@ -48,8 +50,8 @@ def get_nvidia_api_key(
         configured = str(st.secrets.get("NVIDIA_API_KEY", "")).strip()
         if configured:
             return configured
-    except Exception:  # Streamlit is optional for background pipeline execution.
-        pass
+    except Exception as exc:  # Streamlit is optional for background pipeline execution.
+        LOGGER.debug("Streamlit NVIDIA secret lookup unavailable: %s", type(exc).__name__)
 
     raise NvidiaCompanionError(
         "NVIDIA_API_KEY is not configured in the environment, .env, or Streamlit secrets",

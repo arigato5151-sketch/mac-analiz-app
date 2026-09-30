@@ -12,7 +12,6 @@ from db.db_client import SupabaseRestClient
 from models.decision_policy import minimum_confidence_for_league, select_1x2
 from notifications.telegram import TelegramError, send_telegram_message
 
-
 MAX_DELIVERIES_PER_RUN = 20
 
 
@@ -150,7 +149,7 @@ def run_final_result_notifications() -> dict[str, int | str]:
             filters={"id": f"in.({prediction_ids})"},
         )
     }
-    from notifications.pre_match import SNAPSHOT_TYPE, LEGACY_SNAPSHOT_TYPES
+    from notifications.pre_match import LEGACY_SNAPSHOT_TYPES, SNAPSHOT_TYPE
 
     snapshots = {
         int(row["match_id"]): row

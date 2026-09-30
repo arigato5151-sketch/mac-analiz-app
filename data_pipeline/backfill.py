@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 from config.leagues import LEAGUES_BY_ID, TRACKED_LEAGUE_IDS
 from config.settings import get_settings

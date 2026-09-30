@@ -1,11 +1,23 @@
-from models.value_analysis import MIN_VALUE_EV, assess_market_value, best_value_assessment, derive_combo_probabilities, evaluate_flat_stakes, fractional_kelly_stake, value_confidence_status
+import pytest
+
 from models.half_time_model import predict_half_time_markets
+from models.value_analysis import (
+    MIN_VALUE_EV,
+    assess_market_value,
+    best_value_assessment,
+    derive_combo_probabilities,
+    evaluate_flat_stakes,
+    fractional_kelly_stake,
+    value_confidence_status,
+)
 
 
 def test_derive_full_match_combo_probabilities():
-    result = derive_combo_probabilities({"home_win": .5, "over_2_5": .6, "btts_yes": .4})
-    assert result["home_win_over_2_5"] == .3
-    assert result["home_win_btts_yes"] == .2
+    assert derive_combo_probabilities({"home_win": .5, "over_2_5": .6}) == {}
+    matrix = [[.22, .10, .05], [.10, .20, .10], [.05, .10, .08]]
+    result = derive_combo_probabilities({}, score_matrix=matrix)
+    assert result["home_win_over_2_5"] == pytest.approx(.10)
+    assert result["home_win_btts_yes"] == pytest.approx(.10)
 
 
 def test_half_time_model_returns_normalized_result_markets():
@@ -32,7 +44,7 @@ def test_invalid_or_missing_quotes_are_ignored():
         {"home_win": 1.80, "draw": 1.0, "away_win": 3.20, "unused": 9.0},
     )
 
-    assert [item.key for item in result] == ["home_win", "away_win"]
+    assert result == []
 
 
 def test_flat_stake_performance_uses_decimal_odds():

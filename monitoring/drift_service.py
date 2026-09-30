@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
 import pandas as pd
 from scipy import stats
-
-from models.calibration import expected_calibration_error
 
 LOGGER = logging.getLogger(__name__)
 
@@ -404,8 +401,8 @@ class DriftMonitoringService:
                     current_brier = float(
                         performance_evaluations["brier_score"].astype(float).mean()
                     )
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    LOGGER.warning("Current Brier metric unavailable: %s", type(exc).__name__)
 
             current_acc: float | None = None
             if "was_correct" in performance_evaluations.columns:
@@ -413,8 +410,8 @@ class DriftMonitoringService:
                     current_acc = float(
                         performance_evaluations["was_correct"].astype(float).mean()
                     )
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    LOGGER.warning("Current accuracy metric unavailable: %s", type(exc).__name__)
 
             performance_drift = {
                 "sample_size": ll_result["sample_size"],
@@ -457,16 +454,16 @@ class DriftMonitoringService:
                                 seg_brier = round(
                                     float(group["brier_score"].astype(float).mean()), 4
                                 )
-                            except Exception:  # noqa: BLE001
-                                pass
+                            except Exception as exc:  # noqa: BLE001
+                                LOGGER.warning("Segment Brier metric unavailable: %s", type(exc).__name__)
                         seg_acc: float | None = None
                         if "was_correct" in group.columns:
                             try:
                                 seg_acc = round(
                                     float(group["was_correct"].astype(float).mean()), 4
                                 )
-                            except Exception:  # noqa: BLE001
-                                pass
+                            except Exception as exc:  # noqa: BLE001
+                                LOGGER.warning("Segment accuracy metric unavailable: %s", type(exc).__name__)
                         segment_metrics.append(
                             {
                                 "segment_type": "league",

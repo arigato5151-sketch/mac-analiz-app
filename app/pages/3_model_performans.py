@@ -33,7 +33,6 @@ from config.leagues import LEAGUES_BY_ID
 from models.decision_policy import MINIMUM_ACTIONABLE_1X2_CONFIDENCE
 from monitoring.drift_service import DriftMonitoringService
 
-
 LOGGER = logging.getLogger(__name__)
 CHART_CONFIG = {"displayModeBar": False, "displaylogo": False}
 
@@ -306,8 +305,6 @@ except Exception as exc:
 st.subheader("Model ve Veri Sapma Analizi (Drift & Kalite)")
 try:
     from monitoring.feature_snapshot import (
-        CURRENT_SNAPSHOT_NAME,
-        REFERENCE_SNAPSHOT_NAME,
         extract_snapshot_metadata,
         load_feature_snapshot,
         resolve_snapshot_path,

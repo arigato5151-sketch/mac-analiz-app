@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import pytest
-
 from app.components.match_visuals import build_form_comparison, build_radar_comparison
 from models.feature_engineering import MatchResult, TeamState
 

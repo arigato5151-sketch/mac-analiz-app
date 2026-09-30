@@ -6,7 +6,6 @@ from pathlib import Path
 
 from db.models_db import Base
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MIGRATION_PATH = PROJECT_ROOT / "alembic" / "versions" / "001_initial_schema.py"
 

@@ -16,12 +16,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.components.auth import current_user_id, get_user_db, render_auth_panel
 from app.components.data import (
     UPCOMING_HORIZON_DAYS,
     load_recent_odds_for_matches,
     load_upcoming_dashboard,
 )
-from app.components.auth import current_user_id, get_user_db, render_auth_panel
 from app.components.decision_board import build_match_decisions
 from app.components.model_registry import active_production_version, version_label
 from app.components.ui import (
@@ -32,8 +32,11 @@ from app.components.ui import (
     section_intro,
 )
 from models.baselines import detect_upcoming_collapse
-from models.value_analysis import MIN_VALUE_EV, assess_market_value, best_value_assessment
-
+from models.value_analysis import (
+    MIN_VALUE_EV,
+    assess_market_value,
+    best_value_assessment,
+)
 
 configure_page("Ana Sayfa")
 page_header(

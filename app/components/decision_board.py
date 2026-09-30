@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 import pandas as pd
 
-from app.components.ui import prediction_signal
 from app.components.freshness import FRESHNESS_CURRENT, freshness_status
+from app.components.ui import prediction_signal
 from data_pipeline.value_bets import vig_free_probabilities
 from models.decision_policy import minimum_confidence_for_league
 from models.market_forecast import MINIMUM_GOAL_MARKET_CONFIDENCE

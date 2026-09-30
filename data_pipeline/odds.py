@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Mapping
+from typing import Any
 
 import numpy as np
-from config.settings import PRE_MATCH_DECISION_LEAD_MINUTES
 
+from config.settings import PRE_MATCH_DECISION_LEAD_MINUTES
 from data_pipeline.api_client import ApiFootballClient
 from db.db_client import SupabaseRestClient
-
 
 PRIMARY_BOOKMAKER_ID = 8
 PRIMARY_BOOKMAKER_NAME = "Bet365"
@@ -19,6 +20,7 @@ SECONDARY_BOOKMAKER_ID = 4
 SECONDARY_BOOKMAKER_NAME = "Pinnacle"
 MULTI_BOOKMAKER_IDS = [PRIMARY_BOOKMAKER_ID, SECONDARY_BOOKMAKER_ID]
 MULTI_BOOKMAKER_NAMES = {PRIMARY_BOOKMAKER_ID: PRIMARY_BOOKMAKER_NAME, SECONDARY_BOOKMAKER_ID: SECONDARY_BOOKMAKER_NAME}
+LOGGER = logging.getLogger(__name__)
 
 
 def _parse_utc_timestamp(value: object, *, field: str) -> datetime:
@@ -163,7 +165,7 @@ def record_odds_quote(
 ) -> bool:
     """Append only meaningful line changes for each bookmaker; preserve the exact alert-time quote."""
     any_inserted = False
-    for bm_id, odds_bm in odds.bookmakers.items():
+    for odds_bm in odds.bookmakers.values():
         if not odds_bm.has_any_market:
             continue
         quote = {
@@ -239,7 +241,7 @@ def multi_bookmaker_vig_free_probabilities(
     all_probs: list[dict[str, float]] = []
     weights: list[float] = []
 
-    for bm_id, odds in multi_odds.bookmakers.items():
+    for odds in multi_odds.bookmakers.values():
         probs = vig_free_market_probabilities(odds.as_snapshot())
         if probs is None:
             continue
@@ -254,8 +256,8 @@ def multi_bookmaker_vig_free_probabilities(
             if total_implied > 1.0:
                 vig = total_implied - 1.0
                 vig_weight = 1.0 / max(vig, 0.01)  # inverse vig
-        except Exception:
-            pass
+        except Exception as exc:
+            LOGGER.warning("Could not calculate bookmaker vig weight: %s", type(exc).__name__)
         weights.append(vig_weight)
 
     if not all_probs:

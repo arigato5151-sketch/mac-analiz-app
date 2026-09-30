@@ -13,7 +13,6 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 
 import streamlit as st
 
@@ -67,9 +66,9 @@ def load_model_registry() -> tuple[ModelVersionInfo, ...]:
     production_version = ""
     production_trained_at: datetime | None = None
     if latest_path.is_file():
-        import joblib
+        from models.artifact_store import load_verified_joblib
 
-        bundle = joblib.load(latest_path)
+        bundle = load_verified_joblib(latest_path)
         production_version = str(bundle.get("model_version", "")).strip()
         production_trained_at = _parse_timestamp(bundle.get("training_end"))
 

@@ -5,17 +5,14 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import joblib
 import streamlit as st
 
 from config.settings import PROJECT_ROOT, get_public_supabase_settings
 from db.db_client import PublicSupabaseRestClient
 from models.feature_engineering import CausalFeatureState
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -427,7 +424,9 @@ def load_latest_model_metadata() -> dict[str, Any] | None:
     latest_path = model_dir / "latest.joblib"
     if not latest_path.is_file():
         return None
-    bundle = joblib.load(latest_path)
+    from models.artifact_store import load_verified_joblib
+
+    bundle = load_verified_joblib(latest_path)
     model_version = str(bundle.get("model_version", "")).strip()
     if not model_version:
         return None

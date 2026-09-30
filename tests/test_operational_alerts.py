@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 
 from notifications.operational_alerts import build_health_report, format_alert
 
-
 NOW = datetime(2026, 8, 30, 12, tzinfo=timezone.utc)
 
 

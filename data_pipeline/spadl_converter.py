@@ -14,12 +14,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pandas as pd
-
-if TYPE_CHECKING:
-    pass  # only used for type hints, no runtime import needed
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +23,8 @@ logger = logging.getLogger(__name__)
 # Optional dependency guard
 # ---------------------------------------------------------------------------
 try:
-    import socceraction.spadl as spadl
     import socceraction.spadl.statsbomb as sb_spadl
+    from socceraction import spadl
 
     SOCCERACTION_AVAILABLE = True
     logger.info("socceraction available — SPADL conversion enabled")
@@ -75,7 +71,7 @@ def _empty_spadl() -> pd.DataFrame:
 def convert_statsbomb_events_to_spadl(
     events: pd.DataFrame,
     game_id: int = 0,
-    freeze_frames: pd.DataFrame | None = None,  # noqa: ARG001 — reserved for future use
+    freeze_frames: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Convert StatsBomb event rows to SPADL format.
 

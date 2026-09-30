@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import itertools
+from collections.abc import Iterable
 from dataclasses import dataclass
 from math import sqrt
-from typing import Iterable
 
 import pandas as pd
-
 
 WILSON_95_Z = 1.959963984540054
 
@@ -77,9 +77,7 @@ def summarize_live_performance(
         reference_brier_score is not None
         and reference_brier_score > 0
         and brier_score > reference_brier_score * (1 + degradation_threshold)
-    ):
-        status = "İzlenmeli"
-    elif reference_accuracy is not None and upper < reference_accuracy:
+    ) or reference_accuracy is not None and upper < reference_accuracy:
         status = "İzlenmeli"
     elif (
         reference_brier_score is not None
@@ -125,7 +123,7 @@ def build_performance_breakdowns(
     if missing:
         raise ValueError(f"performance is missing columns: {', '.join(sorted(missing))}")
     if len(confidence_edges) < 2 or any(
-        left >= right for left, right in zip(confidence_edges, confidence_edges[1:])
+        left >= right for left, right in itertools.pairwise(confidence_edges)
     ):
         raise ValueError("confidence_edges must be strictly increasing")
 
@@ -163,7 +161,7 @@ def build_performance_breakdowns(
     else:
         league_rows = []
     confidence_rows: list[dict[str, float | int | str]] = []
-    for lower, upper in zip(confidence_edges, confidence_edges[1:]):
+    for lower, upper in itertools.pairwise(confidence_edges):
         group = frame[(frame["confidence"] >= lower) & (frame["confidence"] < upper)]
         if group.empty:
             continue

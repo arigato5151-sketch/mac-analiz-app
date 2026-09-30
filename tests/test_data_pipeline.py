@@ -5,6 +5,8 @@ from typing import Any
 
 import pytest
 
+from data_pipeline.api_client import ApiFootballClient
+from data_pipeline.backfill import backfill_history
 from data_pipeline.fetch_fixtures import (
     normalize_status,
     sync_fixtures,
@@ -12,15 +14,13 @@ from data_pipeline.fetch_fixtures import (
 )
 from data_pipeline.fetch_injuries import transform_injuries
 from data_pipeline.fetch_lineups import transform_lineups
-from data_pipeline.api_client import ApiFootballClient
-from data_pipeline.fetch_team_stats import build_team_form
 from data_pipeline.fetch_results import (
     extract_expected_goals,
     extract_expected_metrics,
     reconcile_stale_active_fixtures,
     sync_recent_results,
 )
-from data_pipeline.backfill import backfill_history
+from data_pipeline.fetch_team_stats import build_team_form
 
 
 def fixture(

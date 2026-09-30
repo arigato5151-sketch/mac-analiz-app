@@ -14,7 +14,6 @@ from data_pipeline.fetch_fixtures import SyncSummary, sync_fixtures, transform_f
 from db.db_client import SupabaseRestClient
 from monitoring.operational_events import record_api_diagnostics, record_exception
 
-
 EXPECTED_GOALS_STAT_TYPES = frozenset({"expected_goals", "xg"})
 EXPECTED_ASSISTS_STAT_TYPES = frozenset(
     {"expected_assists", "expected_assist", "xa", "x_a"}

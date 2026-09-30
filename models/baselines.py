@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 from sklearn.metrics import log_loss
 
-from models.calibration import expected_calibration_error
+from models.calibration import expected_calibration_error, multiclass_brier_score
 
 CLASS_LABELS = ("home_win", "draw", "away_win")
 
@@ -49,12 +49,11 @@ def _metrics(labels: np.ndarray, probabilities: np.ndarray, name: str) -> Baseli
     # Stored decimal probabilities can differ from one by a few machine
     # epsilon. Normalize after validation so sklearn scores them consistently.
     probabilities = probabilities / row_totals[:, np.newaxis]
-    one_hot = _one_hot(labels)
     correct = (probabilities.argmax(axis=1) == labels).astype(float)
     return BaselineResult(
         name=name,
         log_loss=float(log_loss(labels, probabilities, labels=list(range(len(CLASS_LABELS))))),
-        brier_score=float(np.mean((probabilities - one_hot) ** 2)),
+        brier_score=multiclass_brier_score(labels, probabilities),
         accuracy=float(correct.mean()),
     )
 

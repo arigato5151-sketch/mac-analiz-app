@@ -13,7 +13,6 @@ from db.db_client import SupabaseRestClient
 from monitoring.operational_events import record_event
 from notifications.telegram import TelegramError, send_telegram_message
 
-
 EVALUATION_GRACE = timedelta(hours=6)
 QUEUE_GRACE = timedelta(hours=3)
 STALE_ACTIVE_GRACE = timedelta(hours=4)

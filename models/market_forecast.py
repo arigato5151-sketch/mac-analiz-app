@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from math import isfinite
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 
 from models.poisson_model import PoissonPrediction
-
 
 MINIMUM_DOUBLE_CHANCE_CONFIDENCE = 0.70
 MINIMUM_GOAL_MARKET_CONFIDENCE = 0.65
@@ -62,6 +62,7 @@ def derive_market_probabilities(
     )[:3]
 
     return {
+        "score_matrix": matrix.tolist(),
         "double_chance": {
             "1X": home + draw,
             "X2": draw + away,
@@ -128,7 +129,7 @@ def format_market_summary(markets: dict[str, Any]) -> list[str]:
     scores = markets.get("correct_scores") or []
     if scores:
         formatted = [
-            f"{str(item['score'])} %{float(item['probability']) * 100:.0f}"
+            f"{item['score']!s} %{float(item['probability']) * 100:.0f}"
             for item in scores[:3]
         ]
         lines.append("Olası skorlar: " + " · ".join(formatted))

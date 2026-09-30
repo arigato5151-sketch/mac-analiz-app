@@ -8,7 +8,6 @@ from typing import Any, Literal
 
 from db.db_client import SupabaseRestClient
 
-
 Severity = Literal["info", "warning", "error"]
 _MAX_MESSAGE_LENGTH = 300
 _MAX_CONTEXT_ITEMS = 20

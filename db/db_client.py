@@ -19,7 +19,9 @@ def _build_session() -> requests.Session:
         total=4,
         backoff_factor=0.5,
         status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=frozenset({"GET", "POST", "PATCH", "DELETE"}),
+        # POST is intentionally excluded: insert/upsert callers do not have a
+        # universal idempotency key and retrying can duplicate history rows.
+        allowed_methods=frozenset({"GET", "PATCH", "DELETE"}),
         respect_retry_after_header=True,
     )
     session = requests.Session()
@@ -164,6 +166,10 @@ class SupabaseRestClient:
     ) -> list[dict[str, Any]]:
         if page_size < 1 or page_size > 1_000:
             raise ValueError("page_size must be between 1 and 1000")
+        # Offset pagination is only deterministic with an explicit order.
+        # Supabase tables in this project expose an integer `id` primary key;
+        # callers for tables without one must provide their own order.
+        effective_order = order or "id.asc"
 
         rows: list[dict[str, Any]] = []
         offset = 0
@@ -174,7 +180,7 @@ class SupabaseRestClient:
                 filters=filters,
                 limit=page_size,
                 offset=offset,
-                order=order,
+                order=effective_order,
             )
             rows.extend(page)
             if len(page) < page_size:

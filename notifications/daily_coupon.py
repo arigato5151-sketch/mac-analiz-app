@@ -10,10 +10,9 @@ from zoneinfo import ZoneInfo
 
 from config.settings import get_settings
 from db.db_client import SupabaseRestClient
+from models.coupon_policy import _market_family, diversified_coupon_rows
 from models.value_analysis import ValueAssessment, assess_market_value
-from models.coupon_policy import diversified_coupon_rows, _market_family
 from notifications.telegram import send_telegram_message
-
 
 TZ = ZoneInfo("Europe/Istanbul")
 
@@ -61,12 +60,14 @@ def _rows(db: SupabaseRestClient, now: datetime) -> list[dict[str, Any]]:
     return sorted(result, key=lambda row: row["best"].expected_value, reverse=True)
 
 
-def build_daily_coupon_message(rows: list[dict[str, Any]]) -> str:
+def build_daily_coupon_message(rows: list[dict[str, Any]], *, market_warning: str | None = None) -> str:
     if not rows:
         return "🎟️ Günlük kupon\nBugünün kalan maçlarında eşleşen oran ve model tahmini bulunamadı."
     groups = _coupon_groups(rows)
     low, balanced, high = groups["low_risk"], groups["balanced"], groups["high_odds"]
     sections = [f"🎟️ Günlük kupon · {len(rows)} oranlı maç"]
+    if market_warning:
+        sections.append(f"⚠️ {market_warning}")
     for title, selected in (("🟢 Düşük risk", low), ("🟡 Dengeli", balanced), ("🔴 Yüksek oran", high)):
         sections.append(f"\n{title}")
         if not selected:
@@ -112,15 +113,31 @@ def _persist_coupon_runs(db: SupabaseRestClient, rows: list[dict[str, Any]], cou
         db.upsert("daily_coupon_runs", [{"coupon_date": coupon_date, "coupon_type": coupon_type, "selections": selections, "total_odds": total_odds}], on_conflict="coupon_date,coupon_type")
 
 
+def _market_gate_warning(db: SupabaseRestClient) -> str | None:
+    promoted = db.select_all(
+        "model_candidates",
+        columns="status,offline_metrics,promoted_at",
+        filters={"status": "eq.promoted"},
+        order="promoted_at.desc",
+    )
+    if not promoted:
+        return "Model-piyasa karşılaştırması bulunamadı; kupon yalnızca istatistiksel sinyaldir."
+    comparison = (promoted[0].get("offline_metrics") or {}).get("market_comparison") or {}
+    if comparison.get("status") != "passed":
+        return "Model piyasayı anlamlı biçimde geçemedi; EV sinyalleri temkinli değerlendirilmelidir."
+    return None
+
+
 def run_daily_coupon() -> dict[str, int | str]:
     settings = get_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     rows = _rows(db, datetime.now(timezone.utc))
     _persist_coupon_runs(db, rows, datetime.now(TZ).date().isoformat())
+    market_warning = _market_gate_warning(db)
     token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN", "").strip(), os.getenv("TELEGRAM_CHAT_ID", "").strip()
     if not token or not chat_id:
         return {"matches": len(rows), "sent": 0, "skipped": "telegram_not_configured"}
-    send_telegram_message(build_daily_coupon_message(rows), bot_token=token, chat_id=chat_id)
+    send_telegram_message(build_daily_coupon_message(rows, market_warning=market_warning), bot_token=token, chat_id=chat_id)
     return {"matches": len(rows), "sent": 1}
 
 

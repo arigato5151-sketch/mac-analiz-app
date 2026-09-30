@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import joblib
 import numpy as np
@@ -127,12 +127,12 @@ def test_push_local_models_includes_parquet_and_metadata(tmp_path: Path):
     assert "feature_snapshot_ref_model_v1.parquet" in uploaded_names
     assert "feature_snapshot_ref_model_v1.json" in uploaded_names
     assert "feature_snapshot_current.parquet" in uploaded_names
-    assert len(result) == 5
+    assert "artifact_manifest.json" in uploaded_names
+    assert len(result) == 6
 
 
 def test_download_model_artifacts_lifecycle(tmp_path: Path):
     """Verify download_model_artifacts pulls model, json and snapshots, handling storage errors."""
-    downloaded_files: dict[str, Path] = {}
 
     def mock_download(name, dest_dir=None, local_path=None):
         if "missing" in name:
@@ -169,6 +169,13 @@ def test_latest_bundle_falls_back_to_versioned_snapshots(tmp_path: Path):
                 {"model_version": model_version},
                 out_path,
             )
+            from models.artifact_store import build_artifact_manifest
+
+            (Path(dest_dir) / "artifact_manifest.json").write_text(
+                json.dumps(build_artifact_manifest(Path(dest_dir))), encoding="utf-8"
+            )
+            return out_path
+        if name == "artifact_manifest.json":
             return out_path
         if name == f"feature_snapshot_ref_{model_version}.parquet":
             out_path.write_bytes(b"reference")

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from models.market_forecast import (
     MINIMUM_DOUBLE_CHANCE_CONFIDENCE,
     MINIMUM_GOAL_MARKET_CONFIDENCE,
 )
-
 
 MARKET_LABELS = {
     ("total_goals", "over_1_5"): "Üst 1.5",

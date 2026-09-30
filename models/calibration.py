@@ -8,8 +8,17 @@ import numpy as np
 from scipy.optimize import minimize_scalar
 from sklearn.metrics import log_loss
 
-
 EPSILON = 1e-7
+
+
+def multiclass_brier_score(labels: np.ndarray, probabilities: np.ndarray) -> float:
+    """Standard multiclass Brier score: sum squared class errors per row."""
+    actual = np.asarray(labels, dtype=int)
+    values = np.asarray(probabilities, dtype=float)
+    if values.ndim != 2 or len(actual) != len(values):
+        raise ValueError("Labels and probabilities must be aligned")
+    one_hot = np.eye(values.shape[1], dtype=float)[actual]
+    return float(np.mean(np.sum((values - one_hot) ** 2, axis=1)))
 
 
 @dataclass(frozen=True)
@@ -23,8 +32,8 @@ def calibration_candidate_is_safe(
     raw: CalibrationQuality,
     candidate: CalibrationQuality,
     *,
-    minimum_log_loss_improvement: float = 1e-4,
-    maximum_secondary_regression: float = 1e-4,
+    minimum_log_loss_improvement: float = 1e-3,
+    maximum_secondary_regression: float = 1e-3,
 ) -> bool:
     """Require a loss improvement without sacrificing Brier score or ECE."""
     return (
@@ -39,12 +48,11 @@ def calibration_candidate_is_safe(
 def _multiclass_quality(
     labels: np.ndarray, probabilities: np.ndarray
 ) -> CalibrationQuality:
-    one_hot = np.eye(probabilities.shape[1])[labels]
     return CalibrationQuality(
         log_loss=float(
             log_loss(labels, probabilities, labels=list(range(probabilities.shape[1])))
         ),
-        brier_score=float(np.mean((probabilities - one_hot) ** 2)),
+        brier_score=multiclass_brier_score(labels, probabilities),
         expected_calibration_error=expected_calibration_error(labels, probabilities),
     )
 

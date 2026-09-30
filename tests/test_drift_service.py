@@ -12,7 +12,6 @@ from evaluation.drift_check import run_drift_check
 from monitoring.drift_service import (
     DriftMonitoringService,
     DriftThresholds,
-    calculate_feature_drift,
     calculate_psi,
     compute_performance_log_loss,
     sanitize_dict,

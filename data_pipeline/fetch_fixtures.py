@@ -14,7 +14,6 @@ from data_pipeline.api_client import ApiFootballClient
 from db.db_client import SupabaseRestClient
 from monitoring.operational_events import record_api_diagnostics, record_exception
 
-
 FINISHED_STATUSES = {"FT", "AET", "PEN"}
 LIVE_STATUSES = {"1H", "HT", "2H", "ET", "BT", "P", "SUSP", "INT", "LIVE"}
 

@@ -231,8 +231,8 @@ class StatsBombAdapter:
             try:
                 cached_data = json.loads(lookup_cache_file.read_text(encoding="utf-8"))
                 return cached_data.get("match")
-            except Exception:
-                pass
+            except Exception as exc:
+                LOGGER.debug("StatsBomb match lookup cache read failed: %s", type(exc).__name__)
 
         comps = self.get_competitions()
         if comps.empty:
@@ -275,7 +275,7 @@ class StatsBombAdapter:
                 json.dumps({"match": found_match}, ensure_ascii=False, default=str),
                 encoding="utf-8",
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            LOGGER.debug("StatsBomb match lookup cache write failed: %s", type(exc).__name__)
 
         return found_match

@@ -40,16 +40,16 @@ def build_morning_messages(
                 (
                     f"⚽ {home} — {away}",
                     f"{league} · {kickoff.astimezone(ZoneInfo('Europe/Istanbul')).strftime('%d.%m %H:%M')}",
-                    "1-X-2: "
+                    ("1-X-2: "
                     f"1 %{float(prediction['prob_home_win']) * 100:.0f} · "
                     f"X %{float(prediction['prob_draw']) * 100:.0f} · "
-                    f"2 %{float(prediction['prob_away_win']) * 100:.0f}",
-                    "Üst/Alt 2.5: "
+                    f"2 %{float(prediction['prob_away_win']) * 100:.0f}"),
+                    ("Üst/Alt 2.5: "
                     f"Üst %{float(prediction['prob_over_2_5']) * 100:.0f} · "
-                    f"Alt %{(1 - float(prediction['prob_over_2_5'])) * 100:.0f}",
-                    "KG Var/Yok: "
+                    f"Alt %{(1 - float(prediction['prob_over_2_5'])) * 100:.0f}"),
+                    ("KG Var/Yok: "
                     f"Var %{float(prediction['prob_btts']) * 100:.0f} · "
-                    f"Yok %{(1 - float(prediction['prob_btts'])) * 100:.0f}",
+                    f"Yok %{(1 - float(prediction['prob_btts'])) * 100:.0f}"),
                     "İstatistiksel olasılıktır; kesin sonuç değildir.",
                 )
             )

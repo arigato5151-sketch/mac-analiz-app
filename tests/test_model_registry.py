@@ -6,6 +6,7 @@ import joblib
 import pytest
 
 import app.components.model_registry as registry
+from models.artifact_store import build_artifact_manifest
 
 
 @pytest.fixture(autouse=True)
@@ -26,6 +27,9 @@ def artifact_dir(tmp_path, monkeypatch):
             "training_end": "2026-01-02T00:00:00+00:00",
         },
         model_dir / "latest.joblib",
+    )
+    (model_dir / "artifact_manifest.json").write_text(
+        json.dumps(build_artifact_manifest(model_dir)), encoding="utf-8"
     )
     artifacts = {
         "model_v20260101T000000Z.json": {"training_end": "2026-01-01T00:00:00+00:00"},

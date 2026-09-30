@@ -1,14 +1,14 @@
 import pytest
-import models.feature_engineering as feature_engineering
 
+from models import feature_engineering
 from models.feature_engineering import (
     BINARY_FEATURE_COLUMNS,
     FEATURE_COLUMNS,
     RESULT_ONLY_FEATURE_COLUMNS,
     availability_impact_score,
     build_training_dataset,
-    build_upcoming_poisson_predictions,
     build_upcoming_features,
+    build_upcoming_poisson_predictions,
     margin_of_victory_multiplier,
     regress_elo_to_league_mean,
 )
@@ -94,7 +94,8 @@ def test_training_rho_estimation_only_sees_prior_matches(monkeypatch) -> None:
         ]
     )
 
-    assert observed_lengths == [0, 1, 2]
+    # Rho is refreshed at month boundaries, not once per training row.
+    assert observed_lengths == []
 
 
 def test_upcoming_matches_do_not_mutate_state_without_results() -> None:
@@ -178,7 +179,8 @@ def test_market_odds_are_vig_free_and_fall_back_to_poisson() -> None:
     assert features.loc[0, "market_implied_draw"] == pytest.approx(0.25)
     assert features.loc[0, "market_home_move"] > 0
     assert features.loc[1, "market_odds_available"] == 0
-    assert features.loc[1, "market_implied_home_win"] == features.loc[1, "poisson_home_win"]
+    assert features.loc[1, "market_implied_home_win"] == pytest.approx(1 / 3)
+    assert features.loc[1, "market_implied_home_win"] != features.loc[1, "poisson_home_win"]
 
 
 def test_availability_and_lineup_features_have_safe_defaults() -> None:

@@ -1,8 +1,8 @@
 """Auditable live prediction results for completed fixtures."""
 
 import sys
-from statistics import median
 from pathlib import Path
+from statistics import median
 
 import pandas as pd
 import plotly.express as px
@@ -13,7 +13,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.components.data import load_evaluated_predictions, load_odds_history_for_matches
+from app.components.data import (
+    load_evaluated_predictions,
+    load_odds_history_for_matches,
+)
 from app.components.grid import build_read_only_grid_options
 from app.components.metrics import format_accuracy, summarize_binary_accuracy
 from app.components.model_registry import (
@@ -36,7 +39,6 @@ from models.value_analysis import (
     fractional_kelly_stake,
     value_confidence_status,
 )
-
 
 configure_page("Tahmin Sonuçları")
 page_header(

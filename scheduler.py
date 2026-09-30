@@ -14,7 +14,6 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from config.settings import UPCOMING_HORIZON_DAYS
 
-
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 

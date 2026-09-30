@@ -8,7 +8,6 @@ it can be backtested before being allowed into coupons.
 from __future__ import annotations
 
 from math import isfinite
-from typing import Any
 
 import numpy as np
 from scipy.stats import poisson

@@ -11,7 +11,6 @@ from typing import Any
 
 from config.settings import PROJECT_ROOT, _load_env_file
 
-
 # Gemini API authorization (AQ) keys are supported by the current 1.5/1.0 models.
 # Current model versions as of 2025: 1.5-flash, 1.5-pro, 1.5-flash-8b.
 # Free tier (Google AI Studio) supports: gemini-1.5-flash, gemini-1.5-flash-002, gemini-1.5-pro, gemini-1.5-flash-8b.
@@ -73,7 +72,7 @@ def get_gemini_api_key(
     )
 
 
-def _format_metric(value: float | int | None) -> str:
+def _format_metric(value: float | None) -> str:
     return "veri yok" if value is None else f"{float(value):.2f}"
 
 
@@ -265,12 +264,13 @@ def generate_match_commentary(
                 "google-genai is not installed; install requirements.txt",
                 reason="configuration",
             ) from error
-        client_factory = lambda key: genai.Client(
-            api_key=key,
-            # The SDK timeout is expressed in milliseconds. It prevents an unavailable
-            # provider from leaving a Streamlit interaction in a pending state.
-            http_options={"timeout": _request_timeout_ms()},
-        )
+        def client_factory(key: str) -> Any:
+            return genai.Client(
+                api_key=key,
+                # The SDK timeout is expressed in milliseconds. It prevents an unavailable
+                # provider from leaving a Streamlit interaction in a pending state.
+                http_options={"timeout": _request_timeout_ms()},
+            )
 
     try:
         client = client_factory(configured_key)

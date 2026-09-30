@@ -9,20 +9,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 import unicodedata
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from config.settings import get_settings
 from db.db_client import SupabaseRestClient
 
-
 NESINE_BOOKMAKER = "Nesine"
 DEFAULT_NESINE_URL = "https://www.nesine.com/iddaa?et=1&le=2"
 _ODD = re.compile(r"^(?:[1-9]\d?)(?:[.,]\d{1,3})$")
+LOGGER = logging.getLogger(__name__)
 
 
 def _normalise(value: str) -> str:
@@ -76,7 +78,11 @@ def parse_rendered_text_rows(rows: Iterable[Mapping[str, Any]]) -> list[NesineMa
             continue
         values = row.get("markets") or row.get("odds") or {}
         if isinstance(values, Mapping):
-            get = lambda *keys: next((_odd(str(values[k])) for k in keys if values.get(k) is not None and _odd(str(values[k]))), None)
+            def get(*keys: str) -> float | None:
+                return next(
+                    (_odd(str(values[key])) for key in keys if values.get(key) is not None and _odd(str(values[key]))),
+                    None,
+                )
             result = (get("1", "home_win"), get("X", "draw"), get("2", "away_win"))
             totals = (get("Over 2.5", "over_2_5"), get("Under 2.5", "under_2_5"))
             btts = (get("Var", "Yes", "btts_yes"), get("Yok", "No", "btts_no"))
@@ -222,7 +228,8 @@ def _collect_detail_markets(page: Any, base_rows: list[dict[str, Any]]) -> list[
             collected.append({**row, "all_markets": detailed})
             page.go_back(wait_until="domcontentloaded", timeout=10_000)
             page.wait_for_timeout(300)
-        except Exception:
+        except Exception as exc:
+            LOGGER.warning("Nesine market detail skipped for visible row: %s", type(exc).__name__)
             collected.append(row)
     return collected
 

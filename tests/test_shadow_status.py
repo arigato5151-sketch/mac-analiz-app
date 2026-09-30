@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.components.data as data
+from app.components import data
 from app.components.shadow_status import summarize_shadow_candidate
 from models.shadow import MINIMUM_PROMOTION_SAMPLE
 

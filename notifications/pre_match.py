@@ -1,4 +1,4 @@
-"""Refresh context and send one Telegram message about 25 minutes before kickoff.
+"""Refresh context and send one Telegram message before the configured decision deadline.
 
 Notification and snapshot type constants are versioned (pre_match_v1, pre_match_snapshot_v1)
 for forward compatibility. Legacy values (pre_match_20m, pre_match_60m) are still accepted
@@ -11,14 +11,11 @@ import argparse
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import joblib
-
 from config.leagues import LEAGUES_BY_ID
-from config.settings import get_settings
+from config.settings import PRE_MATCH_DECISION_LEAD_MINUTES, get_settings
 from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_injuries import sync_injuries
 from data_pipeline.fetch_lineups import sync_fixture_lineups
@@ -26,15 +23,23 @@ from data_pipeline.fetch_team_stats import sync_team_form
 from data_pipeline.odds import MatchOdds, fetch_match_odds, record_odds_quote
 from data_pipeline.refresh_context import current_elo_ratings
 from db.db_client import DatabaseError, SupabaseRestClient
-from models.feature_engineering import CausalFeatureState
-from models.decision_policy import minimum_confidence_for_league, select_1x2
+from models.artifact_store import load_verified_joblib
+from models.decision_policy import (
+    minimum_confidence_for_league,
+    policy_from_metadata,
+    select_1x2,
+)
 from models.market_forecast import format_telegram_market_lines
-from models.value_analysis import MIN_VALUE_EV, best_value_assessment
-from models.predict import generate_prediction_rows, load_latest_team_forms, persist_predictions, resolve_model_path
+from models.predict import (
+    generate_prediction_rows,
+    load_latest_team_forms,
+    persist_predictions,
+    resolve_model_path,
+)
 from models.shadow import run_shadow_predictions
 from models.train_model import load_historical_matches
+from models.value_analysis import MIN_VALUE_EV, best_value_assessment
 from notifications.telegram import send_telegram_message
-
 
 NOTIFICATION_TYPE = "pre_match_v1"
 SNAPSHOT_TYPE = "pre_match_snapshot_v1"
@@ -42,7 +47,7 @@ SNAPSHOT_TYPE = "pre_match_snapshot_v1"
 LEGACY_NOTIFICATION_TYPES = ("pre_match_20m", "pre_match_60m")
 LEGACY_SNAPSHOT_TYPES = ("pre_match_60m",)
 WINDOW_START_MINUTES = 0
-WINDOW_END_MINUTES = 25
+WINDOW_END_MINUTES = PRE_MATCH_DECISION_LEAD_MINUTES
 LINEUP_LOOKAHEAD_MINUTES = 90
 
 
@@ -121,7 +126,7 @@ def persist_production_snapshot(
 
 
 def due_matches(matches: list[dict[str, Any]], *, now: datetime) -> list[dict[str, Any]]:
-    """Return unsent fixtures with at most 25 minutes left before kickoff.
+    """Return unsent fixtures inside the configured pre-match decision window.
 
     GitHub schedules can start late. The notification log provides idempotency, so
     accepting the full pre-kickoff interval avoids permanently missing a fixture.
@@ -150,10 +155,13 @@ def pre_match_message(
     away_team: str,
     league_name: str,
     odds: MatchOdds | None = None,
+    policy: dict[str, object] | None = None,
 ) -> str:
     kickoff = datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
     outcome_labels = ("Ev kazanır", "Beraberlik", "Deplasman kazanır")
-    publish_threshold = minimum_confidence_for_league(match.get("league_id"))
+    publish_threshold = minimum_confidence_for_league(
+        match.get("league_id"), policy=policy
+    )
     outcome_index, probability, actionable = select_1x2(
         (
             prediction["prob_home_win"],
@@ -177,8 +185,8 @@ def pre_match_message(
         f"⏰ {kickoff.astimezone(ZoneInfo('Europe/Istanbul')).strftime('%d.%m · %H:%M')}",
         "",
         result_line,
-        f"Üst 2.5: %{float(prediction['prob_over_2_5']) * 100:.0f} · "
-        f"KG Var: %{float(prediction['prob_btts']) * 100:.0f}",
+        (f"Üst 2.5: %{float(prediction['prob_over_2_5']) * 100:.0f} · "
+        f"KG Var: %{float(prediction['prob_btts']) * 100:.0f}"),
     ]
     market_lines = format_telegram_market_lines(
         prediction.get("market_probabilities") or {}
@@ -361,7 +369,7 @@ def _refresh_and_predict(
         print(f"Skipped {skipped} matches due to team sync failures")
 
     model_path = resolve_model_path()
-    bundle = joblib.load(model_path)
+    bundle = load_verified_joblib(model_path)
     model_version = str(bundle.get("model_version", model_path.stem))
     team_forms = load_latest_team_forms(db, team_ids)
     rows = generate_prediction_rows(
@@ -382,7 +390,7 @@ def _refresh_and_predict(
     except Exception as error:
         # Shadow evaluation must never delay or suppress a production alert.
         print(f"Shadow forecast skipped: {type(error).__name__}")
-    return persisted, model_version, historical, team_forms
+    return persisted, model_version, historical, team_forms, bundle
 
 
 def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
@@ -401,7 +409,7 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
     odds_history_written, odds_by_fixture, failed_match_ids = sync_soon_odds(api, db, now=now)
     if not matches:
         return {"due_matches": 0, "sent": 0, "lineup_rows": lineup_rows, "odds_history_rows": odds_history_written, "api": api.diagnostics()}
-    predictions, model_version, historical, team_forms = _refresh_and_predict(api, db, matches)
+    predictions, model_version, _historical, _team_forms, bundle = _refresh_and_predict(api, db, matches)
     predictions_by_match = {int(row["match_id"]): row for row in predictions}
     team_ids = {int(team_id) for match in matches for team_id in (match["home_team_id"], match["away_team_id"])}
     league_ids = {int(match["league_id"]) for match in matches}
@@ -413,7 +421,7 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
         int(row["id"]): str(row["name"])
         for row in db.select_all("leagues", columns="id,name", filters={"id": f"in.({','.join(map(str, league_ids))})"})
     }
-    availability_rows = db.select_all(
+    db.select_all(
         "player_availability",
         columns="match_id,team_id,player_name,status",
         filters={"team_id": f"in.({','.join(map(str, team_ids))})"},
@@ -485,6 +493,7 @@ def run_pre_match_notifications(now: datetime | None = None) -> dict[str, Any]:
                 away_team=teams.get(int(match["away_team_id"]), "Deplasman"),
                 league_name=leagues.get(int(match["league_id"]), "Lig"),
                 odds=odds,
+                policy=policy_from_metadata(bundle),
             ),
             bot_token=bot_token,
             chat_id=chat_id,

@@ -14,6 +14,7 @@ from telegram.ext import (
     filters,
 )
 
+
 # Command handlers
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command."""

@@ -10,7 +10,6 @@ from typing import Any
 from config.settings import UPCOMING_HORIZON_DAYS, get_settings
 from db.db_client import SupabaseRestClient
 
-
 FRESHNESS_LIMIT = timedelta(hours=36)
 STALE_ACTIVE_GRACE = timedelta(hours=4)
 

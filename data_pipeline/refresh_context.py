@@ -15,9 +15,13 @@ from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_injuries import sync_injuries
 from data_pipeline.fetch_team_stats import sync_team_form
 from db.db_client import SupabaseRestClient
-from monitoring.operational_events import record_api_diagnostics, record_event, record_exception
 from models.feature_engineering import CausalFeatureState
 from models.train_model import load_historical_matches
+from monitoring.operational_events import (
+    record_api_diagnostics,
+    record_event,
+    record_exception,
+)
 
 
 @dataclass(frozen=True)

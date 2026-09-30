@@ -12,9 +12,10 @@ from pathlib import Path
 from config.settings import get_supabase_admin_settings
 from db.db_client import SupabaseRestClient
 
-
 MIGRATIONS_DIR = Path(__file__).with_name("migrations")
 MIGRATION_NAME = re.compile(r"^(?P<version>\d{3}_[a-z0-9_]+)\.sql$")
+# 030 was intentionally reserved; migration files are immutable and are not renumbered.
+ALLOWED_MIGRATION_GAPS = frozenset({30})
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,13 @@ def discover_migrations(directory: Path = MIGRATIONS_DIR) -> list[Migration]:
         raise ValueError("No SQL migrations found")
     if len(versions) != len(set(versions)):
         raise ValueError("Duplicate migration versions found")
+    numbers = [int(version[:3]) for version in versions]
+    expected = set(range(numbers[0], numbers[-1] + 1))
+    gaps = expected.difference(numbers)
+    unexpected_gaps = gaps.difference(ALLOWED_MIGRATION_GAPS)
+    if unexpected_gaps:
+        formatted = ", ".join(f"{number:03d}" for number in sorted(unexpected_gaps))
+        raise ValueError(f"Unexpected migration version gap(s): {formatted}")
     return migrations
 
 
@@ -56,7 +64,7 @@ def verify_ledger(
     """Compare the deployed ledger with exact repository file hashes."""
     applied = {
         str(row["version"]): str(row["checksum"])
-        for row in db.select_all("schema_migrations", columns="version,checksum")
+        for row in db.select_all("schema_migrations", columns="version,checksum", order="version.asc")
     }
     expected = {migration.version: migration.checksum for migration in migrations}
     return {

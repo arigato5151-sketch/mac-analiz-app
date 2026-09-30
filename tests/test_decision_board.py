@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
-import pytest
 
 from app.components.decision_board import (
     build_match_decisions,

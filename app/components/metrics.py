@@ -28,7 +28,7 @@ def summarize_binary_accuracy(values: pd.Series) -> BinaryAccuracySummary:
         raise ValueError("Binary accuracy values must be booleans or null")
 
     correct = int(evaluated.astype(bool).sum())
-    sample_size = int(len(evaluated))
+    sample_size = len(evaluated)
     return BinaryAccuracySummary(
         correct=correct,
         sample_size=sample_size,
