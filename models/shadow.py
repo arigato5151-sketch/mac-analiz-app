@@ -138,7 +138,9 @@ def evaluate_shadow_predictions(db: SupabaseRestClient) -> list[dict[str, Any]]:
     already_evaluated = {
         int(row["shadow_prediction_id"])
         for row in db.select_all(
-            "shadow_prediction_performance", columns="shadow_prediction_id"
+            "shadow_prediction_performance",
+            columns="shadow_prediction_id",
+            order="shadow_prediction_id.asc",
         )
     }
     lookback_cutoff = (
@@ -349,6 +351,7 @@ def promote_candidate(db: SupabaseRestClient, model_version: str) -> str:
     candidate_performance = db.select_all(
         "shadow_prediction_performance", columns="shadow_prediction_id,match_id,was_correct,brier_score",
         filters={"shadow_prediction_id": f"in.({shadow_ids})"},
+        order="shadow_prediction_id.asc",
     )
     match_ids = {int(row["match_id"]) for row in candidate_performance}
     if not match_ids:
@@ -462,6 +465,7 @@ def shadow_report(db: SupabaseRestClient) -> dict[str, Any]:
     shadow_rows = db.select_all(
         "shadow_prediction_performance",
         columns="shadow_prediction_id,was_correct,brier_score",
+        order="shadow_prediction_id.asc",
     )
     by_version: dict[str, list[dict[str, Any]]] = {}
     for row in shadow_rows:

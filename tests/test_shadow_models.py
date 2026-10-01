@@ -17,6 +17,7 @@ class _NoFinishedMatchesDb:
     def select_all(self, table: str, **kwargs: object) -> list[dict]:
         self.queried.add(table)
         if table == "shadow_prediction_performance":
+            assert kwargs["order"] == "shadow_prediction_id.asc"
             return []
         if table == "matches":
             return []
