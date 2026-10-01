@@ -60,6 +60,9 @@ jobs:
           echo "Nesine collector tamamlandı; eşleşmeyen maçlar kupona alınmadı." >> "$GITHUB_STEP_SUMMARY"
       - name: Refresh team form, Elo, and availability
         run: python -m data_pipeline.refresh_context --days 7
+      - name: Collect daily shadow-candidate predictions
+        continue-on-error: true
+        run: python -m models.shadow --days 7
       - name: Generate upcoming predictions
         run: python -m models.predict --days 7
       - name: Send daily coupon to Telegram
@@ -67,8 +70,6 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m notifications.daily_coupon | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Collect daily shadow-candidate predictions
-        run: python -m models.shadow --days 7
       - name: Validate data quality
         run: python -m data_pipeline.data_quality --days 7 | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Sync today's final scores
