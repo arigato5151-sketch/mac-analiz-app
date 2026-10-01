@@ -19,6 +19,7 @@ from app.components.data import (
     load_recent_odds_for_matches,
     load_upcoming_dashboard,
 )
+from app.components.freshness import odds_are_current
 from app.components.ui import configure_page, disclaimer, page_header
 from models.coupon_policy import diversified_coupon_rows
 from models.value_analysis import (
@@ -98,12 +99,16 @@ odds_captured_by_match = {
 }
 
 rows: list[dict[str, object]] = []
-filter_counts = {"no_odds": 0, "sanity": 0, "below_probability": 0}
+filter_counts = {"no_odds": 0, "stale_odds": 0, "sanity": 0, "below_probability": 0}
+odds_now = datetime.now(timezone.utc)
 for _, match in matches.iterrows():
     match_id = int(match["id"])
     raw_odds = odds_by_match.get(match_id)
     if not isinstance(raw_odds, dict):
         filter_counts["no_odds"] += 1
+        continue
+    if not odds_are_current(odds_captured_by_match.get(match_id), now=odds_now):
+        filter_counts["stale_odds"] += 1
         continue
     probabilities = {
         "home_win": match.get("prob_home_win"),
@@ -152,15 +157,12 @@ for _, match in matches.iterrows():
         "odds_captured_at": odds_captured_by_match.get(match_id),
     })
 
-if not rows:
-    st.warning("Bugünün maçlarında hem oran hem de geçerli model tahmini eşleşmedi.")
-    st.stop()
-
 rows.sort(key=lambda row: (float(row["best"].expected_value), float(row["probability"])), reverse=True)
 
 with st.expander("Filtreleme özeti"):
     st.write(
         f"İncelenen maç: {len(matches)} · Oranı olmayan: {filter_counts['no_odds']} · "
+        f"Güncel olmayan oran: {filter_counts['stale_odds']} · "
         f"Model tutarsızlığı: {filter_counts['sanity']} · %50 altı: {filter_counts['below_probability']}"
     )
 
@@ -207,28 +209,36 @@ def render_coupon(title: str, selected: list[dict[str, object]], color: str) -> 
         st.write(f"- **{row['time']} · {row['match']}** — {label(item)}")
     st.caption(f"Yaklaşık toplam oran: **{total:.2f}** · Garanti değildir.")
 
-st.caption(f"Bugünün oranlı ve tahminli maç sayısı: {len(rows)}")
-render_coupon("Düşük riskli kupon", diversified_coupon_rows(rows, max_items=None, min_probability=0.55, min_ev=0.0), "🟢")
+eligible_rows = diversified_coupon_rows(rows, min_probability=0.55, min_ev=1e-9)
+st.caption(f"Bugünün kupona uygun value seçimi: {len(eligible_rows)}")
+render_coupon(
+    "Düşük riskli kupon",
+    diversified_coupon_rows(rows, max_items=None, min_probability=0.55, min_ev=1e-9),
+    "🟢",
+)
 render_coupon("Dengeli kupon", diversified_coupon_rows(rows, max_items=None, min_ev=0.03), "🟡")
 render_coupon("Yüksek oranlı kupon", diversified_coupon_rows(rows, max_items=None, min_ev=0.03, high_odds=True), "🔴")
 
 st.divider()
 st.subheader("Kupona uygun maçların value tablosu")
-st.dataframe(
-    pd.DataFrame([
-        {
-            "Saat": row["time"], "Karşılaşma": row["match"], "Seçim": label(row["best"]),
-            "Value": f"%{row['best'].expected_value * 100:+.1f}",
-            "Oran kaynağı": row["bookmaker"],
-            "Oran güncelleme": (
-                row["odds_captured_at"].strftime("%d.%m.%Y %H:%M")
-                if hasattr(row.get("odds_captured_at"), "strftime")
-                else "Bilinmiyor"
-            ),
-            "Lig": row["league"],
-        }
-        for row in rows
-    ]),
-    hide_index=True,
-    width="stretch",
-)
+if not eligible_rows:
+    st.info("Güncel oran ve pozitif value koşullarını karşılayan seçim yok.")
+else:
+    st.dataframe(
+        pd.DataFrame([
+            {
+                "Saat": row["time"], "Karşılaşma": row["match"], "Seçim": label(row["best"]),
+                "Value": f"%{row['best'].expected_value * 100:+.1f}",
+                "Oran kaynağı": row["bookmaker"],
+                "Oran güncelleme": (
+                    row["odds_captured_at"].strftime("%d.%m.%Y %H:%M")
+                    if hasattr(row.get("odds_captured_at"), "strftime")
+                    else "Bilinmiyor"
+                ),
+                "Lig": row["league"],
+            }
+            for row in eligible_rows
+        ]),
+        hide_index=True,
+        width="stretch",
+    )

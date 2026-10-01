@@ -16,6 +16,7 @@ from config.settings import PROJECT_ROOT, UPCOMING_HORIZON_DAYS, get_settings
 from data_pipeline.odds import attach_pre_match_odds
 from db.db_client import DatabaseError, SupabaseRestClient
 from models.artifact_store import (
+    ArtifactIntegrityError,
     ArtifactStoreError,
     download_model_artifacts,
     load_verified_joblib,
@@ -124,6 +125,10 @@ def resolve_model_path(model_path: Path | None = None) -> Path:
         downloaded = download_model_artifacts("latest", dest_dir=model_dir)
         if "model" in downloaded and downloaded["model"].is_file():
             return downloaded["model"]
+    except ArtifactIntegrityError:
+        # A missing or mismatched manifest is not a network outage. Falling
+        # back to an unverified local copy would silently weaken integrity.
+        raise
     except ArtifactStoreError:
         pass
     latest_path = model_dir / "latest.joblib"

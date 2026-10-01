@@ -377,7 +377,16 @@ class CausalFeatureState:
             home_lambda = (1.0 - shrinkage) * home_lambda + shrinkage * league_home
             away_lambda = (1.0 - shrinkage) * away_lambda + shrinkage * league_away
         rho = self.league_rhos.get(league_id, 0.0)
-        return predict_score_probabilities(home_lambda, away_lambda, dixon_coles_rho=rho)
+        try:
+            return predict_score_probabilities(home_lambda, away_lambda, dixon_coles_rho=rho)
+        except ValueError as exc:
+            if "non-positive score probability" not in str(exc):
+                raise
+            # A historical league rho can be infeasible for this fixture's
+            # larger lambdas. Preserve a valid causal baseline without
+            # changing the fitted rho for other fixtures.
+            LOGGER.warning("Infeasible Dixon-Coles rho for league %s; using independent Poisson", league_id)
+            return predict_score_probabilities(home_lambda, away_lambda)
 
     def feature_row(self, row: dict[str, Any]) -> dict[str, float]:
         self._prepare_season(row)

@@ -9,7 +9,7 @@ from typing import Any
 
 import pandas as pd
 
-from app.components.freshness import FRESHNESS_CURRENT, freshness_status
+from app.components.freshness import odds_are_current
 from app.components.ui import prediction_signal
 from data_pipeline.value_bets import vig_free_probabilities
 from models.decision_policy import minimum_confidence_for_league
@@ -114,16 +114,7 @@ def _current_odds(
     captured_at = quote.get("captured_at")
     if not isinstance(odds, Mapping) or captured_at is None:
         return None
-    if isinstance(captured_at, pd.Timestamp):
-        captured_at = captured_at.to_pydatetime()
-    elif not isinstance(captured_at, datetime):
-        try:
-            captured_at = datetime.fromisoformat(
-                str(captured_at).replace("Z", "+00:00")
-            )
-        except ValueError:
-            return None
-    if freshness_status(captured_at, source="odds", now=now) != FRESHNESS_CURRENT:
+    if not odds_are_current(captured_at, now=now):
         return None
     return odds
 

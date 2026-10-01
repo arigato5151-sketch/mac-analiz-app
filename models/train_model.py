@@ -33,6 +33,12 @@ from config.settings import (
 )
 from data_pipeline.odds import attach_pre_match_odds
 from db.db_client import DatabaseError, SupabaseRestClient
+from models.artifact_store import (
+    MANIFEST_NAME,
+    ArtifactIntegrityError,
+    build_artifact_manifest,
+    load_verified_joblib,
+)
 from models.calibration import (
     apply_binary_temperature,
     apply_multiclass_temperature,
@@ -814,6 +820,15 @@ def save_model_bundle(
     bundle: dict[str, Any], output_dir: Path, *, publish_latest: bool = False
 ) -> tuple[Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
+    existing_models = list(output_dir.glob("*.joblib"))
+    if existing_models:
+        manifest_path = output_dir / MANIFEST_NAME
+        if not manifest_path.is_file():
+            raise ArtifactIntegrityError(
+                "Existing model artifacts need a trusted manifest before retraining"
+            )
+        for existing_model in existing_models:
+            load_verified_joblib(existing_model, manifest_path=manifest_path)
     version = datetime.now(timezone.utc).strftime("v%Y%m%dT%H%M%SZ")
     model_path = output_dir / f"model_{version}.joblib"
     metadata_path = output_dir / f"model_{version}.json"
@@ -854,6 +869,10 @@ def save_model_bundle(
         temporary_latest = output_dir / "latest.tmp"
         joblib.dump(versioned_bundle, temporary_latest, compress=3)
         os.replace(temporary_latest, latest_path)
+    (output_dir / MANIFEST_NAME).write_text(
+        json.dumps(build_artifact_manifest(output_dir), indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
     return model_path, metadata_path
 
 

@@ -23,6 +23,7 @@ from app.components.data import (
     load_upcoming_dashboard,
 )
 from app.components.decision_board import build_match_decisions
+from app.components.freshness import odds_are_current
 from app.components.model_registry import active_production_version, version_label
 from app.components.ui import (
     compact_dashboard_display,
@@ -42,7 +43,7 @@ configure_page("Ana Sayfa")
 page_header(
     "Maçları tek bakışta değerlendirin",
     "Bugün ve yarının önceliklendirilmiş karar özeti; tüm program ikincil görünümdedir.",
-    eyebrow="25 LİG · GÜNCEL TAHMİNLER",
+    eyebrow="25 LİG · MAÇ TAHMİNLERİ",
 )
 disclaimer()
 auth_enabled = render_auth_panel()
@@ -54,8 +55,8 @@ except Exception:  # Streamlit must remain usable during upstream outages.
     st.stop()
 
 st.caption(
-    "Analiz ekran\u0131 yaln\u0131zca incelemeye de\u011fer ma\u00e7lar\u0131 \\u00f6ne \\u00e7\u0131kar\u0131r. "
-    "Olas\u0131l\u0131klar kesin sonu\u00e7 de\u011fildir."
+    "Analiz ekranı yalnızca incelemeye değer maçları öne çıkarır. "
+    "Olasılıklar kesin sonuç değildir."
 )
 
 if not matches.empty and "model_version" in matches:
@@ -98,6 +99,12 @@ if not matches.empty and "model_version" in matches:
         st.caption(
             f"Son tahmin güncellemesi: {latest_prediction:%d.%m %H:%M} (Europe/Istanbul)"
         )
+        prediction_age = datetime.now(ZoneInfo("Europe/Istanbul")) - latest_prediction.to_pydatetime()
+        if prediction_age > timedelta(hours=24):
+            st.warning(
+                "Tahminler son 24 saatte yenilenmedi; maç seçmeden önce "
+                "veri güncelliğini doğrulayın."
+            )
 
 
 def open_detail(match_id: int) -> None:
@@ -183,6 +190,8 @@ else:
             value_match_ids = set()
             for _, match_row in window.iterrows():
                 odds_row = odds_by_match.get(int(match_row["id"]), {})
+                if not odds_are_current(odds_row.get("captured_at"), now=istanbul_now):
+                    continue
                 raw_odds = odds_row.get("odds") if isinstance(odds_row, dict) else None
                 if not isinstance(raw_odds, dict):
                     continue
@@ -235,7 +244,9 @@ else:
                     "away_win": "prob_away_win",
                 }
                 raw_odds = odds_row.get("odds") if isinstance(odds_row, dict) else None
-                if isinstance(raw_odds, dict):
+                if isinstance(raw_odds, dict) and odds_are_current(
+                    odds_row.get("captured_at"), now=istanbul_now
+                ):
                     value = best_value_assessment(
                         {
                             odds_key: match_row.get(probability_key)
@@ -283,7 +294,9 @@ else:
                         cols[1].caption(decision.market_gap)
                     odds_row = odds_by_match.get(int(decision.match_id), {})
                     raw_odds = odds_row.get("odds") if isinstance(odds_row, dict) else None
-                    if isinstance(raw_odds, dict):
+                    if isinstance(raw_odds, dict) and odds_are_current(
+                        odds_row.get("captured_at"), now=istanbul_now
+                    ):
                         match_row = window.loc[window["id"] == decision.match_id].iloc[0]
                         value = best_value_assessment(
                             {

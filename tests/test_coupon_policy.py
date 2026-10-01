@@ -46,6 +46,16 @@ def test_coupon_requires_higher_threshold_for_btts():
     assert diversified_coupon_rows(rows, min_ev=0.0) == []
 
 
+def test_coupon_value_table_candidates_exclude_negative_ev() -> None:
+    negative = SimpleNamespace(key="home_win", expected_value=-.397, model_probability=.60, odds=1.15)
+    positive = SimpleNamespace(key="away_win", expected_value=.04, model_probability=.60, odds=1.80)
+    rows = [
+        {"match_id": 1, "assessments": [negative], "best": negative},
+        {"match_id": 2, "assessments": [positive], "best": positive},
+    ]
+    assert [row["match_id"] for row in diversified_coupon_rows(rows, min_ev=0.0)] == [2]
+
+
 def test_same_match_can_use_different_market_families():
     def item(key):
         return SimpleNamespace(key=key, expected_value=.40, model_probability=.6, odds=2.0)

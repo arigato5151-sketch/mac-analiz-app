@@ -253,15 +253,14 @@ def download_model_artifacts(
     except ArtifactStoreError as exc:
         raise ArtifactIntegrityError(f"Artifact manifest '{MANIFEST_NAME}' is unavailable") from exc
 
+    # The bundle is not usable until its manifest matches. Do not return a
+    # partially downloaded or mismatched model to scheduled prediction jobs.
+    bundle = load_verified_joblib(downloaded["model"], manifest_path=downloaded["manifest"])
     snapshot_version = base_name
     if base_name == "latest":
-        try:
-            bundle = load_verified_joblib(downloaded["model"], manifest_path=downloaded["manifest"])
-            stored_version = str(bundle.get("model_version", "")).strip()
-            if stored_version:
-                snapshot_version = stored_version
-        except Exception as exc:
-            LOGGER.warning("Could not resolve version from latest model bundle: %s", exc)
+        stored_version = str(bundle.get("model_version", "")).strip()
+        if stored_version:
+            snapshot_version = stored_version
 
     # Companion files are best-effort. Prefer stable aliases, then fall back to
     # versioned objects produced by older training runs.

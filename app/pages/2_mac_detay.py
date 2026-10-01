@@ -29,6 +29,7 @@ from app.components.freshness import (
     FRESHNESS_CURRENT,
     FRESHNESS_STALE,
     freshness_status,
+    odds_are_current,
 )
 from app.components.match_visuals import build_form_comparison, build_radar_comparison
 from app.components.model_registry import (
@@ -369,10 +370,11 @@ try:
             width="stretch",
         )
         odds_reference = odds_history["captured_at"].max().to_pydatetime()
+        odds_now = pd.Timestamp.now(tz="UTC").to_pydatetime()
         odds_age_status = freshness_status(
             odds_reference,
             source="odds",
-            now=pd.Timestamp.now(tz="UTC").to_pydatetime(),
+            now=odds_now,
         )
         st.caption(
             f"Oran verisi: {odds_age_status} (son kayıt {odds_reference:%d.%m %H:%M}). "
@@ -397,7 +399,11 @@ try:
                 else None
             ),
         }
-        value_assessments = assess_market_value(model_probabilities, latest_odds)
+        quote_is_current = odds_are_current(odds_reference, now=odds_now)
+        value_assessments = (
+            assess_market_value(model_probabilities, latest_odds)
+            if quote_is_current else []
+        )
         if value_assessments:
             st.subheader("Oran ve olasılık karşılaştırması")
             st.caption(
@@ -429,6 +435,8 @@ try:
                 ]
             )
             st.dataframe(value_frame, hide_index=True, width="stretch")
+        elif not quote_is_current:
+            st.info("Son oran kaydı güncel değil; değer hesabı gösterilmiyor.")
         else:
             st.info("Son oran kaydında modelle eşleşen geçerli pazar bulunamadı; value hesaplanmadı.")
 except Exception:

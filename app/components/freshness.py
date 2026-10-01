@@ -31,3 +31,19 @@ def freshness_status(
     if now - reference > limit:
         return FRESHNESS_STALE
     return FRESHNESS_CURRENT
+
+
+def odds_are_current(reference: object, *, now: datetime) -> bool:
+    """Only timestamped, timezone-aware quotes may enter live value calculations."""
+    if hasattr(reference, "to_pydatetime"):
+        reference = reference.to_pydatetime()
+    elif isinstance(reference, str):
+        try:
+            reference = datetime.fromisoformat(reference.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+    if not isinstance(reference, datetime) or reference.tzinfo is None:
+        return False
+    if reference > now:
+        return False
+    return freshness_status(reference, source="odds", now=now) == FRESHNESS_CURRENT

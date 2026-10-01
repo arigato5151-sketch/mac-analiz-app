@@ -13,7 +13,9 @@ import pandas as pd
 import pytest
 
 from models.artifact_store import (
+    ArtifactIntegrityError,
     ArtifactStoreError,
+    build_artifact_manifest,
     download_model_artifacts,
     push_local_models,
 )
@@ -138,7 +140,12 @@ def test_download_model_artifacts_lifecycle(tmp_path: Path):
         if "missing" in name:
             raise ArtifactStoreError(f"Object not found: {name}")
         out_path = Path(dest_dir) / name
-        out_path.write_bytes(b"dummy_content")
+        if name == "latest.joblib":
+            joblib.dump({"model_version": "model_v20260923T070000Z"}, out_path)
+        elif name == "artifact_manifest.json":
+            out_path.write_text(json.dumps(build_artifact_manifest(tmp_path)), encoding="utf-8")
+        else:
+            out_path.write_bytes(b"dummy_content")
         return out_path
 
     with patch("models.artifact_store.download_model", side_effect=mock_download):
@@ -148,6 +155,33 @@ def test_download_model_artifacts_lifecycle(tmp_path: Path):
     assert "metadata" in artifacts
     assert artifacts["model"].name == "latest.joblib"
     assert (tmp_path / "latest.joblib").is_file()
+
+
+def test_download_bundle_rejects_missing_remote_manifest(tmp_path: Path):
+    def mock_download(name, dest_dir=None, local_path=None):
+        if name == "artifact_manifest.json":
+            raise ArtifactStoreError("not found")
+        out_path = Path(dest_dir) / name
+        joblib.dump({"model_version": "test"}, out_path)
+        return out_path
+
+    with patch("models.artifact_store.download_model", side_effect=mock_download):
+        with pytest.raises(ArtifactIntegrityError, match="manifest.*unavailable"):
+            download_model_artifacts("latest", dest_dir=tmp_path)
+
+
+def test_download_bundle_rejects_bad_manifest_checksum(tmp_path: Path):
+    def mock_download(name, dest_dir=None, local_path=None):
+        out_path = Path(dest_dir) / name
+        if name == "latest.joblib":
+            joblib.dump({"model_version": "test"}, out_path)
+        elif name == "artifact_manifest.json":
+            out_path.write_text(json.dumps({"artifacts": {"latest.joblib": "wrong"}}), encoding="utf-8")
+        return out_path
+
+    with patch("models.artifact_store.download_model", side_effect=mock_download):
+        with pytest.raises(ArtifactIntegrityError, match="checksum mismatch"):
+            download_model_artifacts("latest", dest_dir=tmp_path)
 
 
 def test_download_model_artifacts_storage_unreachable_fallback(tmp_path: Path):
