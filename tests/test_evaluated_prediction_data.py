@@ -71,6 +71,15 @@ class DashboardDb:
             return [{"id": 39, "name": "Lig", "country": "TR"}]
         raise AssertionError(f"Unexpected table: {table}")
 
+    def select(self, table: str, **kwargs: Any) -> list[dict[str, Any]]:
+        assert table == "predictions"
+        assert kwargs == {
+            "columns": "predicted_at",
+            "order": "predicted_at.desc",
+            "limit": 1,
+        }
+        return [{"predicted_at": "2026-09-02T12:00:00+00:00"}]
+
 
 class PerformanceDb:
     def __init__(self) -> None:
@@ -79,38 +88,6 @@ class PerformanceDb:
     def select_all(self, table: str, **kwargs: Any) -> list[dict[str, Any]]:
         self.calls.append((table, kwargs))
         return []
-
-
-class LatestPredictionDb:
-    def __init__(self, rows: list[dict[str, Any]]) -> None:
-        self.rows = rows
-        self.call: tuple[str, dict[str, Any]] | None = None
-
-    def select(self, table: str, **kwargs: Any) -> list[dict[str, Any]]:
-        self.call = (table, kwargs)
-        return self.rows
-
-
-def test_latest_prediction_time_is_not_limited_to_visible_fixtures(monkeypatch) -> None:
-    db = LatestPredictionDb([{"predicted_at": "2026-10-01T07:00:00+00:00"}])
-    data.load_latest_prediction_time.clear()
-    monkeypatch.setattr(data, "get_db", lambda: db)
-
-    timestamp = data.load_latest_prediction_time()
-
-    assert timestamp.isoformat() == "2026-10-01T10:00:00+03:00"
-    assert db.call == (
-        "predictions",
-        {"columns": "predicted_at", "order": "predicted_at.desc", "limit": 1},
-    )
-
-
-def test_latest_prediction_time_returns_none_when_no_timestamp(monkeypatch) -> None:
-    db = LatestPredictionDb([])
-    data.load_latest_prediction_time.clear()
-    monkeypatch.setattr(data, "get_db", lambda: db)
-
-    assert data.load_latest_prediction_time() is None
 
 
 def test_evaluated_predictions_use_single_database_view(monkeypatch) -> None:
@@ -141,6 +118,7 @@ def test_upcoming_dashboard_requests_predictions_only_for_visible_fixtures(monke
     assert frame.loc[0, "home_team"] == "Ev"
     assert frame.loc[0, "market_probabilities"] == {"double_chance": {"1X": 0.8}}
     assert str(frame.loc[0, "predicted_at"].tz) == "Europe/Istanbul"
+    assert frame.loc[0, "latest_prediction_at"].isoformat() == "2026-09-02T15:00:00+03:00"
 
 
 def test_live_performance_requests_diversified_market_fields(monkeypatch) -> None:

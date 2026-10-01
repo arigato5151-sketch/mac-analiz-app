@@ -63,6 +63,21 @@ def load_upcoming_dashboard(
     horizon_days: int = UPCOMING_HORIZON_DAYS,
 ) -> pd.DataFrame:
     db = get_db()
+    latest_rows = db.select(
+        "predictions",
+        columns="predicted_at",
+        order="predicted_at.desc",
+        limit=1,
+    )
+    if latest_rows and latest_rows[0].get("predicted_at"):
+        latest_prediction = pd.to_datetime(
+            latest_rows[0]["predicted_at"], utc=True, errors="coerce"
+        )
+        if pd.notna(latest_prediction):
+            latest_prediction = latest_prediction.tz_convert("Europe/Istanbul")
+    else:
+        latest_prediction = pd.NaT
+
     now = datetime.now(timezone.utc)
     end = now + timedelta(days=horizon_days)
     matches = db.select_all(
@@ -75,7 +90,7 @@ def load_upcoming_dashboard(
         order="match_date.asc,id.asc",
     )
     if not matches:
-        return pd.DataFrame()
+        return pd.DataFrame({"latest_prediction_at": [latest_prediction]})
 
     match_ids = ",".join(str(int(match["id"])) for match in matches)
     predictions = pd.DataFrame(
@@ -110,28 +125,12 @@ def load_upcoming_dashboard(
     frame["match_date"] = pd.to_datetime(frame["match_date"], utc=True).dt.tz_convert(
         "Europe/Istanbul"
     )
+    frame["latest_prediction_at"] = latest_prediction
     if "predicted_at" in frame:
         frame["predicted_at"] = pd.to_datetime(
             frame["predicted_at"], utc=True, errors="coerce"
         ).dt.tz_convert("Europe/Istanbul")
     return frame.sort_values("match_date").reset_index(drop=True)
-
-
-@st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
-def load_latest_prediction_time() -> pd.Timestamp | None:
-    """Return the newest prediction timestamp, independent of upcoming fixtures."""
-    rows = get_db().select(
-        "predictions",
-        columns="predicted_at",
-        order="predicted_at.desc",
-        limit=1,
-    )
-    if not rows or not rows[0].get("predicted_at"):
-        return None
-    timestamp = pd.to_datetime(rows[0]["predicted_at"], utc=True, errors="coerce")
-    if pd.isna(timestamp):
-        return None
-    return timestamp.tz_convert("Europe/Istanbul")
 
 
 @st.cache_data(ttl=MATCH_DETAIL_TTL_SECONDS, show_spinner="Poisson baseline hazırlanıyor...")

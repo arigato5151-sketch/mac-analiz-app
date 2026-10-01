@@ -19,7 +19,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.components.auth import current_user_id, get_user_db, render_auth_panel
 from app.components.data import (
     UPCOMING_HORIZON_DAYS,
-    load_latest_prediction_time,
     load_recent_odds_for_matches,
     load_upcoming_dashboard,
 )
@@ -89,10 +88,7 @@ if not matches.empty and "model_version" in matches:
             st.warning(f"{collapse_warning} Tahminleri temkinli yorumlayın.")
 
     # Use the whole prediction table, not only fixtures still shown as upcoming.
-    try:
-        latest_prediction = load_latest_prediction_time()
-    except Exception:
-        latest_prediction = None
+    latest_prediction = matches["latest_prediction_at"].dropna().max()
     if latest_prediction is not None:
         st.caption(
             f"Son tahmin güncellemesi: {latest_prediction:%d.%m %H:%M} (Europe/Istanbul)"
