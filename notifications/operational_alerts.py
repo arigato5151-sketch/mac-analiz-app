@@ -94,6 +94,7 @@ def collect_health_report(db: SupabaseRestClient, *, now: datetime) -> dict[str,
         "result_notification_queue",
         columns="match_id,available_at",
         filters={"sent_at": "is.null"},
+        order="prediction_id.asc",
     )
     active = db.select_all(
         "matches",
