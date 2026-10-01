@@ -55,9 +55,11 @@ def test_explicit_registration_rejects_mismatched_version(tmp_path):
 class _NoFinishedMatchesDb:
     def __init__(self) -> None:
         self.queried: set[str] = set()
+        self.orders: dict[str, str | None] = {}
 
     def select_all(self, table: str, **kwargs: object) -> list[dict]:
         self.queried.add(table)
+        self.orders[table] = kwargs.get("order")
         if table == "shadow_prediction_performance":
             assert kwargs["order"] == "shadow_prediction_id.asc"
             return []
@@ -76,6 +78,7 @@ def test_shadow_evaluation_skips_scan_when_no_finished_matches() -> None:
 
     assert evaluate_shadow_predictions(db) == []
     assert db.queried <= {"shadow_prediction_performance", "matches"}
+    assert db.orders["shadow_prediction_performance"] == "shadow_prediction_id.asc"
 
 
 def test_shadow_candidate_needs_a_sufficient_same_match_sample() -> None:

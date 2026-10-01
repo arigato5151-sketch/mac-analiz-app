@@ -117,6 +117,23 @@ def load_upcoming_dashboard(
     return frame.sort_values("match_date").reset_index(drop=True)
 
 
+@st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
+def load_latest_prediction_time() -> pd.Timestamp | None:
+    """Return the newest prediction timestamp, independent of upcoming fixtures."""
+    rows = get_db().select(
+        "predictions",
+        columns="predicted_at",
+        order="predicted_at.desc",
+        limit=1,
+    )
+    if not rows or not rows[0].get("predicted_at"):
+        return None
+    timestamp = pd.to_datetime(rows[0]["predicted_at"], utc=True, errors="coerce")
+    if pd.isna(timestamp):
+        return None
+    return timestamp.tz_convert("Europe/Istanbul")
+
+
 @st.cache_data(ttl=MATCH_DETAIL_TTL_SECONDS, show_spinner="Poisson baseline hazırlanıyor...")
 def load_match_baseline(match_id: int) -> dict[str, Any]:
     db = get_db()
