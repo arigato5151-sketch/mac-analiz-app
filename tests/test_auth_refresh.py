@@ -1,4 +1,16 @@
+import pytest
+
 from app.components import auth
+from config.settings import PublicSupabaseSettings
+
+
+@pytest.fixture(autouse=True)
+def configured_public_supabase(monkeypatch):
+    monkeypatch.setattr(
+        auth,
+        "get_public_supabase_settings",
+        lambda: PublicSupabaseSettings("https://example.supabase.co", "test-anon-key"),
+    )
 
 
 def test_current_access_token_refreshes_expired_session(monkeypatch):
