@@ -46,28 +46,38 @@ MARKET_REQUIRED_CI_UPPER = -0.005
 
 def candidate_path(model_version: str) -> Path:
     path = PROJECT_ROOT / "models" / "saved_models" / f"{model_version}.joblib"
-    if not path.is_file():
-        # A fresh clone or CI checkout may not carry the binary. Re-hydrate it
-        # from Supabase Storage rather than failing shadow evaluation.
-        try:
-            result = download_model(f"{model_version}.joblib", dest_dir=path.parent)
-            download_model("artifact_manifest.json", dest_dir=path.parent)
-            return result
-        except ArtifactStoreError as error:
-            raise FileNotFoundError(
-                f"Candidate model artifact is missing: {model_version}"
-            ) from error
-    return path
+    if path.is_file():
+        load_verified_joblib(path)
+        return path
+    # Normal weekly candidates share the production bundle manifest.
+    try:
+        result = download_model(f"{model_version}.joblib", dest_dir=path.parent)
+        download_model("artifact_manifest.json", dest_dir=path.parent)
+        load_verified_joblib(result)
+        return result
+    except ArtifactStoreError:
+        pass
+    # Recovery candidates have their own manifest. Keep it isolated so it
+    # cannot replace the production manifest in a scheduled runner.
+    recovery_dir = path.parent / "recovery" / model_version
+    prefix = f"recovery/{model_version}/"
+    try:
+        result = download_model(prefix + path.name, dest_dir=recovery_dir)
+        download_model(prefix + "artifact_manifest.json", dest_dir=recovery_dir)
+        load_verified_joblib(result)
+        return result
+    except ArtifactStoreError as error:
+        raise FileNotFoundError(
+            f"Verified candidate artifact is missing: {model_version}"
+        ) from error
 
 
-def register_newest_candidate(db: SupabaseRestClient) -> dict[str, Any]:
-    """Register the newest versioned artifact; `latest.joblib` is never a candidate."""
-    model_dir = PROJECT_ROOT / "models" / "saved_models"
-    path = newest_versioned_model(model_dir)
-    if path is None:
-        raise FileNotFoundError("No versioned model artifact was found")
+def register_candidate_artifact(db: SupabaseRestClient, path: Path) -> dict[str, Any]:
+    """Register an explicitly selected, locally verified shadow candidate."""
     bundle = load_verified_joblib(path)
-    version = str(bundle.get("model_version", path.stem))
+    version = str(bundle.get("model_version", "")).strip()
+    if not version or version != path.stem or not version.startswith("model_v"):
+        raise ValueError("Candidate artifact version does not match its filename")
     existing = db.select(
         "model_candidates",
         columns="model_version,status",
@@ -75,8 +85,6 @@ def register_newest_candidate(db: SupabaseRestClient) -> dict[str, Any]:
         limit=1,
     )
     if existing and existing[0]["status"] == "promoted":
-        # Re-registering a promoted version would flip it back to shadow and let
-        # promote_candidate "re-promote" the live model for no reason.
         return existing[0]
     row = {
         "model_version": version,
@@ -85,6 +93,15 @@ def register_newest_candidate(db: SupabaseRestClient) -> dict[str, Any]:
         "registered_at": datetime.now(timezone.utc).isoformat(),
     }
     return db.upsert("model_candidates", [row], on_conflict="model_version")[0]
+
+
+def register_newest_candidate(db: SupabaseRestClient) -> dict[str, Any]:
+    """Register the newest versioned artifact; `latest.joblib` is never a candidate."""
+    model_dir = PROJECT_ROOT / "models" / "saved_models"
+    path = newest_versioned_model(model_dir)
+    if path is None:
+        raise FileNotFoundError("No versioned model artifact was found")
+    return register_candidate_artifact(db, path)
 
 
 def run_shadow_predictions(
@@ -500,6 +517,7 @@ def shadow_report(db: SupabaseRestClient) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--register-newest", action="store_true")
+    parser.add_argument("--register-artifact", type=Path)
     parser.add_argument("--evaluate", action="store_true")
     parser.add_argument("--promote")
     parser.add_argument("--report", action="store_true")
@@ -510,6 +528,10 @@ def main() -> None:
     result: dict[str, Any] = {}
     if args.register_newest:
         result["candidate"] = register_newest_candidate(db)["model_version"]
+    if args.register_artifact:
+        result["candidate"] = register_candidate_artifact(
+            db, args.register_artifact
+        )["model_version"]
     if args.evaluate:
         result["evaluated"] = len(evaluate_shadow_predictions(db))
     if args.promote:
@@ -518,6 +540,7 @@ def main() -> None:
         result["report"] = shadow_report(db)
     if (
         not args.register_newest
+        and not args.register_artifact
         and not args.evaluate
         and not args.promote
         and not args.report

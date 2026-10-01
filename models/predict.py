@@ -186,6 +186,7 @@ def load_upcoming_matches(
     availability = db.select_all(
         "team_availability_status",
         columns="team_id,available_count,unavailable_count,refreshed_at",
+        order="team_id.asc",
     )
     fallback_availability: dict[int, dict[str, int]] = {}
     for row in availability:
@@ -202,7 +203,9 @@ def load_upcoming_matches(
             "available_count": int(row["available_count"]),
             "unavailable_count": int(row["unavailable_count"]),
         }
-    lineups = db.select_all("fixture_lineups", columns="match_id,team_id")
+    lineups = db.select_all(
+        "fixture_lineups", columns="match_id,team_id", order="match_id.asc,team_id.asc"
+    )
     confirmed = {(int(row["match_id"]), int(row["team_id"])) for row in lineups}
     enriched = attach_pre_match_odds(matches, quotes, observed_at=now)
     for match in enriched:

@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import json
+
+import joblib
+import pytest
+
+import models.shadow as shadow
+from models.artifact_store import ArtifactStoreError, build_artifact_manifest
 from models.shadow import (
     MAXIMUM_PROMOTION_BRIER,
     MINIMUM_PROMOTION_ACCURACY,
@@ -8,6 +15,41 @@ from models.shadow import (
     paired_market_comparison,
     promotion_decision,
 )
+
+
+def test_recovery_candidate_uses_its_own_verified_manifest(tmp_path, monkeypatch):
+    monkeypatch.setattr(shadow, "PROJECT_ROOT", tmp_path)
+    version = "model_v20261001T082640Z"
+    requests: list[str] = []
+
+    def fake_download(name, *, dest_dir):
+        requests.append(name)
+        if not name.startswith("recovery/"):
+            raise ArtifactStoreError("legacy artifact missing")
+        target = dest_dir / name.rsplit("/", 1)[-1]
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        if target.suffix == ".joblib":
+            joblib.dump({"model_version": version}, target)
+        else:
+            target.write_text(json.dumps(build_artifact_manifest(dest_dir)), encoding="utf-8")
+        return target
+
+    monkeypatch.setattr(shadow, "download_model", fake_download)
+    path = shadow.candidate_path(version)
+
+    assert path.parent.name == version
+    assert requests[-1] == f"recovery/{version}/artifact_manifest.json"
+
+
+def test_explicit_registration_rejects_mismatched_version(tmp_path):
+    path = tmp_path / "model_v20261001T082640Z.joblib"
+    joblib.dump({"model_version": "other"}, path)
+    (tmp_path / "artifact_manifest.json").write_text(
+        json.dumps(build_artifact_manifest(tmp_path)), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="does not match"):
+        shadow.register_candidate_artifact(object(), path)
 
 
 class _NoFinishedMatchesDb:
