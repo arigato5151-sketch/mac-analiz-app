@@ -23,6 +23,7 @@ from app.components.data import (
 from app.components.live_performance import (
     build_performance_breakdowns,
     summarize_live_performance,
+    wilson_interval,
 )
 from app.components.market_performance import summarize_diversified_market_performance
 from app.components.model_registry import STATUS_CANDIDATE, load_model_registry
@@ -35,6 +36,7 @@ from monitoring.drift_service import DriftMonitoringService
 
 LOGGER = logging.getLogger(__name__)
 CHART_CONFIG = {"displayModeBar": False, "displaylogo": False}
+SHADOW_THRESHOLD_START = pd.Timestamp("2026-10-01T06:14:27Z")
 
 
 configure_page("Model Performansı")
@@ -488,6 +490,7 @@ else:
         f"Canlı metrikler yalnızca {selected_model_version} sürümüne aittir."
     )
     performance["evaluated_at"] = pd.to_datetime(performance["evaluated_at"], utc=True)
+    performance["predicted_at"] = pd.to_datetime(performance["predicted_at"], utc=True)
     performance["rolling_accuracy"] = performance["was_correct"].astype(float).rolling(30, min_periods=1).mean()
     performance["rolling_brier"] = performance["brier_score"].astype(float).rolling(30, min_periods=1).mean()
     reference_brier = metrics.get("brier_score") if metadata else None
@@ -506,8 +509,29 @@ else:
     actionable_accuracy = (
         actionable["was_correct"].astype(bool).mean() if not actionable.empty else None
     )
+    # Track the stricter 60% gate only on predictions made after the experiment
+    # start; immutable pre-match snapshots provide the prediction timestamp.
+    shadow_threshold = 0.60
+    experiment_cohort = performance[
+        performance["predicted_at"] >= SHADOW_THRESHOLD_START
+    ]
+    experiment_confidence = result_confidence.loc[experiment_cohort.index]
+    shadow_actionable = experiment_cohort[
+        experiment_confidence >= shadow_threshold
+    ]
+    shadow_accuracy = (
+        shadow_actionable["was_correct"].astype(bool).mean()
+        if not shadow_actionable.empty
+        else None
+    )
+    shadow_sample_ready = len(shadow_actionable) >= 100
+    shadow_coverage = (
+        len(shadow_actionable) / len(experiment_cohort)
+        if not experiment_cohort.empty
+        else 0.0
+    )
 
-    summary_columns = st.columns(6)
+    summary_columns = st.columns(7)
     summary_columns[0].metric("Değerlendirilen maç", str(summary.sample_size))
     summary_columns[1].metric("Tüm 1X2 isabet", f"%{summary.accuracy * 100:.1f}")
     summary_columns[2].metric(
@@ -523,10 +547,77 @@ else:
         f"%{len(actionable) / len(performance) * 100:.1f}",
     )
     summary_columns[5].metric("Canlı Brier", f"{summary.brier_score:.3f}")
+    summary_columns[6].metric(
+        "Gölge %60 isabet",
+        (
+            f"%{shadow_accuracy * 100:.1f}"
+            if shadow_sample_ready and shadow_accuracy is not None
+            else "Veri bekleniyor"
+        ),
+        delta=(
+            f"n={len(shadow_actionable)}/100 gerekli · "
+            f"sonuçlanan {len(experiment_cohort)} · "
+            f"kapsama %{shadow_coverage * 100:.1f}"
+        ),
+        delta_color="off",
+        help=(
+            "İleri testte %60 ve üzeri güvenli en az 100 sonuç birikmeden isabet "
+            "gösterilmez. Bu ölçüm tahmin ve kupon önerilerini değiştirmez."
+        ),
+    )
     st.caption(
         f"Güvenli 1X2, en yüksek sonuç olasılığı en az "
         f"%{MINIMUM_ACTIONABLE_1X2_CONFIDENCE * 100:.0f} olan maçları kapsar; "
-        "diğer maçlar Telegram'da Pas olarak işaretlenir."
+        "diğer maçlar Telegram'da Pas olarak işaretlenir. Gölge %60 ölçümü "
+        "mevcut önerilere uygulanmaz; yalnızca deney başlangıcından sonra "
+        "kaydedilen tahminleri kapsar."
+    )
+
+    st.subheader("1-X-2 güven eşiği karşılaştırması")
+    threshold_rows = []
+    for threshold in (MINIMUM_ACTIONABLE_1X2_CONFIDENCE, shadow_threshold):
+        selected = experiment_cohort[
+            experiment_confidence >= threshold
+        ]
+        selected_count = len(selected)
+        selected_accuracy = (
+            selected["was_correct"].astype(bool).mean()
+            if selected_count
+            else None
+        )
+        interval = (
+            wilson_interval(
+                int(selected["was_correct"].astype(bool).sum()), selected_count
+            )
+            if selected_count >= 100
+            else None
+        )
+        threshold_rows.append(
+            {
+                "Güven eşiği": f"%{threshold * 100:.0f}",
+                "Maç": selected_count,
+                "Kapsama": (
+                    f"%{selected_count / len(experiment_cohort) * 100:.1f}"
+                    if not experiment_cohort.empty
+                    else "—"
+                ),
+                "İsabet": (
+                    f"%{selected_accuracy * 100:.1f}"
+                    if selected_accuracy is not None and selected_count >= 100
+                    else f"Veri bekleniyor ({selected_count}/100)"
+                ),
+                "%95 güven aralığı": (
+                    f"%{interval[0] * 100:.1f} – %{interval[1] * 100:.1f}"
+                    if interval is not None
+                    else "—"
+                ),
+            }
+        )
+    st.dataframe(pd.DataFrame(threshold_rows), hide_index=True, width="stretch")
+    st.caption(
+        f"İleri test başlangıcı: {SHADOW_THRESHOLD_START.strftime('%d.%m.%Y %H:%M UTC')}. "
+        f"Şu ana kadar bu sürüm için {len(experiment_cohort)} deney maçı sonuçlandı. "
+        "İsabet ve %95 aralık, ilgili eşikte en az 100 maç olunca gösterilir."
     )
 
     market_rows = [
