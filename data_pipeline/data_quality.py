@@ -90,11 +90,18 @@ def main() -> None:
             "status": "eq.scheduled",
             "and": f"(match_date.gte.{now.isoformat()},match_date.lte.{end.isoformat()})",
         },
+        order="id.asc",
     )
-    predictions = db.select_all("predictions", columns="match_id,predicted_at")
-    forms = db.select_all("team_form", columns="team_id,calculated_at")
+    predictions = db.select_all(
+        "predictions", columns="match_id,predicted_at", order="match_id.asc"
+    )
+    forms = db.select_all(
+        "team_form", columns="team_id,calculated_at", order="team_id.asc"
+    )
     availability = db.select_all(
-        "team_availability_status", columns="team_id,refreshed_at"
+        "team_availability_status",
+        columns="team_id,refreshed_at",
+        order="team_id.asc",
     )
     active_matches = db.select_all(
         "matches",
@@ -103,6 +110,7 @@ def main() -> None:
             "status": "in.(scheduled,live)",
             "match_date": f"lt.{(now - STALE_ACTIVE_GRACE).isoformat()}",
         },
+        order="id.asc",
     )
     report = assess_morning_quality(
         scheduled,

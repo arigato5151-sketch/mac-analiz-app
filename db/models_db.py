@@ -256,6 +256,7 @@ class PlayerAvailability(Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False)  # injured, suspended, doubtful
     source: Mapped[str | None] = mapped_column(String(100), nullable=True)
     refreshed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     team: Mapped[Team] = relationship(back_populates="availabilities")
     match: Mapped[Match | None] = relationship(back_populates="player_availability")
