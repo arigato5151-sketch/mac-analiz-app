@@ -13,7 +13,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.data import load_upcoming_dashboard
-from app.components.grid import build_read_only_grid_options
+from app.components.grid import (
+    build_read_only_grid_options,
+    fit_read_only_grid_columns,
+)
 from app.components.ui import (
     compact_dashboard_display,
     configure_page,
@@ -81,8 +84,11 @@ else:
         overview_df = compact_dashboard_display(filtered)
         AgGrid(
             overview_df,
-            gridOptions=build_read_only_grid_options(overview_df),
+            gridOptions=fit_read_only_grid_columns(
+                build_read_only_grid_options(overview_df)
+            ),
             fit_columns_on_grid_load=True,
+            reload_data=True,
             theme="streamlit",
             enable_enterprise_modules=False,
             height=640,
@@ -91,8 +97,11 @@ else:
         display_df = dashboard_display(filtered)
         AgGrid(
             display_df,
-            gridOptions=build_read_only_grid_options(display_df),
+            gridOptions=fit_read_only_grid_columns(
+                build_read_only_grid_options(display_df)
+            ),
             fit_columns_on_grid_load=True,
+            reload_data=True,
             theme="streamlit",
             enable_enterprise_modules=False,
             height=640,

@@ -18,3 +18,16 @@ def build_read_only_grid_options(frame: pd.DataFrame) -> dict[str, object]:
         autoHeaderHeight=True,
     )
     return builder.build()
+
+
+def fit_read_only_grid_columns(options: dict[str, object]) -> dict[str, object]:
+    """Let match dashboard columns share the available width and wrap long cells."""
+    default_column = options.setdefault("defaultColDef", {})
+    if isinstance(default_column, dict):
+        default_column.update(
+            flex=1,
+            minWidth=52,
+            wrapText=True,
+            autoHeight=True,
+        )
+    return options
