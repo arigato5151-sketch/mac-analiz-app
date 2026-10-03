@@ -15,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.components.data import load_upcoming_dashboard
 from app.components.grid import (
     build_read_only_grid_options,
-    fit_match_dashboard_columns,
+    fit_read_only_grid_columns,
 )
 from app.components.ui import (
     compact_dashboard_display,
@@ -84,7 +84,7 @@ else:
         overview_df = compact_dashboard_display(filtered)
         AgGrid(
             overview_df,
-            gridOptions=fit_match_dashboard_columns(
+            gridOptions=fit_read_only_grid_columns(
                 build_read_only_grid_options(overview_df)
             ),
             fit_columns_on_grid_load=True,
@@ -97,7 +97,7 @@ else:
         display_df = dashboard_display(filtered)
         AgGrid(
             display_df,
-            gridOptions=fit_match_dashboard_columns(
+            gridOptions=fit_read_only_grid_columns(
                 build_read_only_grid_options(display_df)
             ),
             fit_columns_on_grid_load=True,

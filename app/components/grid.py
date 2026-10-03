@@ -52,3 +52,7 @@ def fit_match_dashboard_columns(options: dict[str, object]) -> dict[str, object]
             autoHeight=False,
         )
     return options
+
+
+# Keep the previous helper name available while hosted instances refresh files.
+fit_read_only_grid_columns = fit_match_dashboard_columns
