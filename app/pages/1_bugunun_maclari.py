@@ -95,6 +95,11 @@ else:
         )
     with markets_tab:
         display_df = dashboard_display(filtered)
+        compact_columns = [
+            column for column in display_df.columns if column not in {"Tarih", "Lig", "Maç"}
+        ]
+        for column in compact_columns:
+            display_df[column] = display_df[column].str.replace(" · ", " ", regex=False)
         AgGrid(
             display_df,
             gridOptions=fit_read_only_grid_columns(
