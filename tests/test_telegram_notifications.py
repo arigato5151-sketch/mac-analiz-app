@@ -33,7 +33,7 @@ class FakeSession:
 def test_telegram_send_posts_expected_payload_without_returning_token() -> None:
     session = FakeSession(FakeResponse(ok=True, status_code=200, payload={"ok": True}))
 
-    send_telegram_message("Merhaba", bot_token="secret-token", chat_id="42", session=session)
+    send_telegram_message("🎟️ Günlük kupon · Test", bot_token="secret-token", chat_id="42", session=session)
 
     assert session.url.endswith("/botsecret-token/sendMessage")
     assert session.payload["chat_id"] == "42"
@@ -43,7 +43,7 @@ def test_telegram_error_does_not_include_credentials() -> None:
     session = FakeSession(FakeResponse(ok=False, status_code=401, payload={}))
 
     try:
-        send_telegram_message("Merhaba", bot_token="secret-token", chat_id="42", session=session)
+        send_telegram_message("🎟️ Günlük kupon · Test", bot_token="secret-token", chat_id="42", session=session)
     except TelegramError as exc:
         assert "secret-token" not in str(exc)
     else:
