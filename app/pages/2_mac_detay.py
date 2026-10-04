@@ -16,7 +16,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.components.analysis_report import build_match_analysis_report
 from app.components.auth import current_user_id, get_user_db, render_auth_panel
 from app.components.availability import summarize_availability
-from app.components.commentary import summarize_absences, summarize_form
 from app.components.data import (
     load_confirmed_lineups,
     load_match_availability,
@@ -48,10 +47,6 @@ from app.components.ui import (
     page_header,
     prediction_signal,
     probability_percent,
-)
-from data_pipeline.match_commentary import (
-    MatchCommentaryError,
-    generate_match_commentary,
 )
 from models.decision_policy import minimum_confidence_for_league
 from models.market_forecast import derive_market_probabilities, format_market_summary
@@ -503,63 +498,6 @@ try:
             confidence_threshold=minimum_confidence_for_league(selected.get("league_id")),
         )
     )
-
-    st.subheader("İsteğe bağlı yapay zekâ yorumu")
-    st.caption(
-        "Yorum; mevcut model olasılıkları, Poisson beklenen golü, son form ve doğrulanmış "
-        "kadro verisinden üretilir. Kesin sonuç veya bahis tavsiyesi değildir."
-    )
-    commentary_key = f"gemini_commentary:{int(selected_id)}:{selected.get('model_version', 'pending')}"
-    probabilities = [
-        selected.get("prob_home_win"),
-        selected.get("prob_draw"),
-        selected.get("prob_away_win"),
-    ]
-    has_probabilities = all(pd.notna(probability) for probability in probabilities)
-    if not has_probabilities:
-        st.info("Yapay zeka yorumu için önce bu maçın 1X2 model olasılıkları hazırlanmalıdır.")
-    elif st.button("Yorumu oluştur", key=f"generate_commentary:{int(selected_id)}"):
-        try:
-            with st.spinner("Maç yorumu hazırlanıyor..."):
-                st.session_state[commentary_key] = generate_match_commentary(
-                    home_team=str(selected["home_team"]),
-                    away_team=str(selected["away_team"]),
-                    home_xg=float(baseline.home_expected_goals),
-                    away_xg=float(baseline.away_expected_goals),
-                    home_absences=summarize_absences(
-                        availability_data, team_id=int(selected["home_team_id"])
-                    ),
-                    away_absences=summarize_absences(
-                        availability_data, team_id=int(selected["away_team_id"])
-                    ),
-                    home_form=summarize_form(home_state),
-                    away_form=summarize_form(away_state),
-                    home_win_probability=float(probabilities[0]),
-                    draw_probability=float(probabilities[1]),
-                    away_win_probability=float(probabilities[2]),
-                )
-        except MatchCommentaryError as error:
-            # Keep provider details and credentials out of both the UI and application logs.
-            LOGGER.warning("Gemini commentary unavailable: reason=%s", error.reason)
-            user_messages = {
-                "configuration": "Yapay zeka yorum ayarı eksik. GEMINI_API_KEY/NVIDIA_API_KEY ve google-genai kurulumu kontrol edilmelidir.",
-                "authentication": "Yapay zekâ yorum servisi doğrulanamadı. Uygulama yöneticisi anahtar ayarını kontrol etmelidir.",
-                "quota": "Yapay zekâ yorum kotası geçici olarak dolu. Birkaç dakika sonra tekrar deneyin.",
-                "timeout": "Yapay zekâ yorum servisi zaman aşımına uğradı. Lütfen tekrar deneyin.",
-                "model": "Gemini ve NVIDIA NIM modelleri bu API anahtarlarıyla kullanılamıyor. GEMINI_MODEL (gemini-2.5-flash / gemini-1.5-flash) veya NVIDIA_MODEL ayarını kontrol edin.",
-                "provider": "Yapay zekâ yorum servisleri bu isteği işleyemedi. Model ayarını ve API erişimini kontrol edin.",
-            }
-            st.error(user_messages.get(error.reason, "Yorum şu anda üretilemedi. Lütfen tekrar deneyin."))
-        except Exception:
-            LOGGER.exception("Unexpected error while generating Gemini commentary")
-            st.error(
-                "Yorum hazırlanırken beklenmeyen bir hata oluştu. "
-                "Uygulama logunda ayrıntılı hata kaydı oluşturuldu."
-            )
-
-    commentary = st.session_state.get(commentary_key)
-    if commentary:
-        st.info(commentary)
 
     st.subheader("Takım karşılaştırması")
     radar = build_radar_comparison(
