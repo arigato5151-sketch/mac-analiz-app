@@ -141,21 +141,11 @@ gösterir, eski veya eksik yerel binary'yi üretim modeli gibi sunmaz.
 
 ## Telegram bildirimleri
 
-Bildirimler isteğe bağlıdır. Yapılandırıldığında sabah iş akışı her yaklaşan
-maç için ayrı bir mesaj gönderir; mesaj 1-X-2, Üst/Alt 2.5 ve KG Var/Yok
-olasılıklarıyla birlikte API-Football üzerinden gelen güncel Bet365 oranlarını
-da içerir. Oran verisi o maçta mevcut değilse tahmin mesajı yine gönderilir.
-Gece iş akışı son 30 değerlendirmedeki 1-X-2
-performansını gönderir. `Result Telegram notifications` iş akışı her 15 dakikada
-bir sonuçlanan maçları değerlendirip her maç için ayrı sonuç kartı yollar; kartta
-1-X-2, Üst 2.5 ve KG Var tahminlerinin doğru/yanlış durumu `✓`/`✗` ile gösterilir.
-`Pre-match Telegram notifications` iş akışı her 5 dakikada bir kontrol yapar;
-maça 25 dakika veya daha az kaldığında ilgili iki takımın form ve kadro bağlamını
-yeniler, tahmini günceller ve tek mesaj gönderir. Mesaja, Gemini ile üretilen
-bağlama dayalı kısa bir `🧠 Maç yorumu` bölümü de eklenir. Gemini erişilemezse
-zaman duyarlı tahmin bildirimi yorum bölümü olmadan yine gönderilir. GitHub'ın
-zamanlanmış pre-match çalışmasını geciktirmesine karşı aynı idempotent kontrol,
-otomatik sonuç workflow'unda da çalışır. Kurulum:
+Telegram'a yalnızca `🎟️ Günlük kupon` mesajları ve kupon sonuçları gönderilir.
+Maç tahminleri, maç sonuç kartları, performans özetleri ve operasyon uyarıları
+gönderim katmanında elenir; Supabase pre-match cron göndericisi de migration
+`036` ile durdurulur. Günlük kupon üretimi ve sonuçlandırması çalışmaya devam
+eder. Kurulum:
 
 1. Telegram'da `@BotFather` ile bir bot oluşturun ve bot tokenını alın.
 2. Botunuza Telegram'dan `/start` gönderin.

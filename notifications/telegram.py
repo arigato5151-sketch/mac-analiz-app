@@ -11,6 +11,11 @@ class TelegramError(RuntimeError):
     """Raised when Telegram rejects a notification request."""
 
 
+def _is_coupon_message(text: str) -> bool:
+    """Allow only daily coupon cards and their settlement results on Telegram."""
+    return text.lstrip().startswith("🎟️ Günlük kupon")
+
+
 def send_telegram_message(
     text: str,
     *,
@@ -19,6 +24,8 @@ def send_telegram_message(
     session: requests.Session | None = None,
 ) -> None:
     """Send a plain-text message without including credentials in errors."""
+    if not _is_coupon_message(text):
+        return
     if not bot_token or not chat_id:
         raise ValueError("Telegram bot token and chat ID are required")
     if not text.strip():
