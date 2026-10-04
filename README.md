@@ -99,6 +99,11 @@ db/migrations/028_personal_match_workspace.sql
 db/migrations/029_personal_match_decisions.sql
 db/migrations/031_daily_coupon_results.sql
 db/migrations/032_nesine_market_quotes.sql
+db/migrations/033_align_current_availability_timestamps.sql
+db/migrations/034_add_current_availability_fixture.sql
+db/migrations/035_repair_availability_history_timestamps.sql
+db/migrations/036_telegram_coupon_messages_only.sql
+db/migrations/037_prediction_horizon_snapshots.sql
 ```
 
 Migration'lar idempotent olacak şekilde tasarlanmıştır; yine de üretim

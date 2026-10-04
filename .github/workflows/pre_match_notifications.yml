@@ -34,3 +34,5 @@ jobs:
       - run: python -m pip install --disable-pip-version-check -r requirements.txt
       - name: Refresh and notify matches near kickoff
         run: python -m notifications.pre_match
+      - name: Capture fixed-horizon forecasts
+        run: python -m evaluation.forecast_horizons --capture | tee -a "$GITHUB_STEP_SUMMARY"

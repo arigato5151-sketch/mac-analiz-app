@@ -37,6 +37,8 @@ jobs:
         run: python -m data_pipeline.fetch_results --lookback-days 0
       - name: Evaluate newly completed predictions
         run: python -m evaluation.track_performance
+      - name: Report fixed-horizon forecast performance
+        run: python -m evaluation.forecast_horizons --report | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Settle completed daily coupons
         continue-on-error: true
         env:
