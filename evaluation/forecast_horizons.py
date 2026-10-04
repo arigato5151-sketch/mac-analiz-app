@@ -10,6 +10,11 @@ from typing import Any
 
 from config.settings import get_settings
 from data_pipeline.isotime import parse_iso_datetime
+from data_pipeline.odds import (
+    MatchOdds,
+    MultiBookmakerOdds,
+    multi_bookmaker_vig_free_probabilities,
+)
 from db.db_client import DatabaseError, SupabaseRestClient
 from evaluation.track_performance import build_performance_row
 
@@ -65,6 +70,69 @@ def capture_horizon_snapshots(
         }
 
     match_ids = sorted(targets)
+    odds_quotes: list[dict[str, Any]] = []
+    for start in range(0, len(match_ids), MATCH_ID_QUERY_BATCH_SIZE):
+        batch = match_ids[start : start + MATCH_ID_QUERY_BATCH_SIZE]
+        odds_quotes.extend(
+            db.select_all(
+                "odds_quote_history",
+                columns="match_id,bookmaker,odds,source_updated_at,captured_at",
+                filters={
+                    "match_id": f"in.({','.join(map(str, batch))})",
+                    "captured_at": f"lte.{captured_at.isoformat()}",
+                },
+                order="captured_at.desc",
+            )
+        )
+    latest_odds: dict[tuple[int, str], dict[str, Any]] = {}
+    for quote in odds_quotes:
+        match_id = int(quote["match_id"])
+        bookmaker = str(quote.get("bookmaker") or "").strip()
+        if not bookmaker or match_id not in targets:
+            continue
+        kickoff = parse_iso_datetime(str(targets[match_id][0]["match_date"]))
+        try:
+            quote_time = parse_iso_datetime(str(quote["captured_at"]))
+            source_time = (
+                parse_iso_datetime(str(quote["source_updated_at"]))
+                if quote.get("source_updated_at")
+                else None
+            )
+        except (TypeError, ValueError):
+            continue
+        if quote_time > captured_at or quote_time >= kickoff:
+            continue
+        if source_time is not None and (source_time > captured_at or source_time >= kickoff):
+            continue
+        latest_odds.setdefault((match_id, bookmaker), quote)
+
+    market_by_match: dict[int, dict[str, float]] = {}
+    for match_id in targets:
+        bookmaker_odds: dict[int, MatchOdds] = {}
+        for bookmaker_index, ((quote_match_id, bookmaker), quote) in enumerate(
+            latest_odds.items()
+        ):
+            if quote_match_id != match_id:
+                continue
+            odds = quote.get("odds") or {}
+            if not isinstance(odds, dict):
+                continue
+            bookmaker_odds[bookmaker_index] = MatchOdds(
+                bookmaker=bookmaker,
+                home_win=odds.get("home_win"),
+                draw=odds.get("draw"),
+                away_win=odds.get("away_win"),
+                over_2_5=odds.get("over_2_5"),
+                under_2_5=odds.get("under_2_5"),
+                btts_yes=odds.get("btts_yes"),
+                btts_no=odds.get("btts_no"),
+            )
+        probabilities = multi_bookmaker_vig_free_probabilities(
+            MultiBookmakerOdds(bookmakers=bookmaker_odds)
+        )
+        if probabilities:
+            market_by_match[match_id] = probabilities
+
     predictions: list[dict[str, Any]] = []
     for start in range(0, len(match_ids), MATCH_ID_QUERY_BATCH_SIZE):
         batch = match_ids[start : start + MATCH_ID_QUERY_BATCH_SIZE]
@@ -126,6 +194,7 @@ def capture_horizon_snapshots(
             "prob_over_2_5": prediction.get("prob_over_2_5"),
             "prob_btts": prediction.get("prob_btts"),
             "market_probabilities": prediction.get("market_probabilities") or {},
+            "market_implied_probabilities": market_by_match.get(match_id, {}),
             "source_predicted_at": predicted_at.isoformat(),
             "captured_at": captured_at.isoformat(),
             "lead_minutes": round(lead_minutes, 2),
@@ -154,7 +223,7 @@ def horizon_performance_report(db: SupabaseRestClient) -> dict[str, Any]:
         columns=(
             "id,source_prediction_id,match_id,horizon_key,model_version,prob_home_win,"
             "prob_draw,prob_away_win,prob_over_2_5,prob_btts,market_probabilities,"
-            "captured_at,lead_minutes,prediction_age_minutes"
+            "market_implied_probabilities,captured_at,lead_minutes,prediction_age_minutes"
         ),
         order="captured_at.asc,id.asc",
     )
@@ -197,7 +266,28 @@ def horizon_performance_report(db: SupabaseRestClient) -> dict[str, Any]:
             match,
             evaluated_at=datetime.now(timezone.utc).isoformat(),
         )
-        groups[str(snapshot["horizon_key"])].append({**snapshot, **metrics})
+        market = snapshot.get("market_implied_probabilities") or {}
+        market_values = (
+            market.get("market_implied_home_win"),
+            market.get("market_implied_draw"),
+            market.get("market_implied_away_win"),
+        )
+        market_metrics = None
+        if all(value is not None for value in market_values):
+            market_metrics = build_performance_row(
+                {
+                    "id": int(snapshot["source_prediction_id"]),
+                    "match_id": int(snapshot["match_id"]),
+                    "prob_home_win": market_values[0],
+                    "prob_draw": market_values[1],
+                    "prob_away_win": market_values[2],
+                },
+                match,
+                evaluated_at=datetime.now(timezone.utc).isoformat(),
+            )
+        groups[str(snapshot["horizon_key"])].append(
+            {**snapshot, **metrics, "market_metrics": market_metrics}
+        )
 
     report: dict[str, Any] = {"unscored_snapshots": unscored, "horizons": {}}
     for horizon in HORIZON_WINDOWS:
@@ -222,8 +312,39 @@ def horizon_performance_report(db: SupabaseRestClient) -> dict[str, Any]:
                 if count
                 else None
             ),
+            "market_comparison_sample_size": sum(
+                row["market_metrics"] is not None for row in rows
+            ),
+            "model_accuracy_on_market_sample": _mean_metric(
+                rows, "was_correct", paired=True
+            ),
+            "model_brier_on_market_sample": _mean_metric(
+                rows, "brier_score", paired=True
+            ),
+            "model_log_loss_on_market_sample": _mean_metric(
+                rows, "log_loss", paired=True
+            ),
+            "market_accuracy": _mean_metric(rows, "was_correct", market=True),
+            "market_brier_score": _mean_metric(rows, "brier_score", market=True),
+            "market_log_loss": _mean_metric(rows, "log_loss", market=True),
         }
     return report
+
+
+def _mean_metric(
+    rows: list[dict[str, Any]],
+    metric: str,
+    *,
+    market: bool = False,
+    paired: bool = False,
+) -> float | None:
+    eligible = [
+        row for row in rows if row["market_metrics"] is not None or not paired
+    ]
+    key = "market_metrics" if market else None
+    values = [(row[key] if key else row).get(metric) for row in eligible]
+    numeric = [float(value) for value in values if value is not None]
+    return sum(numeric) / len(numeric) if numeric else None
 
 
 def main() -> None:
