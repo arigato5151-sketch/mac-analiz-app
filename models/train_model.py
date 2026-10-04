@@ -904,7 +904,7 @@ def load_completed_matches(db: SupabaseRestClient) -> list[dict[str, Any]]:
     matches = load_historical_matches(db)
     quotes = db.select_all(
         "odds_quote_history",
-        columns="match_id,odds,source_updated_at,captured_at",
+        columns="match_id,bookmaker,odds,source_updated_at,captured_at",
         order="captured_at.asc",
     )
     try:

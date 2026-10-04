@@ -18,23 +18,50 @@ def policy_from_metadata(metadata: Mapping[str, object] | None) -> dict[str, obj
 def select_threshold_from_calibration(
     labels: Sequence[int], probabilities: np.ndarray, *, minimum_coverage: float = 0.20
 ) -> tuple[float, dict[str, float]]:
-    """Select the actionable threshold using calibration rows only."""
+    """Select a confidence gate using a conservative accuracy estimate."""
     values = np.asarray(probabilities, dtype=float)
     actual = np.asarray(labels, dtype=int)
     if values.ndim != 2 or values.shape[1] != 3 or len(actual) != len(values):
         raise ValueError("Calibration labels and probabilities must be aligned (n, 3)")
+    if len(actual) == 0 or np.any((actual < 0) | (actual > 2)):
+        raise ValueError("Calibration labels must be non-empty class indices in [0, 2]")
+    if not np.isfinite(values).all() or np.any((values < 0) | (values > 1)):
+        raise ValueError("Calibration probabilities must be finite values in [0, 1]")
+    if not np.allclose(values.sum(axis=1), 1.0, atol=1e-3):
+        raise ValueError("Each calibration probability row must sum to one")
+    if not 0 < minimum_coverage <= 1:
+        raise ValueError("minimum_coverage must be in (0, 1]")
     confidence = values.max(axis=1)
     predicted = values.argmax(axis=1)
-    candidates: list[tuple[float, float, float]] = []
+    candidates: list[tuple[float, float, float, float]] = []
     for threshold in np.arange(0.50, 0.701, 0.01):
         mask = confidence >= threshold
         coverage = float(mask.mean())
         if coverage >= minimum_coverage:
-            candidates.append((float((predicted[mask] == actual[mask]).mean()), coverage, float(threshold)))
+            selected_count = int(mask.sum())
+            accuracy = float((predicted[mask] == actual[mask]).mean())
+            # Wilson lower bound penalizes thresholds supported by few examples.
+            z = 1.96
+            denominator = 1.0 + z * z / selected_count
+            center = accuracy + z * z / (2.0 * selected_count)
+            margin = z * np.sqrt(
+                accuracy * (1.0 - accuracy) / selected_count
+                + z * z / (4.0 * selected_count**2)
+            )
+            lower_bound = float((center - margin) / denominator)
+            candidates.append((lower_bound, coverage, float(threshold), accuracy))
     if not candidates:
-        return MINIMUM_ACTIONABLE_1X2_CONFIDENCE, {"coverage": 0.0, "accuracy": 0.0}
-    accuracy, coverage, threshold = max(candidates, key=lambda row: (row[0], row[1], -row[2]))
-    return threshold, {"coverage": coverage, "accuracy": accuracy}
+        return MINIMUM_ACTIONABLE_1X2_CONFIDENCE, {
+            "coverage": 0.0, "accuracy": 0.0, "accuracy_lower_bound": 0.0
+        }
+    lower_bound, coverage, threshold, accuracy = max(
+        candidates, key=lambda row: (row[0], row[1], -row[2])
+    )
+    return threshold, {
+        "coverage": coverage,
+        "accuracy": accuracy,
+        "accuracy_lower_bound": lower_bound,
+    }
 
 
 def minimum_confidence_for_league(

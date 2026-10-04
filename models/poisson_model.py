@@ -95,6 +95,15 @@ def _dixon_coles_log_likelihood(
     away_lambdas: NDArray[np.float64],
 ) -> float:
     """Negative log-likelihood for Dixon-Coles rho (for minimization)."""
+    lengths = {len(home_goals), len(away_goals), len(home_lambdas), len(away_lambdas)}
+    if len(lengths) != 1:
+        raise ValueError("Goals and expected-goal arrays must have equal lengths")
+    if not all(np.isfinite(values).all() for values in (home_lambdas, away_lambdas)):
+        raise ValueError("Expected-goal arrays must contain only finite values")
+    if np.any(home_lambdas <= 0) or np.any(away_lambdas <= 0):
+        raise ValueError("Expected-goal values must be positive")
+    if np.any(home_goals < 0) or np.any(away_goals < 0):
+        raise ValueError("Goal counts cannot be negative")
     total = 0.0
     for hg, ag, hl, al in zip(home_goals, away_goals, home_lambdas, away_lambdas):
         tau = 1.0
@@ -137,6 +146,16 @@ def estimate_dixon_coles_rho(
     ag_arr = np.asarray(away_goals, dtype=int)
     hl_arr = np.asarray(home_lambdas, dtype=float)
     al_arr = np.asarray(away_lambdas, dtype=float)
+
+    lengths = {len(hg_arr), len(ag_arr), len(hl_arr), len(al_arr)}
+    if len(lengths) != 1:
+        raise ValueError("Goals and expected-goal arrays must have equal lengths")
+    if not all(np.isfinite(values).all() for values in (hl_arr, al_arr)):
+        raise ValueError("Expected-goal arrays must contain only finite values")
+    if np.any(hl_arr <= 0) or np.any(al_arr <= 0):
+        raise ValueError("Expected-goal values must be positive")
+    if np.any(hg_arr < 0) or np.any(ag_arr < 0):
+        raise ValueError("Goal counts cannot be negative")
 
     if len(hg_arr) < 30:
         LOGGER.warning("Dixon-Coles rho skipped: only %d observations", len(hg_arr))

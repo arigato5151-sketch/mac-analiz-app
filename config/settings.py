@@ -38,10 +38,8 @@ def _load_streamlit_secrets() -> None:
         import streamlit as st
 
         for key in (
-            "API_FOOTBALL_KEY",
             "SUPABASE_URL",
             "SUPABASE_ANON_KEY",
-            "SUPABASE_SERVICE_ROLE_KEY",
         ):
             if not os.getenv(key):
                 value = st.secrets.get(key)

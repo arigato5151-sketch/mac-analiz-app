@@ -95,8 +95,10 @@ db/migrations/024_expand_telegram_prediction_markets.sql
 db/migrations/025_public_shadow_model_status.sql
 db/migrations/026_fixture_scoped_player_availability.sql
 db/migrations/027_causal_availability_timestamps.sql
-  db/migrations/028_personal_match_workspace.sql
-  db/migrations/029_personal_match_decisions.sql
+db/migrations/028_personal_match_workspace.sql
+db/migrations/029_personal_match_decisions.sql
+db/migrations/031_daily_coupon_results.sql
+db/migrations/032_nesine_market_quotes.sql
 ```
 
 Migration'lar idempotent olacak şekilde tasarlanmıştır; yine de üretim

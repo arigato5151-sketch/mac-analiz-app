@@ -14,7 +14,7 @@ import numpy as np
 
 from config.settings import PROJECT_ROOT, UPCOMING_HORIZON_DAYS, get_settings
 from data_pipeline.isotime import parse_iso_datetime
-from data_pipeline.odds import vig_free_market_probabilities
+from data_pipeline.odds import attach_pre_match_odds, vig_free_market_probabilities
 from db.db_client import DatabaseError, SupabaseRestClient
 from evaluation.track_performance import EVALUATION_LOOKBACK_DAYS
 from models.artifact_store import (
@@ -316,7 +316,9 @@ def paired_market_comparison(
 def _market_log_loss_sample(
     shadow: dict[str, Any], match: dict[str, Any], quote: dict[str, Any]
 ) -> tuple[float, float] | None:
-    market = vig_free_market_probabilities(quote.get("odds") or {})
+    market = quote.get("market_odds_blended") or vig_free_market_probabilities(
+        quote.get("odds") or {}
+    )
     if not market or match.get("home_score") is None or match.get("away_score") is None:
         return None
     actual = (
@@ -391,29 +393,40 @@ def promote_candidate(db: SupabaseRestClient, model_version: str) -> str:
     if not paired:
         raise RuntimeError("No same-match production baseline is available")
     completed_matches = db.select_all(
-        "matches", columns="id,home_score,away_score", filters={"id": f"in.({','.join(map(str, sorted(match_ids)))})"}
+        "matches",
+        columns="id,match_date,home_score,away_score",
+        filters={"id": f"in.({','.join(map(str, sorted(match_ids)))})"},
     )
     matches_by_id = {int(row["id"]): row for row in completed_matches}
     odds_rows = db.select_all(
-        "odds_quote_history", columns="match_id,odds,captured_at",
+        "odds_quote_history",
+        columns="match_id,bookmaker,odds,source_updated_at,captured_at",
         filters={"match_id": f"in.({','.join(map(str, sorted(match_ids)))})"},
         order="captured_at.desc",
     )
     shadows_by_match = {int(row["match_id"]): row for row in shadows}
-    market_samples: list[tuple[float, float]] = []
-    market_matches_seen: set[int] = set()
+    quotes_by_match: dict[int, list[dict[str, Any]]] = {}
     for quote in odds_rows:
-        match_id = int(quote["match_id"])
-        if match_id in market_matches_seen:
-            continue
-        shadow = shadows_by_match.get(match_id)
+        quotes_by_match.setdefault(int(quote["match_id"]), []).append(quote)
+    market_samples: list[tuple[float, float]] = []
+    for match_id, shadow in shadows_by_match.items():
         match = matches_by_id.get(match_id)
         if not shadow or not match:
             continue
-        if parse_iso_datetime(str(quote["captured_at"])) > parse_iso_datetime(str(shadow["predicted_at"])):
+        eligible_quotes = quotes_by_match.get(match_id, [])
+        if not eligible_quotes:
             continue
-        market_matches_seen.add(match_id)
-        sample = _market_log_loss_sample(shadow, match, quote)
+        observed_at = parse_iso_datetime(str(shadow["predicted_at"]))
+        market_row = attach_pre_match_odds(
+            [match],
+            eligible_quotes,
+            observed_at=observed_at,
+        )[0]
+        sample = _market_log_loss_sample(
+            shadow,
+            match,
+            {"market_odds_blended": market_row.get("market_odds_blended")},
+        )
         if sample is not None:
             market_samples.append(sample)
     market_comparison = paired_market_comparison(market_samples)

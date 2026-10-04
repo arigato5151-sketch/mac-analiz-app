@@ -216,15 +216,18 @@ def vig_free_market_probabilities(odds: Mapping[str, object]) -> dict[str, float
     outcomes = normalize(("home_win", "draw", "away_win"))
     if outcomes is None:
         return None
-    totals = normalize(("over_2_5", "under_2_5")) or {}
-    btts = normalize(("btts_yes", "btts_no")) or {}
-    return {
+    totals = normalize(("over_2_5", "under_2_5"))
+    btts = normalize(("btts_yes", "btts_no"))
+    probabilities = {
         "market_implied_home_win": outcomes["home_win"],
         "market_implied_draw": outcomes["draw"],
         "market_implied_away_win": outcomes["away_win"],
-        "market_implied_over_2_5": totals.get("over_2_5", 0.5),
-        "market_implied_btts": btts.get("btts_yes", 0.5),
     }
+    if totals:
+        probabilities["market_implied_over_2_5"] = totals["over_2_5"]
+    if btts:
+        probabilities["market_implied_btts"] = btts["btts_yes"]
+    return probabilities
 
 
 def multi_bookmaker_vig_free_probabilities(
@@ -273,10 +276,14 @@ def multi_bookmaker_vig_free_probabilities(
     for p in all_probs:
         keys.update(p.keys())
     for key in keys:
-        values = [p.get(key, 0.0) for p in all_probs]
-        if len(values) != len(weights):
-            continue
-        blended[key] = sum(v * w for v, w in zip(values, weights)) / total_weight
+        available = [
+            (probabilities[key], weight)
+            for probabilities, weight in zip(all_probs, weights)
+            if key in probabilities
+        ]
+        key_weight = sum(weight for _, weight in available)
+        if key_weight > 0:
+            blended[key] = sum(value * weight for value, weight in available) / key_weight
 
     # Ensure result probabilities sum to 1
     result_keys = ("market_implied_home_win", "market_implied_draw", "market_implied_away_win")
@@ -374,13 +381,11 @@ def attach_pre_match_odds(
         row = dict(match)
         history = valid_by_match.get(int(row["id"]), [])
         if history:
-            opening, latest = history[0], history[-1]
+            unknown_bookmaker_ids: dict[str, int] = {}
 
-            # Per-bookmaker odds (support both legacy flat format and new per-bookmaker format)
-            opening_odds = opening.get("odds") or {}
-            latest_odds = latest.get("odds") or {}
-
-            def _normalize_odds_snapshot(odds_dict: dict[str, Any]) -> dict[int, MatchOdds]:
+            def _normalize_odds_snapshot(
+                odds_dict: dict[str, Any], bookmaker: str | None = None
+            ) -> dict[int, MatchOdds]:
                 """Convert stored odds snapshot to bookmaker_id -> MatchOdds mapping."""
                 if not odds_dict:
                     return {}
@@ -405,9 +410,23 @@ def attach_pre_match_odds(
                     }
                 else:
                     # Legacy flat format: {home_win: "...", draw: "...", ...} -> single bookmaker
+                    normalized_name = (bookmaker or PRIMARY_BOOKMAKER_NAME).casefold()
+                    bookmaker_id = next(
+                        (
+                            key
+                            for key, name in MULTI_BOOKMAKER_NAMES.items()
+                            if name.casefold() == normalized_name
+                        ),
+                        None,
+                    )
+                    # Unknown providers remain distinct instead of overwriting one another.
+                    if bookmaker_id is None:
+                        bookmaker_id = unknown_bookmaker_ids.setdefault(
+                            normalized_name, 100_000 + len(unknown_bookmaker_ids)
+                        )
                     return {
-                        PRIMARY_BOOKMAKER_ID: MatchOdds(
-                            bookmaker=PRIMARY_BOOKMAKER_NAME,
+                        bookmaker_id: MatchOdds(
+                            bookmaker=bookmaker or PRIMARY_BOOKMAKER_NAME,
                             source_updated_at=None,
                             home_win=odds_dict.get("home_win"),
                             draw=odds_dict.get("draw"),
@@ -419,8 +438,43 @@ def attach_pre_match_odds(
                         )
                     }
 
-            opening_multi = MultiBookmakerOdds(bookmakers=_normalize_odds_snapshot(opening_odds))
-            latest_multi = MultiBookmakerOdds(bookmakers=_normalize_odds_snapshot(latest_odds))
+            # Each history row is one bookmaker quote. Keep the first and last
+            # eligible quote independently per bookmaker so interleaved updates
+            # do not erase the other providers' prices.
+            opening_by_bookmaker: dict[int, MatchOdds] = {}
+            latest_by_bookmaker: dict[int, MatchOdds] = {}
+            latest_at_by_bookmaker: dict[int, datetime] = {}
+            for quote in history:
+                quote_odds = quote.get("odds") or {}
+                parsed = _normalize_odds_snapshot(
+                    quote_odds, str(quote.get("bookmaker") or PRIMARY_BOOKMAKER_NAME)
+                )
+                captured = _parse_utc_timestamp(quote["captured_at"], field="captured_at")
+                for bookmaker_id, bookmaker_odds in parsed.items():
+                    if bookmaker_id not in opening_by_bookmaker:
+                        opening_by_bookmaker[bookmaker_id] = bookmaker_odds
+                    oldest = datetime.min.replace(tzinfo=timezone.utc)
+                    if captured >= latest_at_by_bookmaker.get(bookmaker_id, oldest):
+                        latest_by_bookmaker[bookmaker_id] = bookmaker_odds
+                        latest_at_by_bookmaker[bookmaker_id] = captured
+
+            opening_multi = MultiBookmakerOdds(bookmakers=opening_by_bookmaker)
+            latest_multi = MultiBookmakerOdds(bookmakers=latest_by_bookmaker)
+            # Maintain the legacy flat odds fields for existing feature consumers.
+            opening = min(
+                history,
+                key=lambda item: _parse_utc_timestamp(
+                    item["captured_at"], field="captured_at"
+                ),
+            )
+            latest = max(
+                history,
+                key=lambda item: _parse_utc_timestamp(
+                    item["captured_at"], field="captured_at"
+                ),
+            )
+            opening_odds = opening.get("odds") or {}
+            latest_odds = latest.get("odds") or {}
 
             # Store per-bookmaker snapshots (preserve original format for backward compatibility)
             row["market_opening_odds"] = opening_odds

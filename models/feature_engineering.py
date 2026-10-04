@@ -6,6 +6,7 @@ import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from itertools import groupby
 from typing import Any
 
 import numpy as np
@@ -629,32 +630,40 @@ def build_training_dataset(
     label_rows: list[dict[str, Any]] = []
     observed_matches: list[dict[str, Any]] = []
     last_rho_month: tuple[int, int] | None = None
-    for row in valid:
-        home_score = int(row["home_score"])
-        away_score = int(row["away_score"])
-        match_at = datetime.fromisoformat(str(row["match_date"]).replace("Z", "+00:00"))
+    for match_at, group_iter in groupby(
+        valid, key=lambda row: _match_datetime_utc(row["match_date"])
+    ):
+        simultaneous_matches = list(group_iter)
         if league_rhos is None:
-            current_month = _month_key(row["match_date"])
+            current_month = _month_key(match_at)
             if current_month != last_rho_month and observed_matches:
                 state.league_rhos = estimate_league_dixon_coles_rhos(observed_matches)
             last_rho_month = current_month
-        baseline = state.poisson_baseline(row)
-        feature_rows.append(state.feature_row(row))
-        label_rows.append(
-            {
-                "match_id": int(row["id"]),
-                "match_date": match_at,
-                "result": _result_label(home_score, away_score),
-                "over_2_5": int(home_score + away_score >= 3),
-                "btts": int(home_score > 0 and away_score > 0),
-            }
-        )
-        state.update(row)
-        observed_matches.append({
-            **row,
-            "home_expected_goals": baseline.home_expected_goals,
-            "away_expected_goals": baseline.away_expected_goals,
-        })
+        baselines = [state.poisson_baseline(row) for row in simultaneous_matches]
+        feature_rows.extend(state.feature_row(row) for row in simultaneous_matches)
+        for row in simultaneous_matches:
+            home_score = int(row["home_score"])
+            away_score = int(row["away_score"])
+            label_rows.append(
+                {
+                    "match_id": int(row["id"]),
+                    "match_date": match_at,
+                    "result": _result_label(home_score, away_score),
+                    "over_2_5": int(home_score + away_score >= 3),
+                    "btts": int(home_score > 0 and away_score > 0),
+                }
+            )
+        # Results from simultaneous kickoffs become visible only after every
+        # fixture at that timestamp has received its features.
+        for row, baseline in zip(simultaneous_matches, baselines):
+            state.update(row)
+            observed_matches.append(
+                {
+                    **row,
+                    "home_expected_goals": baseline.home_expected_goals,
+                    "away_expected_goals": baseline.away_expected_goals,
+                }
+            )
 
     features = pd.DataFrame(feature_rows, columns=FEATURE_COLUMNS)
     labels = pd.DataFrame(label_rows)
