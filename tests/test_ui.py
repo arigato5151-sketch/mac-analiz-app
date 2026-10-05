@@ -76,9 +76,7 @@ def test_dashboard_formats_each_diversified_market_as_a_separate_cell() -> None:
     assert cells["Alt 3.5"] == "%68.0"
     assert cells["Ev 0.5 Üst"] == "%74.0"
     assert cells["Dep. 0.5 Üst"] == "—"
-    assert cells["Skor 1"] == "1-0 · %18.0"
-    assert cells["Skor 2"] == "2-0 · %14.0"
-    assert cells["Skor 3"] == "1-1 · %12.0"
+    assert not any(column.startswith("Skor ") for column in cells)
 
 
 def test_dashboard_handles_missing_or_malformed_diversified_markets() -> None:
@@ -113,8 +111,8 @@ def test_dashboard_display_includes_each_secondary_market_next_to_match() -> Non
     display = dashboard_display(frame)
 
     assert display.loc[0, "Çifte şans"] == "1X · %91.0"
-    assert display.loc[0, "Skor 1"] == "1-0 · %18.0"
-    assert list(display.columns[3:13]) == list(SECONDARY_MARKET_COLUMNS)
+    assert not any(column.startswith("Skor ") for column in display.columns)
+    assert list(display.columns[3:10]) == list(SECONDARY_MARKET_COLUMNS)
 
 
 def test_compact_dashboard_hides_advanced_markets() -> None:

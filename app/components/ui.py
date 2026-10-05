@@ -161,9 +161,6 @@ SECONDARY_MARKET_COLUMNS: tuple[str, ...] = (
     "Dep. 0.5 Üst",
     "Ev 1.5 Üst",
     "Dep. 1.5 Üst",
-    "Skor 1",
-    "Skor 2",
-    "Skor 3",
 )
 
 
@@ -201,10 +198,6 @@ def diversified_prediction_cells(row: pd.Series) -> dict[str, str]:
             if probability >= MINIMUM_GOAL_MARKET_CONFIDENCE:
                 cells[column] = probability_percent(probability)
 
-        for index, score in enumerate((raw_markets.get("correct_scores") or [])[:3], 1):
-            cells[f"Skor {index}"] = (
-                f"{score['score']!s} · {probability_percent(float(score['probability']))}"
-            )
     except (KeyError, TypeError, ValueError):
         # A malformed historical row must not break the entire dashboard.
         return {column: "—" for column in SECONDARY_MARKET_COLUMNS}
