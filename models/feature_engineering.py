@@ -417,16 +417,22 @@ class CausalFeatureState:
             opening_blended = vig_free_market_probabilities(opening_raw) if opening_raw else None
 
         # Keep market features neutral when no quote exists; Poisson is exposed separately.
-        market_features = market_blended or {
+        # A valid 1X2 quote can still be missing totals/BTTS markets, so fill
+        # those independently instead of assuming each bookmaker offers every market.
+        neutral_market = {
             "market_implied_home_win": 1 / 3,
             "market_implied_draw": 1 / 3,
             "market_implied_away_win": 1 / 3,
             "market_implied_over_2_5": 0.5,
             "market_implied_btts": 0.5,
         }
+        market_features = {**neutral_market, **(market_blended or {})}
+        opening_market = (
+            {**neutral_market, **opening_blended} if opening_blended else None
+        )
 
         # Also update opening_market to use blended opening odds for market move features
-        opening_market = opening_blended
+        move_baseline = opening_market or market_features
 
         home_impact_score = availability_impact_score(
             row.get("home_unavailable_players"),
@@ -522,23 +528,23 @@ class CausalFeatureState:
             "market_odds_available": float(market_blended is not None),
             "market_home_move": float(
                 market_features["market_implied_home_win"]
-                - (opening_market or market_features)["market_implied_home_win"]
+                - move_baseline["market_implied_home_win"]
             ),
             "market_draw_move": float(
                 market_features["market_implied_draw"]
-                - (opening_market or market_features)["market_implied_draw"]
+                - move_baseline["market_implied_draw"]
             ),
             "market_away_move": float(
                 market_features["market_implied_away_win"]
-                - (opening_market or market_features)["market_implied_away_win"]
+                - move_baseline["market_implied_away_win"]
             ),
             "market_over_2_5_move": float(
                 market_features["market_implied_over_2_5"]
-                - (opening_market or market_features)["market_implied_over_2_5"]
+                - move_baseline["market_implied_over_2_5"]
             ),
             "market_btts_move": float(
                 market_features["market_implied_btts"]
-                - (opening_market or market_features)["market_implied_btts"]
+                - move_baseline["market_implied_btts"]
             ),
             "home_available_count": float(row.get("home_available_count", 22)),
             "away_available_count": float(row.get("away_available_count", 22)),

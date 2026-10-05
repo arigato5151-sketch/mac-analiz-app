@@ -18,7 +18,6 @@ from app.components.grid import (
     fit_read_only_grid_columns,
 )
 from app.components.ui import (
-    compact_dashboard_display,
     configure_page,
     dashboard_display,
     disclaimer,
@@ -73,44 +72,29 @@ if league:
     filtered = filtered[filtered["league_name"].isin(league)]
 
 st.subheader(f"Maçlar · {len(filtered)} sonuç")
-section_intro("Hızlı görünüm karar için gereken temel alanları, ayrıntılı görünüm tüm pazarları gösterir.")
+section_intro("Tüm maçlar ve ayrıntılı pazar olasılıkları.")
 if filtered.empty:
     st.info(
         "Bu filtrelerle maç bulunamadı. Lig veya gün seçimini genişletip tekrar deneyin."
     )
 else:
-    overview_tab, markets_tab = st.tabs(["Hızlı görünüm", "Ayrıntılı pazarlar"])
-    with overview_tab:
-        overview_df = compact_dashboard_display(filtered)
-        AgGrid(
-            overview_df,
-            gridOptions=fit_read_only_grid_columns(
-                build_read_only_grid_options(overview_df)
-            ),
-            fit_columns_on_grid_load=True,
-            reload_data=True,
-            theme="streamlit",
-            enable_enterprise_modules=False,
-            height=640,
-        )
-    with markets_tab:
-        display_df = dashboard_display(filtered)
-        compact_columns = [
-            column for column in display_df.columns if column not in {"Tarih", "Lig", "Maç"}
-        ]
-        for column in compact_columns:
-            display_df[column] = display_df[column].str.replace(" · ", " ", regex=False)
-        AgGrid(
-            display_df,
-            gridOptions=fit_read_only_grid_columns(
-                build_read_only_grid_options(display_df)
-            ),
-            fit_columns_on_grid_load=True,
-            reload_data=True,
-            theme="streamlit",
-            enable_enterprise_modules=False,
-            height=640,
-        )
+    display_df = dashboard_display(filtered)
+    compact_columns = [
+        column for column in display_df.columns if column not in {"Tarih", "Lig", "Maç"}
+    ]
+    for column in compact_columns:
+        display_df[column] = display_df[column].str.replace(" · ", " ", regex=False)
+    AgGrid(
+        display_df,
+        gridOptions=fit_read_only_grid_columns(
+            build_read_only_grid_options(display_df)
+        ),
+        fit_columns_on_grid_load=True,
+        reload_data=True,
+        theme="streamlit",
+        enable_enterprise_modules=False,
+        height=640,
+    )
 
 st.caption(
     "Öne çıkan sinyal, 1-X-2, Üst 2.5 ve KG Var olasılıklarının en yükseğidir. "
