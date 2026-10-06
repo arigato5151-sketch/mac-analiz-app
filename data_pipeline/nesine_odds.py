@@ -322,6 +322,11 @@ def _market_slug(value: str) -> str:
 def _is_requested_nesine_market(value: str) -> bool:
     """Keep only the match, half, goal, team-total and corner markets requested."""
     name = _normalise_market_label(value)
+    # Nesine uses both explicit market labels ("1. Yarı Maç Sonucu") and
+    # combined labels ("İlk Yarı/Maç Sonucu 1/1").  The latter is a distinct
+    # market family whose selection text is appended to the heading.
+    if name.startswith(("ilk yari mac sonucu", "1 yari mac sonucu")):
+        return True
     if name in {
         "mac sonucu", "cifte sans", "ilk yari sonucu", "ikinci yari sonucu",
         "1 yari sonucu", "2 yari sonucu", "1 yarisi sonucu", "2 yarisi sonucu",
@@ -332,6 +337,8 @@ def _is_requested_nesine_market(value: str) -> bool:
     }:
         return True
     if re.fullmatch(r"mac sonucu ve \d+ 5 alt ust", name):
+        return True
+    if re.fullmatch(r"[12] yari \d+ 5 (?:gol )?alt ust", name):
         return True
     if re.fullmatch(r"\d+ 5 (?:gol )?alt ust", name):
         return True
@@ -348,15 +355,50 @@ def _extract_requested_market_rows(page: Any, event_id: str) -> list[dict[str, s
       const root = document.querySelector(`[data-test-id="${eventId}-all"]`);
       if (!root) return [];
       const output = [];
-      for (const selection of root.querySelectorAll('[data-mid][data-test-title][data-test-value]')) {
-        let market = selection.parentElement;
-        while (market && !market.querySelector('[data-test-m-id]')) market = market.parentElement;
-        const heading = market?.querySelector('[data-test-m-id]')?.parentElement?.querySelector('span span');
-        output.push({market_name: (heading?.innerText || '').trim(),
-          selection_name: selection.getAttribute('data-test-title') || '',
-          odd: selection.getAttribute('data-test-value') || ''});
+      // Read semantic attributes, not ordinal positions, so unavailable
+      // selections cannot shift odds across rows. Some bulletin versions
+      // virtualize the expanded panel, so harvest as its rendered rows change.
+      const marketViewport = root.querySelector('[class*="MarketList"], [class*="marketList"], [class*="scroll"]') || root;
+      let previousSignature = '';
+      let stagnantPasses = 0;
+      for (let pass = 0; pass < 80; pass++) {
+        for (const selection of root.querySelectorAll('[data-mid][data-test-title][data-test-value]')) {
+          let market = selection.parentElement;
+          while (market && !market.querySelector('[data-test-m-id]')) market = market.parentElement;
+          const marker = market?.querySelector('[data-test-m-id]');
+          const heading = marker?.parentElement?.querySelector('span span') || marker?.parentElement;
+          output.push({market_name: (heading?.innerText || '').trim(),
+            selection_name: selection.getAttribute('data-test-title') || '',
+            odd: selection.getAttribute('data-test-value') || ''});
+        }
+        const current = [...root.querySelectorAll('[data-mid][data-test-title][data-test-value]')]
+          .map(node => `${node.getAttribute('data-mid')}|${node.getAttribute('data-test-title')}|${node.getAttribute('data-test-value')}`)
+          .join('~');
+        stagnantPasses = current === previousSignature ? stagnantPasses + 1 : 0;
+        if (stagnantPasses >= 2) break;
+        previousSignature = current;
+        const scrollers = [marketViewport, ...root.querySelectorAll('*')]
+          .filter(node => node.scrollHeight > node.clientHeight + 20);
+        const scroller = scrollers.sort((a, b) => b.scrollHeight - a.scrollHeight)[0];
+        if (!scroller) break;
+        const before = scroller.scrollTop;
+        scroller.scrollTop = before + Math.max(450, scroller.clientHeight * 0.75);
+        if (scroller.scrollTop === before) {
+          const last = scroller.scrollHeight - scroller.clientHeight;
+          if (before <= 0) scroller.scrollTop = last;
+          else if (before >= last) scroller.scrollTop = 0;
+          else break;
+          if (scroller.scrollTop === before) break;
+        }
       }
-      return output;
+      // Remove duplicates created by overlapping virtualized viewports.
+      const seen = new Set();
+      return output.filter(row => {
+        const key = `${row.market_name}|${row.selection_name}|${row.odd}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
     }""", str(event_id))
     return [
         {"market_code": _market_slug(row["market_name"]), "market_name": row["market_name"],
@@ -383,15 +425,15 @@ def collect_requested_markets_from_nesine(url: str, event_ids: Iterable[str]) ->
         browser = playwright.chromium.launch(headless=True)
         try:
             page = browser.new_page(locale="tr-TR")
+            page.goto(url, wait_until="domcontentloaded", timeout=45_000)
+            page.wait_for_timeout(3_000)
+            page.evaluate("""() => {
+              document.body.classList.remove('stop-scrolling');
+              document.body.style.overflow = 'auto';
+              document.documentElement.style.overflow = 'auto';
+            }""")
             for index, event_id in enumerate(wanted_ids):
                 try:
-                    page.goto(url, wait_until="domcontentloaded", timeout=45_000)
-                    page.wait_for_timeout(1_500)
-                    page.evaluate("""() => {
-                      document.body.classList.remove('stop-scrolling');
-                      document.body.style.overflow = 'auto';
-                      document.documentElement.style.overflow = 'auto';
-                    }""")
                     row_selector = f'[data-test-id="r_{event_id}"]'
                     count_selector = f'[data-test-id="{event_id}_m"]'
                     # The home page may initially select another sport. Click
@@ -400,17 +442,17 @@ def collect_requested_markets_from_nesine(url: str, event_ids: Iterable[str]) ->
                     if football.count():
                         football.evaluate("element => element.click()")
                         page.wait_for_timeout(800)
-                    for _ in range(80):
+                    for _ in range(120):
                         if page.locator(row_selector).count() and page.locator(count_selector).count():
                             break
                         page.evaluate("window.scrollBy(0, Math.max(400, window.innerHeight * 0.75))")
-                        page.wait_for_timeout(250)
+                        page.wait_for_timeout(200)
                     if not page.locator(count_selector).count():
                         LOGGER.warning("Nesine detailed markets unavailable for event %s", event_id)
                         continue
                     counter = page.locator(count_selector).locator("span.a4cc134d0a3a892deaa6")
                     (counter if counter.count() else page.locator(count_selector)).evaluate("element => element.click()")
-                    page.wait_for_timeout(1_200)
+                    page.wait_for_timeout(1_500)
                     markets = _extract_requested_market_rows(page, event_id)
                     if not markets:
                         # Some fixtures expand directly in the row without an
