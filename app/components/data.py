@@ -322,23 +322,6 @@ def load_recent_odds_for_matches(match_ids: tuple[int, ...]) -> pd.DataFrame:
         .drop_duplicates("match_id", keep="first")
         .drop(columns="_provider_priority")
     )
-    # Merge normalized Nesine detail markets into the same odds mapping used by
-    # value analysis. This is additive and leaves other providers untouched.
-    nesine_rows = get_db().select_all(
-        "nesine_market_quotes",
-        columns="match_id,market_code,market_name,selection_code,selection_name,odd,captured_at",
-        filters={"match_id": ids_filter}, order="captured_at.desc",
-    )
-    if nesine_rows:
-        detail_by_match: dict[int, dict[str, str]] = {}
-        for detail in nesine_rows:
-            key = _nesine_market_key(detail)
-            if key:
-                detail_by_match.setdefault(int(detail["match_id"]), {}).setdefault(key, str(detail["odd"]))
-        selected["odds"] = selected.apply(
-            lambda row: {**(row["odds"] if isinstance(row["odds"], dict) else {}), **detail_by_match.get(int(row["match_id"]), {})},
-            axis=1,
-        )
     return selected
 
 

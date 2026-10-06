@@ -567,7 +567,7 @@ try:
         target = target_match[0]
         target_time = pd.to_datetime(target["match_date"], utc=True)
         corner_state = CausalFeatureState()
-        for historical_match in load_completed_match_history():
+        for historical_match in detail["history"]:
             history_time = pd.to_datetime(historical_match["match_date"], utc=True)
             if history_time < target_time:
                 corner_state.update(historical_match)

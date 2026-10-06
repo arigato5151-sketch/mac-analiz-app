@@ -9,7 +9,10 @@ from st_aggrid import GridOptionsBuilder
 def build_read_only_grid_options(frame: pd.DataFrame) -> dict[str, object]:
     """Build community-edition options without unused selection state."""
     builder = GridOptionsBuilder.from_dataframe(frame)
-    builder.configure_pagination(paginationAutoPageSize=True)
+    # The hosted Streamlit-AgGrid version reports 100 rows while rendering an
+    # empty viewport when paginationAutoPageSize is enabled. A fixed page size
+    # keeps the viewport and pagination model in sync across versions.
+    builder.configure_pagination(paginationPageSize=25, paginationAutoPageSize=False)
     builder.configure_default_column(
         filter=True,
         sortable=True,
