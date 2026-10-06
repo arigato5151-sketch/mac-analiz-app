@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from models.value_analysis import MAX_PUBLISHABLE_EXPECTED_VALUE
+
 RESULT_KEYS = {"home_win", "draw", "away_win"}
 TOTAL_KEYS = {"over_2_5", "under_2_5"}
 BTTS_KEYS = {"btts_yes", "btts_no"}
@@ -57,6 +59,7 @@ def diversified_coupon_rows(
                 probability < max(min_probability, market_floor)
                 or odds > MAX_PUBLISHABLE_ODDS
                 or expected_value < min_ev
+                or expected_value > MAX_PUBLISHABLE_EXPECTED_VALUE
             ):
                 continue
             if high_odds and odds < 2.5:

@@ -98,3 +98,12 @@ def test_best_value_applies_the_same_ev_threshold():
     assert best is not None
     assert best.key == "home_win"
     assert best.expected_value >= MIN_VALUE_EV
+
+
+def test_best_value_rejects_extreme_edge_as_suspicious_quote():
+    best = best_value_assessment(
+        {"home_win": 0.62, "draw": 0.20, "away_win": 0.18},
+        {"home_win": 17.50, "draw": 5.00, "away_win": 1.10},
+    )
+
+    assert best is None

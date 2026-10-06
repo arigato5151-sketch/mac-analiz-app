@@ -8,6 +8,9 @@ from math import isfinite
 
 MIN_VALUE_EV = 0.03
 MIN_VALUE_SAMPLE = 30
+# Larger apparent edges are more likely to indicate a bad quote or an
+# uncalibrated probability than a publishable opportunity.
+MAX_PUBLISHABLE_EXPECTED_VALUE = 0.50
 
 COMBO_MARKETS = {
     "home_win_over_2_5": ("home_win", "over_2_5"),
@@ -175,7 +178,7 @@ def best_value_assessment(
         raise ValueError("minimum_ev must not be negative")
     candidates = [
         item for item in assess_market_value(model_probabilities, odds)
-        if item.expected_value >= minimum_ev
+        if minimum_ev <= item.expected_value <= MAX_PUBLISHABLE_EXPECTED_VALUE
     ]
     return max(candidates, key=lambda item: item.expected_value, default=None)
 

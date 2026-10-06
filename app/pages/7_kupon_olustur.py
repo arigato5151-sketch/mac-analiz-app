@@ -23,6 +23,7 @@ from app.components.freshness import odds_are_current
 from app.components.ui import configure_page, disclaimer, page_header
 from models.coupon_policy import diversified_coupon_rows
 from models.value_analysis import (
+    MAX_PUBLISHABLE_EXPECTED_VALUE,
     ValueAssessment,
     assess_market_value,
     derive_combo_probabilities,
@@ -140,6 +141,7 @@ for _, match in matches.iterrows():
         for item in assessments
         if item.model_probability >= (0.55 if item.key in {"btts_yes", "btts_no"} else 0.50)
         and item.odds <= 20.0
+        and item.expected_value <= MAX_PUBLISHABLE_EXPECTED_VALUE
     ]
     if not assessments:
         filter_counts["below_probability"] += 1

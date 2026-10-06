@@ -34,6 +34,7 @@ from app.components.ui import (
 )
 from models.baselines import detect_upcoming_collapse
 from models.value_analysis import (
+    MAX_PUBLISHABLE_EXPECTED_VALUE,
     MIN_VALUE_EV,
     assess_market_value,
     best_value_assessment,
@@ -197,7 +198,10 @@ else:
                     },
                     raw_odds,
                 )
-                if any(item.expected_value >= MIN_VALUE_EV for item in assessments):
+                if any(
+                    MIN_VALUE_EV <= item.expected_value <= MAX_PUBLISHABLE_EXPECTED_VALUE
+                    for item in assessments
+                ):
                     value_match_ids.add(int(match_row["id"]))
             decisions = [decision for decision in decisions if decision.match_id in value_match_ids]
         if watched_only:

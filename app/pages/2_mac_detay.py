@@ -59,7 +59,7 @@ from models.market_forecast import (
     derive_market_probabilities,
     derive_requested_market_probabilities,
 )
-from models.value_analysis import assess_market_value
+from models.value_analysis import MAX_PUBLISHABLE_EXPECTED_VALUE, assess_market_value
 
 LOGGER = logging.getLogger(__name__)
 CHART_CONFIG = {"displayModeBar": False, "displaylogo": False}
@@ -517,7 +517,11 @@ try:
                         "Piyasa": f"%{item.fair_market_probability * 100:.1f}",
                         "Fark": f"{item.probability_edge * 100:+.1f} puan",
                         "EV": f"%{item.expected_value * 100:+.1f}",
-                        "Durum": "Değer bulundu" if item.has_value else "Bahis yok",
+                        "Durum": (
+                            "Oran/model tutarsızlığı · doğrula"
+                            if item.expected_value > MAX_PUBLISHABLE_EXPECTED_VALUE
+                            else "Değer bulundu" if item.has_value else "Bahis yok"
+                        ),
                     }
                     for item in value_assessments
                 ]
