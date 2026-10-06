@@ -9,7 +9,7 @@ def test_repository_migrations_allow_only_the_documented_030_gap():
     migrations = discover_migrations()
     numbers = {int(item.version[:3]) for item in migrations}
     assert 30 not in numbers
-    assert numbers == set(range(39)) - {30}
+    assert numbers == set(range(40)) - {30}
 
 
 def test_unexpected_migration_gap_is_rejected(tmp_path: Path):

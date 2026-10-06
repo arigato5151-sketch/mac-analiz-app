@@ -55,16 +55,7 @@ def load_reference_catalog() -> tuple[pd.DataFrame, pd.DataFrame]:
 @st.cache_data(ttl=HISTORY_TTL_SECONDS, show_spinner=False)
 def load_completed_match_history() -> list[dict[str, Any]]:
     """Load only the public match history required by the Poisson UI state."""
-    return get_db().select_all(
-        "matches",
-        columns=(
-            "id,league_id,home_team_id,away_team_id,match_date,status,"
-            "home_score,away_score,home_xg,away_xg,home_xa,away_xa,"
-            "home_corners,away_corners"
-        ),
-        filters={"status": "eq.finished", "home_score": "not.is.null", "away_score": "not.is.null"},
-        order="match_date.asc,id.asc",
-    )
+    return load_historical_matches(get_db())
 
 
 @st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
@@ -356,11 +347,10 @@ def _nesine_market_key(row: dict[str, Any]) -> str | None:
     import re
     import unicodedata
 
-    normalize = lambda value: re.sub(
-        r"[^a-z0-9]+", " ",
-        "".join(char for char in unicodedata.normalize("NFKD", str(value).casefold())
-                if not unicodedata.combining(char)).replace("ı", "i"),
-    ).strip()
+    def normalize(value: object) -> str:
+        folded = unicodedata.normalize("NFKD", str(value).casefold())
+        unaccented = "".join(char for char in folded if not unicodedata.combining(char))
+        return re.sub(r"[^a-z0-9]+", " ", unaccented.replace("ı", "i")).strip()
     market = normalize(f"{row.get('market_name', '')} {row.get('market_code', '')}")
     selection = normalize(f"{row.get('selection_name', '')} {row.get('selection_code', '')}")
     if "korner" in market:
