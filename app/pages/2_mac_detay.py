@@ -20,7 +20,6 @@ from app.components.data import (
     _nesine_market_key,
     get_db,
     load_confirmed_lineups,
-    load_completed_match_history,
     load_match_availability,
     load_match_baseline,
     load_odds_history,
