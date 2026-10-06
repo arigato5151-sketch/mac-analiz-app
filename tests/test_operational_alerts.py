@@ -36,3 +36,26 @@ def test_alert_contains_counts_but_never_fixture_identifiers() -> None:
     assert "Gecikmiş değerlendirme: 2" in alert
     assert "Takılı sonuç bildirimi: 1" in alert
     assert "samples" not in alert
+
+
+def test_failure_alert_includes_workflow_step_run_link_and_safe_event_details() -> None:
+    report = {
+        "healthy": False,
+        "overdue_evaluation_count": 0,
+        "stuck_result_notification_count": 0,
+        "stale_active_match_count": 0,
+        "workflow": "Daily data update",
+        "failed_steps": ["Prediction generation"],
+        "run_url": "https://github.com/example/repo/actions/runs/123",
+        "recent_errors": [{
+            "occurred_at": "2026-08-30T11:50:00+00:00",
+            "component": "fetch_fixtures",
+            "message": "fixture sync failed: ApiFootballError: quota exceeded",
+            "context": {"error_location": "fetch_fixtures.py:158 (sync_fixtures)"},
+        }],
+    }
+    alert = format_alert(report, reason="Morning workflow failed")
+    assert "Başarısız adımlar: Prediction generation" in alert
+    assert "fetch_fixtures.py:158" in alert
+    assert "quota exceeded" in alert
+    assert "actions/runs/123" in alert

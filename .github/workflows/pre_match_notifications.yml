@@ -20,6 +20,7 @@ env:
   TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+  APP_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
 jobs:
   notify:
@@ -27,12 +28,39 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+        id: checkout
+      - name: Capture workflow start time
+        id: run_started
+        run: echo "started_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v6
+        id: python
         with:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install --disable-pip-version-check -r requirements.txt
+        id: deps
       - name: Refresh and notify matches near kickoff
+        id: pre_match
         run: python -m notifications.pre_match
       - name: Capture fixed-horizon forecasts
+        id: horizons
         run: python -m evaluation.forecast_horizons --capture | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Alert logged runtime errors
+        if: success()
+        continue-on-error: true
+        env:
+          APP_RUN_STARTED_AT: ${{ steps.run_started.outputs.started_at }}
+        run: python -m notifications.operational_alerts --events-only --notify --workflow "Maç önü bildirimleri"
+      - name: Alert failed pre-match workflow
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          APP_RUN_STARTED_AT: ${{ steps.run_started.outputs.started_at }}
+          FAILED_STEPS: >-
+            ${{ steps.checkout.outcome == 'failure' && 'Checkout; ' || '' }}
+            ${{ steps.python.outcome == 'failure' && 'Python kurulumu; ' || '' }}
+            ${{ steps.deps.outcome == 'failure' && 'Bağımlılıklar; ' || '' }}
+            ${{ steps.pre_match.outcome == 'failure' && 'Maç önü tahmin/bildirim; ' || '' }}
+            ${{ steps.horizons.outcome == 'failure' && 'Vade tahmini kaydı; ' || '' }}
+        run: python -m notifications.operational_alerts --notify --workflow "Maç önü bildirimleri" --reason "Maç önü otomasyonu başarısız oldu"

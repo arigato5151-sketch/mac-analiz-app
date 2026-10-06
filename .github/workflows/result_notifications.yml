@@ -19,6 +19,7 @@ env:
   SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
   TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+  APP_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
 jobs:
   notify:
@@ -26,24 +27,66 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+        id: checkout
+      - name: Capture workflow start time
+        id: run_started
+        run: echo "started_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v6
+        id: python
         with:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install --disable-pip-version-check -r requirements.txt
+        id: deps
       - name: Verify production migration ledger
+        id: migrations
         run: python -m db.migrations --verify-production
       - name: Reconcile today's final scores
+        id: scores
         run: python -m data_pipeline.fetch_results --lookback-days 0
       - name: Evaluate newly completed predictions
+        id: evaluation
         run: python -m evaluation.track_performance
       - name: Report fixed-horizon forecast performance
+        id: horizons
         run: python -m evaluation.forecast_horizons --report | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Settle completed daily coupons
+        id: coupons
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m notifications.daily_coupon_results | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Alert failed coupon settlement
+        if: steps.coupons.outcome == 'failure'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          APP_RUN_STARTED_AT: ${{ steps.run_started.outputs.started_at }}
+          FAILED_STEPS: Kupon sonuçlandırma
+        run: python -m notifications.operational_alerts --notify --reason "Kupon sonuçlandırma adımı başarısız oldu"
       - name: Send one result card per completed match
+        id: final_results
         run: python -m notifications.final_results
+      - name: Alert failed result workflow
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          APP_RUN_STARTED_AT: ${{ steps.run_started.outputs.started_at }}
+          FAILED_STEPS: >-
+            ${{ steps.checkout.outcome == 'failure' && 'Checkout; ' || '' }}
+            ${{ steps.python.outcome == 'failure' && 'Python kurulumu; ' || '' }}
+            ${{ steps.deps.outcome == 'failure' && 'Bağımlılıklar; ' || '' }}
+            ${{ steps.migrations.outcome == 'failure' && 'Migration doğrulama; ' || '' }}
+            ${{ steps.scores.outcome == 'failure' && 'Skor senkronu; ' || '' }}
+            ${{ steps.evaluation.outcome == 'failure' && 'Tahmin değerlendirmesi; ' || '' }}
+            ${{ steps.horizons.outcome == 'failure' && 'Vade raporu; ' || '' }}
+            ${{ steps.final_results.outcome == 'failure' && 'Sonuç bildirimi; ' || '' }}
+        run: python -m notifications.operational_alerts --notify --workflow "Maç sonucu bildirimleri" --reason "Sonuç otomasyonu başarısız oldu"
+      - name: Alert logged runtime errors
+        if: success()
+        continue-on-error: true
+        env:
+          APP_RUN_STARTED_AT: ${{ steps.run_started.outputs.started_at }}
+        run: python -m notifications.operational_alerts --events-only --notify --workflow "Maç sonucu bildirimleri"

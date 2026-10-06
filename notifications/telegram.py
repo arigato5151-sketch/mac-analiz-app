@@ -12,8 +12,11 @@ class TelegramError(RuntimeError):
 
 
 def _is_coupon_message(text: str) -> bool:
-    """Allow only daily coupon cards and their settlement results on Telegram."""
-    return text.lstrip().startswith("🎟️ Günlük kupon")
+    """Allow known application notification types and reject unrelated messages."""
+    return text.lstrip().startswith((
+        "🎟️ Günlük kupon",
+        "⚠️ Maç Analiz · Operasyon uyarısı",
+    ))
 
 
 def send_telegram_message(

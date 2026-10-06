@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import traceback
 from collections.abc import Mapping
 from typing import Any, Literal
 
@@ -16,7 +17,8 @@ _SENSITIVE_KEY = re.compile(
     re.IGNORECASE,
 )
 _SENSITIVE_VALUE = re.compile(
-    r"(?:Bearer\s+|x-apisports-key\s*[:=]|https?://[^\s@]+:[^\s@]+@)",
+    r"(?:Bearer\s+|x-apisports-key\s*[:=]|https?://[^\s@]+:[^\s@]+@|"
+    r"(?:api[_-]?key|token|secret|password|authorization|cookie|credential)\s*[:=]\s*[^\s,;]+)",
     re.IGNORECASE,
 )
 
@@ -83,14 +85,25 @@ def record_exception(
     error: BaseException,
     context: Mapping[str, object] | None = None,
 ) -> bool:
-    """Store the exception class only; provider response bodies may contain secrets."""
+    """Store bounded exception detail and source location after credential scrubbing."""
+    safe_error = _safe_text(error, limit=180)
+    frames = traceback.extract_tb(error.__traceback__)
+    location = None
+    if frames:
+        frame = frames[-1]
+        filename = frame.filename.replace("\\", "/").rsplit("/", 1)[-1]
+        location = f"{filename}:{frame.lineno} ({frame.name})"
+    details = dict(context or {})
+    details["error_type"] = type(error).__name__
+    if location:
+        details["error_location"] = location
     return record_event(
         db,
         severity="error",
         component=component,
         event_type="operation_failed",
-        message=f"{operation} failed: {type(error).__name__}",
-        context=context,
+        message=f"{operation} failed: {type(error).__name__}: {safe_error}",
+        context=details,
     )
 
 

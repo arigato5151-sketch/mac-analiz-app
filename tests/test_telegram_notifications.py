@@ -50,6 +50,16 @@ def test_telegram_error_does_not_include_credentials() -> None:
         raise AssertionError("TelegramError expected")
 
 
+def test_operational_alert_messages_are_sent_to_telegram() -> None:
+    session = FakeSession(FakeResponse(ok=True, status_code=200, payload={"ok": True}))
+    send_telegram_message(
+        "⚠️ Maç Analiz · Operasyon uyarısı\nTahmin üretimi başarısız",
+        bot_token="secret-token", chat_id="42", session=session,
+    )
+    assert session.payload["chat_id"] == "42"
+    assert "Operasyon uyarısı" in str(session.payload["text"])
+
+
 def test_morning_message_contains_all_prediction_markets_for_one_fixture() -> None:
     messages = build_morning_messages(
         [{"id": 1, "league_id": 39, "home_team_id": 10, "away_team_id": 20, "match_date": "2026-08-30T16:00:00+00:00"}],
