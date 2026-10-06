@@ -28,8 +28,14 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _normalise(value: str) -> str:
+    # Turkish dotless ı does not decompose under NFKD and was being dropped,
+    # turning names such as "Iğdır" into a different string.
+    value = value.replace("ı", "i").replace("İ", "I")
     text = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
-    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    tokens = re.sub(r"[^a-z0-9]+", " ", text.lower()).split()
+    aliases = {"utd": "united", "munchen": "munich"}
+    generic = {"fc", "afc", "cf", "sc", "sk", "fk"}
+    return " ".join(aliases.get(token, token) for token in tokens if token not in generic)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,8 +114,19 @@ def parse_rendered_text_rows(rows: Iterable[Mapping[str, Any]]) -> list[NesineMa
 def match_score(quote: NesineMatchQuote, match: Mapping[str, Any]) -> float:
     home = _normalise(str(match.get("home_team") or match.get("home_name") or ""))
     away = _normalise(str(match.get("away_team") or match.get("away_name") or ""))
-    return (SequenceMatcher(None, _normalise(quote.home_team), home).ratio() +
-            SequenceMatcher(None, _normalise(quote.away_team), away).ratio()) / 2
+
+    def similarity(left: str, right: str) -> float:
+        left_tokens, right_tokens = left.split(), right.split()
+        if not left_tokens or not right_tokens:
+            return 0.0
+        sequence = SequenceMatcher(None, left, right).ratio()
+        common = sum(min(left_tokens.count(token), right_tokens.count(token))
+                     for token in set(left_tokens) | set(right_tokens))
+        token_overlap = 2 * common / (len(left_tokens) + len(right_tokens))
+        return max(sequence, token_overlap)
+
+    return (similarity(_normalise(quote.home_team), home) +
+            similarity(_normalise(quote.away_team), away)) / 2
 
 
 def match_quotes(quotes: Iterable[NesineMatchQuote], matches: Iterable[Mapping[str, Any]], threshold: float = .82) -> list[tuple[int, NesineMatchQuote, float]]:
@@ -143,32 +160,52 @@ def store_nesine_quotes(db: SupabaseRestClient, matched: Iterable[tuple[int, Nes
 
 
 def _extract_rows_from_page(page: Any) -> list[dict[str, Any]]:
-    """Extract likely match rows from rendered DOM without depending on CSS classes.
-
-    Nesine's class names are implementation details. This uses visible text and
-    numeric odds candidates, then leaves team matching and validation to the
-    pure functions above.
-    """
+    """Extract 1/X/2 prices from rendered Nesine event cards and table rows."""
     rows = page.evaluate("""() => {
       const odd = /^([1-9]\\d?)[.,]\\d{1,3}$/;
+      const clean = value => (value || '').replace(/\\s+/g, ' ').trim();
+      const splitPair = value => {
+        const parts = clean(value).split(/\\s+[-–—]\\s+/);
+        return parts.length === 2 && parts.every(part => part && part.length <= 80) ? parts : null;
+      };
+
+      // Current Nesine football fixtures are OCRow_* event cards, not tr/li
+      // elements. The team and odds buttons are contained by the same card.
+      const eventRows = [...document.querySelectorAll('[class*="OCRow_"]')].map(node => {
+        const teamLink = [...node.querySelectorAll('a')]
+          .map(link => clean(link.innerText)).find(text => splitPair(text));
+        const teams = teamLink && splitPair(teamLink);
+        const values = [...node.querySelectorAll('button')]
+          .map(button => clean(button.innerText)).filter(value => odd.test(value));
+        if (!teams || values.length < 3) return null;
+        return {home_team: teams[0], away_team: teams[1],
+          markets: {"1": values[0].replace(',', '.'), "X": values[1].replace(',', '.'), "2": values[2].replace(',', '.')}};
+      }).filter(Boolean);
+      if (eventRows.length) {
+        const seen = new Set();
+        return eventRows.filter(row => {
+          const key = `${row.home_team.toLowerCase()}|${row.away_team.toLowerCase()}|${row.markets['1']}|${row.markets.X}|${row.markets['2']}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      }
+
       const nodes = [...document.querySelectorAll('tr, li, [role="row"]')];
       return nodes.map(node => {
         const text = (node.innerText || '').replace(/\\s+/g, ' ').trim();
         const values = [...text.matchAll(/\\b([1-9]\\d?[.,]\\d{1,3})\\b/g)].map(m => m[1]);
         if (values.length < 3) return null;
-        const parts = text.split(/\\s{2,}|\\|/).map(s => s.trim()).filter(Boolean);
-        const pair = parts.find(p => /\\s[-–—]\\s/.test(p));
+        const pair = text.match(/(.+?)\\s+[-–—]\\s+(.+?)(?=\\s+\\d|$)/);
         if (!pair) return null;
-        const teams = pair.split(/\\s[-–—]\\s/).map(s => s.trim());
-        if (teams.length !== 2 || teams.some(t => !t || t.length > 80)) return null;
+        const teams = [pair[1].trim(), pair[2].trim()];
+        if (teams.some(t => !t || t.length > 80)) return null;
         return {home_team: teams[0], away_team: teams[1], markets: {"1": values[0], "X": values[1], "2": values[2]}};
       }).filter(Boolean);
     }""")
     if rows:
         return rows
-    # Current Nesine layout renders many fixtures as divs rather than rows.
-    # Fall back to the stable visible-text pattern: "Home - Away" followed by
-    # the three 1/X/2 prices.
+    # Last resort for a future layout change: parse visible text lines.
     return page.evaluate("""() => {
       const odd = /^([1-9]\\d?)[.,]\\d{1,3}$/;
       const lines = (document.body.innerText || '').split(/\\n+/).map(x => x.trim()).filter(Boolean);
@@ -218,7 +255,7 @@ def _collect_detail_markets(page: Any, base_rows: list[dict[str, Any]]) -> list[
     for row in base_rows:
         home, away = row["home_team"], row["away_team"]
         try:
-            locator = page.locator("tr, li, [role='row']").filter(has_text=home).filter(has_text=away).first
+            locator = page.locator("[class*='OCRow_'], tr, li, [role='row']").filter(has_text=home).filter(has_text=away).first
             if locator.count() == 0:
                 collected.append(row)
                 continue
@@ -279,10 +316,25 @@ def main() -> None:
     teams = {int(row["id"]): str(row["name"]) for row in db.select_all("teams", columns="id,name")}
     matches = [{**row, "home_team": teams.get(int(row["home_team_id"]), ""),
                 "away_team": teams.get(int(row["away_team_id"]), "")} for row in raw_matches]
-    matched = match_quotes(parse_rendered_text_rows(payload), matches, args.threshold)
+    quotes = parse_rendered_text_rows(payload)
+    matched = match_quotes(quotes, matches, args.threshold)
     stored = store_nesine_quotes(db, matched)
     market_count = sum(len(quote.all_markets()) for _match_id, quote, _score in matched)
-    report = {"rows": len(payload), "matched": len(matched), "stored": stored, "market_selections": market_count}
+    matched_quotes = {id(quote) for _match_id, quote, _score in matched}
+    unmatched_samples = []
+    for quote in (quote for quote in quotes if id(quote) not in matched_quotes):
+        candidates = sorted(((match_score(quote, match), match) for match in matches),
+                            key=lambda item: item[0], reverse=True)
+        best = candidates[0] if candidates else None
+        unmatched_samples.append({
+            "nesine": f"{quote.home_team} - {quote.away_team}",
+            "best_candidate": (f"{best[1].get('home_team')} - {best[1].get('away_team')}" if best else None),
+            "score": round(best[0], 3) if best else None,
+        })
+        if len(unmatched_samples) == 5:
+            break
+    report = {"rows": len(payload), "matched": len(matched), "stored": stored,
+              "market_selections": market_count, "unmatched_samples": unmatched_samples}
     print(json.dumps(report, ensure_ascii=False))
     if not matched:
         raise SystemExit("Nesine collector matched zero fixtures; no odds were stored")
