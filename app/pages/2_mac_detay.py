@@ -58,12 +58,77 @@ from models.market_forecast import (
     derive_corner_probabilities,
     derive_market_probabilities,
     derive_requested_market_probabilities,
-    format_market_summary,
 )
 from models.value_analysis import assess_market_value
 
 LOGGER = logging.getLogger(__name__)
 CHART_CONFIG = {"displayModeBar": False, "displaylogo": False}
+
+
+def _all_market_display_rows(
+    probabilities: dict[str, float], quotes: list[dict[str, object]]
+) -> list[dict[str, str]]:
+    """Combine supported model markets with the latest matching Nesine quotes."""
+    quote_by_key: dict[str, float] = {}
+    for quote in quotes:
+        key = _nesine_market_key(quote)
+        try:
+            odd = float(quote["odd"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if key and odd > 1:
+            quote_by_key[key] = odd
+
+    labels: dict[str, tuple[str, str]] = {}
+
+    def add(key: str, market: str, selection: str) -> None:
+        labels[key] = (market, selection)
+
+    for key, selection in (("home_win", "1"), ("draw", "X"), ("away_win", "2")):
+        add(key, "Maç sonucu", selection)
+    for token in ("1x", "x2", "12"):
+        add(f"double_chance_{token}", "Çifte şans", token.upper())
+    for period, period_label in (("first_half", "1. yarı"), ("second_half", "2. yarı")):
+        for key, selection in (("home_win", "1"), ("draw", "X"), ("away_win", "2")):
+            add(f"{period}_{key}", f"{period_label} maç sonucu", selection)
+    for line in ("1_5", "2_5", "3_5", "4_5"):
+        for direction in ("over", "under"):
+            add(f"{direction}_{line}", "Toplam gol", f"{'Üst' if direction == 'over' else 'Alt'} {line.replace('_', '.')}")
+            for result, result_label in (("home_win", "1"), ("draw", "X"), ("away_win", "2")):
+                add(f"{result}_{direction}_{line}", f"Maç sonucu ve {line.replace('_', '.')} gol", f"{result_label} + {'Üst' if direction == 'over' else 'Alt'}")
+    for line in ("0_5", "1_5", "2_5", "3_5", "4_5"):
+        for direction in ("over", "under"):
+            for team, team_label in (("home", "Ev sahibi"), ("away", "Deplasman")):
+                add(f"{team}_{direction}_{line}", f"{team_label} gol", f"{'Üst' if direction == 'over' else 'Alt'} {line.replace('_', '.')}")
+    for result, result_label in (("home_win", "1"), ("draw", "X"), ("away_win", "2")):
+        for outcome, outcome_label in (("yes", "Var"), ("no", "Yok")):
+            add(f"{result}_btts_{outcome}", "Maç sonucu ve KG", f"{result_label} + {outcome_label}")
+    add("btts_yes", "Karşılıklı gol", "Var")
+    add("btts_no", "Karşılıklı gol", "Yok")
+    for team, team_label in (("home", "Ev sahibi"), ("away", "Deplasman")):
+        for period, period_label in (("first_half", "1. yarı"), ("second_half", "2. yarı")):
+            for line in ("0_5", "1_5"):
+                for direction in ("over", "under"):
+                    add(
+                        f"{team}_{period}_{direction}_{line}",
+                        f"{team_label} {period_label} gol",
+                        f"{'Üst' if direction == 'over' else 'Alt'} {line.replace('_', '.')}",
+                    )
+    for line in ("7_5", "8_5", "9_5", "10_5", "11_5"):
+        for direction in ("over", "under"):
+            add(f"corners_{direction}_{line}", "Toplam korner", f"{'Üst' if direction == 'over' else 'Alt'} {line.replace('_', '.')}")
+
+    rows = []
+    for key, (market, selection) in labels.items():
+        probability = probabilities.get(key)
+        odd = quote_by_key.get(key)
+        rows.append({
+            "Pazar": market,
+            "Seçim": selection,
+            "Model olasılığı": f"%{float(probability) * 100:.1f}" if probability is not None else "Tahmin yok",
+            "Nesine oranı": f"{odd:.2f}" if odd is not None else "—",
+        })
+    return rows
 
 
 configure_page("Maç Detay")
@@ -355,6 +420,7 @@ try:
 except Exception:
     st.warning("Onaylı ilk 11 bilgisi henüz kullanılamıyor.")
 
+requested_market_rows: list[dict[str, object]] = []
 try:
     odds_history = load_odds_history(int(selected_id))
     if odds_history.empty:
@@ -426,54 +492,6 @@ try:
             assess_market_value(model_probabilities, latest_odds)
             if quote_is_current else []
         )
-        st.subheader("Nesine pazar analizi")
-        if requested_market_rows:
-            baseline_for_markets = load_match_baseline(int(selected_id))["prediction"]
-            half_markets = predict_half_time_markets(
-                baseline_for_markets.home_expected_goals,
-                baseline_for_markets.away_expected_goals,
-            )
-            requested_probabilities = derive_requested_market_probabilities(
-                baseline_for_markets, half_markets
-            )
-            corner_state = CausalFeatureState()
-            target_match = get_db().select(
-                "matches",
-                columns="id,league_id,home_team_id,away_team_id,match_date",
-                filters={"id": f"eq.{int(selected_id)}"},
-                limit=1,
-            )
-            if target_match:
-                target = target_match[0]
-                target_time = pd.to_datetime(target["match_date"], utc=True)
-                historical = load_completed_match_history()
-                for historical_match in historical:
-                    history_time = pd.to_datetime(historical_match["match_date"], utc=True)
-                    if history_time < target_time:
-                        corner_state.update(historical_match)
-                corner_estimate = corner_state.corner_baseline(target)
-                if corner_estimate:
-                    requested_probabilities.update(derive_corner_probabilities(
-                        corner_estimate["home_expected_corners"],
-                        corner_estimate["away_expected_corners"],
-                    ))
-            market_analysis_rows = []
-            for row in requested_market_rows:
-                key = _nesine_market_key(row)
-                probability = requested_probabilities.get(key) if key else None
-                market_analysis_rows.append({
-                    "Pazar": row.get("market_name", ""),
-                    "Seçim": row.get("selection_name", ""),
-                    "Nesine oranı": f"{float(row['odd']):.2f}",
-                "Model olasılığı": f"%{probability * 100:.1f}" if probability is not None else "Model yok",
-                })
-            st.dataframe(pd.DataFrame(market_analysis_rows), hide_index=True, width="stretch")
-            st.caption(
-                "Model olasılıkları maçın Poisson skor dağılımından ve devre gol payı varsayımından hesaplanır. "
-                "Korner tahmini, her takımın son tamamlanmış karşılaşmalarındaki korner üretimi ve verdiği korner ortalamasına dayalı Poisson dağılımıdır. En az 3 maçlık korner geçmişi yoksa model tahmini gösterilmez."
-            )
-        else:
-            st.info("Bu maç için Nesine’nin istenen detay pazar oranları henüz alınmamış.")
         if value_assessments:
             st.subheader("Oran ve olasılık karşılaştırması")
             st.caption(
@@ -532,12 +550,44 @@ try:
         result_probabilities, baseline
     )
 
-    st.subheader("Diğer tahminler")
-    diversified_lines = format_market_summary(diversified_markets)
-    if diversified_lines:
-        st.markdown("\n".join(f"- {line}" for line in diversified_lines))
-    else:
-        st.info("Güven eşiğini geçen ek tahmin bulunmuyor.")
+    half_markets = predict_half_time_markets(
+        baseline.home_expected_goals,
+        baseline.away_expected_goals,
+    )
+    all_market_probabilities = derive_requested_market_probabilities(
+        baseline, half_markets
+    )
+    target_match = get_db().select(
+        "matches",
+        columns="id,league_id,home_team_id,away_team_id,match_date",
+        filters={"id": f"eq.{int(selected_id)}"},
+        limit=1,
+    )
+    if target_match:
+        target = target_match[0]
+        target_time = pd.to_datetime(target["match_date"], utc=True)
+        corner_state = CausalFeatureState()
+        for historical_match in load_completed_match_history():
+            history_time = pd.to_datetime(historical_match["match_date"], utc=True)
+            if history_time < target_time:
+                corner_state.update(historical_match)
+        corner_estimate = corner_state.corner_baseline(target)
+        if corner_estimate:
+            all_market_probabilities.update(derive_corner_probabilities(
+                corner_estimate["home_expected_corners"],
+                corner_estimate["away_expected_corners"],
+            ))
+
+    st.subheader("Tüm pazar tahminleri")
+    st.caption(
+        "Modelin desteklediği pazarlar tek tabloda listelenir. Nesine oranı henüz alınmadıysa —, "
+        "model için gerekli veri yoksa Tahmin yok görünür."
+    )
+    st.dataframe(
+        pd.DataFrame(_all_market_display_rows(all_market_probabilities, requested_market_rows)),
+        hide_index=True,
+        width="stretch",
+    )
     expected_goals = diversified_markets["expected_goals"]
     st.caption(
         f"Beklenen gol: {selected['home_team']} {expected_goals['home']:.2f} · "
