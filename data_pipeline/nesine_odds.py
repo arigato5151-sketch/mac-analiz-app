@@ -30,22 +30,25 @@ LOGGER = logging.getLogger(__name__)
 def _normalise(value: str) -> str:
     # Turkish dotless ı does not decompose under NFKD and was being dropped,
     # turning names such as "Iğdır" into a different string.
-    value = value.casefold()
+    value = unicodedata.normalize("NFKD", value.casefold())
+    value = "".join(char for char in value if not unicodedata.combining(char)).replace("ı", "i")
     country_aliases = {
-        "güney kore": "south korea", "özbekistan": "uzbekistan",
-        "kazakistan": "kazakhstan", "faroe adaları": "faroe islands",
+        "guney kore": "south korea", "ozbekistan": "uzbekistan",
+        "kazakistan": "kazakhstan", "faroe adalari": "faroe islands",
         "danimarka": "denmark", "hollanda": "netherlands",
-        "azerbaycan": "azerbaijan", "cebelitarık": "gibraltar",
+        "azerbaycan": "azerbaijan", "cebelitarik": "gibraltar",
         "portekiz": "portugal", "avusturya": "austria", "hindistan": "india",
-        "almanya": "germany", "ispanya": "spain", "hırvatistan": "croatia",
-        "çekya": "czechia", "isviçre": "switzerland", "slovakya": "slovakia",
-        "slovenya": "slovenia", "karadağ": "montenegro",
+        "almanya": "germany", "ispanya": "spain", "hirvatistan": "croatia",
+        "ingiltere": "england", "cekya": "czechia", "arnavutluk": "albania",
+        "finlandiya": "finland", "estonya": "estonia", "izlanda": "iceland",
+        "isvicre": "switzerland", "slovakya": "slovakia", "slovenya": "slovenia",
+        "luksemburg": "luxembourg", "bulgaristan": "bulgaria", "iskocya": "scotland",
+        "fyr macedonia": "north macedonia", "karadag": "montenegro",
         "kuzey makedonya": "north macedonia", "kuzey irlanda": "northern ireland",
     }
     for local_name, canonical_name in country_aliases.items():
         value = re.sub(rf"(?<!\w){re.escape(local_name)}(?!\w)", canonical_name, value)
-    value = value.replace("ı", "i")
-    text = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
+    text = value.encode("ascii", "ignore").decode()
     tokens = re.sub(r"[^a-z0-9]+", " ", text.lower()).split()
     aliases = {"utd": "united", "munchen": "munich"}
     generic = {"fc", "afc", "cf", "sc", "sk", "fk"}
@@ -238,6 +241,45 @@ def _extract_rows_from_page(page: Any) -> list[dict[str, Any]]:
     }""")
 
 
+def _collect_all_rendered_rows(page: Any, *, max_scrolls: int = 80) -> list[dict[str, Any]]:
+    """Collect quotes while scrolling Nesine's virtualized event list."""
+    # Nesine locks document scrolling while its welcome/help layer is mounted.
+    # Removing the scroll lock affects only this temporary browser page and lets
+    # the site render the next batch of event cards as we move through the list.
+    page.evaluate("""() => {
+      document.body.classList.remove('stop-scrolling');
+      document.body.style.overflow = 'auto';
+      document.documentElement.style.overflow = 'auto';
+    }""")
+    rows_by_fixture: dict[tuple[str, str], dict[str, Any]] = {}
+    previous_state: tuple[int, int] | None = None
+    stagnant_bottom_steps = 0
+    for _ in range(max_scrolls):
+        for row in _extract_rows_from_page(page):
+            key = (_normalise(str(row.get("home_team", ""))),
+                   _normalise(str(row.get("away_team", ""))))
+            if all(key):
+                rows_by_fixture[key] = row
+
+        state = page.evaluate("""() => ({
+          y: Math.round(window.scrollY),
+          height: Math.round(document.body.scrollHeight),
+          viewport: Math.round(window.innerHeight)
+        })""")
+        current_state = (state["y"], state["height"])
+        at_bottom = state["y"] + state["viewport"] >= state["height"] - 5
+        if at_bottom and current_state == previous_state:
+            stagnant_bottom_steps += 1
+        else:
+            stagnant_bottom_steps = 0
+        if stagnant_bottom_steps >= 3:
+            break
+        previous_state = current_state
+        page.evaluate("window.scrollBy(0, Math.max(400, window.innerHeight * 0.75))")
+        page.wait_for_timeout(350)
+    return list(rows_by_fixture.values())
+
+
 def _extract_visible_market_rows(page: Any, home_team: str, away_team: str) -> list[dict[str, str]]:
     """Read visible market/selection/odd triplets from a match detail view."""
     return page.evaluate("""() => {
@@ -301,7 +343,10 @@ def collect_from_nesine_page(url: str = DEFAULT_NESINE_URL, *, headless: bool = 
             page = browser.new_page(locale="tr-TR")
             page.goto(url, wait_until="domcontentloaded", timeout=45_000)
             page.wait_for_timeout(4_000)
-            rows = _collect_detail_markets(page, _extract_rows_from_page(page))
+            # The page virtualizes its event list, so a single DOM read only
+            # sees the first screenful. Scroll through the feed and aggregate
+            # every fixture before parsing/storing its 1/X/2 market.
+            rows = _collect_all_rendered_rows(page)
             return parse_rendered_text_rows(rows)
         finally:
             browser.close()
