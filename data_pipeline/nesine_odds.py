@@ -30,7 +30,21 @@ LOGGER = logging.getLogger(__name__)
 def _normalise(value: str) -> str:
     # Turkish dotless ı does not decompose under NFKD and was being dropped,
     # turning names such as "Iğdır" into a different string.
-    value = value.replace("ı", "i").replace("İ", "I")
+    value = value.casefold()
+    country_aliases = {
+        "güney kore": "south korea", "özbekistan": "uzbekistan",
+        "kazakistan": "kazakhstan", "faroe adaları": "faroe islands",
+        "danimarka": "denmark", "hollanda": "netherlands",
+        "azerbaycan": "azerbaijan", "cebelitarık": "gibraltar",
+        "portekiz": "portugal", "avusturya": "austria", "hindistan": "india",
+        "almanya": "germany", "ispanya": "spain", "hırvatistan": "croatia",
+        "çekya": "czechia", "isviçre": "switzerland", "slovakya": "slovakia",
+        "slovenya": "slovenia", "karadağ": "montenegro",
+        "kuzey makedonya": "north macedonia", "kuzey irlanda": "northern ireland",
+    }
+    for local_name, canonical_name in country_aliases.items():
+        value = re.sub(rf"(?<!\w){re.escape(local_name)}(?!\w)", canonical_name, value)
+    value = value.replace("ı", "i")
     text = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
     tokens = re.sub(r"[^a-z0-9]+", " ", text.lower()).split()
     aliases = {"utd": "united", "munchen": "munich"}
