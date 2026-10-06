@@ -14,6 +14,7 @@ from app.components.ui import prediction_signal
 from data_pipeline.value_bets import vig_free_probabilities
 from models.decision_policy import minimum_confidence_for_league
 from models.market_forecast import MINIMUM_GOAL_MARKET_CONFIDENCE
+from models.value_analysis import MAX_PUBLISHABLE_EXPECTED_VALUE
 
 # Odds-snapshot selection keys per model market, with the sibling selections
 # required for the margin-free implied probability.
@@ -75,6 +76,11 @@ def market_gap_text(
         return None
     implied = vig_free_probabilities(odds, MARKET_SELECTIONS[key])
     if implied is None:
+        return None
+    try:
+        if probability * float(odds[key]) - 1 > MAX_PUBLISHABLE_EXPECTED_VALUE:
+            return None
+    except (TypeError, ValueError):
         return None
     gap = probability - implied[key]
     return f"Model %{probability * 100:.1f} · piyasa %{implied[key] * 100:.1f} ({gap * 100:+.1f} puan)"

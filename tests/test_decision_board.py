@@ -130,3 +130,17 @@ def test_stale_odds_never_create_a_market_gap() -> None:
 
     assert decision.market_gap is None
     assert decision.data_status == "Tahmin hazır · güncel oran yok"
+
+
+def test_extreme_model_quote_disagreement_is_not_published_as_market_gap() -> None:
+    now = datetime(2026, 9, 22, 12, tzinfo=timezone.utc)
+    quote = {
+        10: {
+            "odds": {"home_win": "17.50", "draw": "5.00", "away_win": "1.10"},
+            "captured_at": now - timedelta(hours=1),
+        }
+    }
+
+    decision = build_match_decisions(_match_frame(), quote, now=now)[0]
+
+    assert decision.market_gap is None
