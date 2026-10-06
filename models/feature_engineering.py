@@ -334,6 +334,9 @@ class CausalFeatureState:
         self.league_goals: defaultdict[int, deque[tuple[int, int]]] = defaultdict(
             lambda: deque(maxlen=200)
         )
+        self.team_corner_history: defaultdict[int, deque[tuple[int, int, int]]] = defaultdict(
+            lambda: deque(maxlen=12)
+        )
         self.league_rhos: dict[int, float] = league_rhos or {}
         self.league_initial_elos = league_initial_elos or {}
         self._league_seasons: dict[int, str] = {}
@@ -593,6 +596,30 @@ class CausalFeatureState:
             _result_label(home_score, away_score)
         )
         self.league_goals[league_id].append((home_score, away_score))
+        home_corners, away_corners = row.get("home_corners"), row.get("away_corners")
+        if home_corners is not None and away_corners is not None:
+            try:
+                home_corner_count, away_corner_count = int(home_corners), int(away_corners)
+                if home_corner_count >= 0 and away_corner_count >= 0:
+                    self.team_corner_history[home_id].append((home_corner_count, away_corner_count, 1))
+                    self.team_corner_history[away_id].append((away_corner_count, home_corner_count, 0))
+            except (TypeError, ValueError):
+                pass
+
+    def corner_baseline(self, row: dict[str, Any], *, minimum_matches: int = 3) -> dict[str, float] | None:
+        """Estimate full-time corner means from each team's latest completed matches."""
+        home_rows = list(self.team_corner_history.get(int(row["home_team_id"]), ()))
+        away_rows = list(self.team_corner_history.get(int(row["away_team_id"]), ()))
+        if len(home_rows) < minimum_matches or len(away_rows) < minimum_matches:
+            return None
+        home_for = float(np.mean([item[0] for item in home_rows[-8:]]))
+        home_against = float(np.mean([item[1] for item in home_rows[-8:]]))
+        away_for = float(np.mean([item[0] for item in away_rows[-8:]]))
+        away_against = float(np.mean([item[1] for item in away_rows[-8:]]))
+        return {
+            "home_expected_corners": float(np.clip((home_for + away_against) / 2, 0.1, 15.0)),
+            "away_expected_corners": float(np.clip((away_for + home_against) / 2, 0.1, 15.0)),
+        }
 
 
 def _causal_league_rhos(matches: list[dict[str, Any]]) -> dict[int, float]:
@@ -740,3 +767,35 @@ def build_upcoming_poisson_predictions(
     for row in completed:
         state.update(row)
     return {int(row["id"]): state.poisson_baseline(row) for row in targets}
+
+
+def build_upcoming_corner_predictions(
+    historical_matches: list[dict[str, Any]],
+    upcoming_matches: list[dict[str, Any]],
+    *,
+    minimum_matches: int = 3,
+) -> dict[int, dict[str, float]]:
+    """Return causal expected corners for targets with enough team history."""
+    completed = [
+        row for row in historical_matches
+        if row.get("home_score") is not None and row.get("away_score") is not None
+        and row.get("home_corners") is not None and row.get("away_corners") is not None
+        and row.get("match_date")
+    ]
+    completed.sort(key=lambda row: (_match_datetime_utc(row["match_date"]), int(row["id"])))
+    targets = sorted(
+        upcoming_matches,
+        key=lambda row: (_match_datetime_utc(row["match_date"]), int(row["id"])),
+    )
+    state = CausalFeatureState()
+    result: dict[int, dict[str, float]] = {}
+    history_index = 0
+    for target in targets:
+        target_time = _match_datetime_utc(target["match_date"])
+        while history_index < len(completed) and _match_datetime_utc(completed[history_index]["match_date"]) < target_time:
+            state.update(completed[history_index])
+            history_index += 1
+        estimate = state.corner_baseline(target, minimum_matches=minimum_matches)
+        if estimate is not None:
+            result[int(target["id"])] = estimate
+    return result

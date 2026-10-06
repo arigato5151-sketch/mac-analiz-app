@@ -17,7 +17,10 @@ from app.components.analysis_report import build_match_analysis_report
 from app.components.auth import current_user_id, get_user_db, render_auth_panel
 from app.components.availability import summarize_availability
 from app.components.data import (
+    _nesine_market_key,
+    get_db,
     load_confirmed_lineups,
+    load_completed_match_history,
     load_match_availability,
     load_match_baseline,
     load_odds_history,
@@ -49,7 +52,14 @@ from app.components.ui import (
     probability_percent,
 )
 from models.decision_policy import minimum_confidence_for_league
-from models.market_forecast import derive_market_probabilities, format_market_summary
+from models.half_time_model import predict_half_time_markets
+from models.feature_engineering import CausalFeatureState
+from models.market_forecast import (
+    derive_corner_probabilities,
+    derive_market_probabilities,
+    derive_requested_market_probabilities,
+    format_market_summary,
+)
 from models.value_analysis import assess_market_value
 
 LOGGER = logging.getLogger(__name__)
@@ -377,6 +387,23 @@ try:
             "kotasyonudur. Veri yoksa veya eskiyse değer hesaplanmaz."
         )
         latest_odds = odds_history.iloc[-1].get("odds") or {}
+        requested_market_rows = []
+        try:
+            detail_rows = get_db().select_all(
+                "nesine_market_quotes",
+                columns="market_code,market_name,selection_code,selection_name,odd,captured_at",
+                filters={"match_id": f"eq.{int(selected_id)}"},
+                order="captured_at.desc",
+            )
+            seen_markets: set[tuple[str, str]] = set()
+            for row in detail_rows:
+                row_key = (str(row.get("market_code", "")), str(row.get("selection_code", "")))
+                if row_key in seen_markets:
+                    continue
+                seen_markets.add(row_key)
+                requested_market_rows.append(row)
+        except Exception:
+            LOGGER.exception("Could not load Nesine detailed markets for match %s", selected_id)
         model_probabilities = {
             "home_win": selected.get("prob_home_win"),
             "draw": selected.get("prob_draw"),
@@ -399,6 +426,54 @@ try:
             assess_market_value(model_probabilities, latest_odds)
             if quote_is_current else []
         )
+        st.subheader("Nesine pazar analizi")
+        if requested_market_rows:
+            baseline_for_markets = load_match_baseline(int(selected_id))["prediction"]
+            half_markets = predict_half_time_markets(
+                baseline_for_markets.home_expected_goals,
+                baseline_for_markets.away_expected_goals,
+            )
+            requested_probabilities = derive_requested_market_probabilities(
+                baseline_for_markets, half_markets
+            )
+            corner_state = CausalFeatureState()
+            target_match = get_db().select(
+                "matches",
+                columns="id,league_id,home_team_id,away_team_id,match_date",
+                filters={"id": f"eq.{int(selected_id)}"},
+                limit=1,
+            )
+            if target_match:
+                target = target_match[0]
+                target_time = pd.to_datetime(target["match_date"], utc=True)
+                historical = load_completed_match_history()
+                for historical_match in historical:
+                    history_time = pd.to_datetime(historical_match["match_date"], utc=True)
+                    if history_time < target_time:
+                        corner_state.update(historical_match)
+                corner_estimate = corner_state.corner_baseline(target)
+                if corner_estimate:
+                    requested_probabilities.update(derive_corner_probabilities(
+                        corner_estimate["home_expected_corners"],
+                        corner_estimate["away_expected_corners"],
+                    ))
+            market_analysis_rows = []
+            for row in requested_market_rows:
+                key = _nesine_market_key(row)
+                probability = requested_probabilities.get(key) if key else None
+                market_analysis_rows.append({
+                    "Pazar": row.get("market_name", ""),
+                    "Seçim": row.get("selection_name", ""),
+                    "Nesine oranı": f"{float(row['odd']):.2f}",
+                "Model olasılığı": f"%{probability * 100:.1f}" if probability is not None else "Model yok",
+                })
+            st.dataframe(pd.DataFrame(market_analysis_rows), hide_index=True, width="stretch")
+            st.caption(
+                "Model olasılıkları maçın Poisson skor dağılımından ve devre gol payı varsayımından hesaplanır. "
+                "Korner tahmini, her takımın son tamamlanmış karşılaşmalarındaki korner üretimi ve verdiği korner ortalamasına dayalı Poisson dağılımıdır. En az 3 maçlık korner geçmişi yoksa model tahmini gösterilmez."
+            )
+        else:
+            st.info("Bu maç için Nesine’nin istenen detay pazar oranları henüz alınmamış.")
         if value_assessments:
             st.subheader("Oran ve olasılık karşılaştırması")
             st.caption(

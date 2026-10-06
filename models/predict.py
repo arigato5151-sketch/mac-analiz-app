@@ -24,11 +24,12 @@ from models.artifact_store import (
 from models.calibration import apply_binary_temperature, apply_multiclass_temperature
 from models.feature_engineering import (
     FEATURE_COLUMNS,
+    build_upcoming_corner_predictions,
     build_upcoming_features,
     build_upcoming_poisson_predictions,
 )
 from models.half_time_model import predict_half_time_markets
-from models.market_forecast import derive_market_probabilities
+from models.market_forecast import derive_corner_probabilities, derive_market_probabilities
 from models.train_model import (
     load_historical_matches,
     normalize_multiclass_probabilities,
@@ -309,6 +310,7 @@ def generate_prediction_rows(
     poisson_by_match = build_upcoming_poisson_predictions(
         historical_matches, ordered_upcoming, league_rhos=league_rhos
     )
+    corner_by_match = build_upcoming_corner_predictions(historical_matches, ordered_upcoming)
     features = all_features.loc[:, expected_columns]
     if record_features_snapshot and not features.empty:
         try:
@@ -386,6 +388,12 @@ def generate_prediction_rows(
                 poisson_prediction.away_expected_goals,
             )
         )
+        corner_estimate = corner_by_match.get(int(match["id"]))
+        if corner_estimate:
+            market_probabilities["corners"] = derive_corner_probabilities(
+                corner_estimate["home_expected_corners"],
+                corner_estimate["away_expected_corners"],
+            )
         rows.append(
             {
                 "match_id": int(match["id"]),

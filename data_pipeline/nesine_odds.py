@@ -350,13 +350,17 @@ def _is_requested_nesine_market(value: str) -> bool:
         "1 yari sonucu", "2 yari sonucu", "1 yarisi sonucu", "2 yarisi sonucu",
         "1 yari mac sonucu", "2 yari mac sonucu", "ilk yari mac sonucu",
         "karsilikli gol", "mac sonucu ve karsilikli gol",
+        "1 yarisi 2 yarisi alt ust", "ev sahibi 1 yarisi 2 yarisi alt ust",
+        "deplasman 1 yarisi 2 yarisi alt ust",
     }:
         return True
     if re.fullmatch(r"mac sonucu ve \d+ 5 alt ust", name):
         return True
-    if re.fullmatch(r"\d+ 5 gol alt ust", name):
+    if re.fullmatch(r"\d+ 5 (?:gol )?alt ust", name):
         return True
-    if re.fullmatch(r"(ev sahibi|deplasman)(?: [12] (?:y|yari))? \d+ 5 gol alt ust", name):
+    if re.fullmatch(r"(ev sahibi|deplasman)(?: [12] (?:y|yari))? \d+ 5 (?:gol )?alt ust", name):
+        return True
+    if re.fullmatch(r"(?:ev sahibi |deplasman )?[12] yari [12] yari alt ust", name):
         return True
     return "korner" in name and "alt ust" in name
 

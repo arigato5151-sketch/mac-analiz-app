@@ -208,6 +208,26 @@ def extract_expected_metrics(
     }
 
 
+def extract_corner_counts(
+    payload: list[dict[str, Any]], *, home_team_id: int, away_team_id: int
+) -> tuple[int, int] | None:
+    """Extract full-time corners for both fixture teams, preserving missing data."""
+    values: dict[int, int] = {}
+    for team_stats in payload:
+        team_id = (team_stats.get("team") or {}).get("id")
+        if team_id not in {home_team_id, away_team_id}:
+            continue
+        for stat in team_stats.get("statistics", []):
+            if _statistic_key(stat.get("type", "")) not in {"corner_kicks", "corner_kick", "corners"}:
+                continue
+            value = _non_negative_float(stat.get("value"))
+            if value is not None and value.is_integer():
+                values[int(team_id)] = int(value)
+    if home_team_id not in values or away_team_id not in values:
+        return None
+    return values[home_team_id], values[away_team_id]
+
+
 def sync_recent_expected_metrics(
     api: ApiFootballClient,
     db: SupabaseRestClient,
@@ -227,7 +247,7 @@ def sync_recent_expected_metrics(
         "matches",
         columns=(
             "id,home_team_id,away_team_id,home_xg,away_xg,home_xa,away_xa,"
-            "expected_metrics_checked_at"
+            "expected_metrics_checked_at,home_corners,away_corners"
         ),
         filters={
             "status": "eq.finished",
@@ -239,7 +259,7 @@ def sync_recent_expected_metrics(
         checked_at = match.get("expected_metrics_checked_at")
         already_complete = all(
             match.get(column) is not None
-            for column in ("home_xg", "away_xg", "home_xa", "away_xa")
+            for column in ("home_xg", "away_xg", "home_xa", "away_xa", "home_corners", "away_corners")
         )
         # Avoid paying an API request every run when a competition does not expose xA.
         recently_checked = checked_at is not None and datetime.fromisoformat(
@@ -267,6 +287,14 @@ def sync_recent_expected_metrics(
             home_team_id=int(match["home_team_id"]),
             away_team_id=int(match["away_team_id"]),
         )
+        corners = extract_corner_counts(
+            statistics,
+            home_team_id=int(match["home_team_id"]),
+            away_team_id=int(match["away_team_id"]),
+        )
+        if corners is not None:
+            metrics["home_corners"] = corners[0]
+            metrics["away_corners"] = corners[1]
         updates.append(
             {
                 "id": int(match["id"]),

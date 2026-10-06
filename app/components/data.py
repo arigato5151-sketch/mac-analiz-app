@@ -55,7 +55,16 @@ def load_reference_catalog() -> tuple[pd.DataFrame, pd.DataFrame]:
 @st.cache_data(ttl=HISTORY_TTL_SECONDS, show_spinner=False)
 def load_completed_match_history() -> list[dict[str, Any]]:
     """Load only the public match history required by the Poisson UI state."""
-    return load_historical_matches(get_db())
+    return get_db().select_all(
+        "matches",
+        columns=(
+            "id,league_id,home_team_id,away_team_id,match_date,status,"
+            "home_score,away_score,home_xg,away_xg,home_xa,away_xa,"
+            "home_corners,away_corners"
+        ),
+        filters={"status": "eq.finished", "home_score": "not.is.null", "away_score": "not.is.null"},
+        order="match_date.asc,id.asc",
+    )
 
 
 @st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
@@ -344,12 +353,25 @@ def load_recent_odds_for_matches(match_ids: tuple[int, ...]) -> pd.DataFrame:
 
 def _nesine_market_key(row: dict[str, Any]) -> str | None:
     """Map normalized Nesine labels to prediction-market keys."""
-    market = f"{row.get('market_name', '')} {row.get('market_code', '')}".lower()
-    selection = f"{row.get('selection_name', '')} {row.get('selection_code', '')}".lower()
-    first = "1. yarı" in market or "ilk yarı" in market
-    second = "2. yarı" in market or "ikinci yarı" in market
+    import re
+    import unicodedata
+
+    normalize = lambda value: re.sub(
+        r"[^a-z0-9]+", " ",
+        "".join(char for char in unicodedata.normalize("NFKD", str(value).casefold())
+                if not unicodedata.combining(char)).replace("ı", "i"),
+    ).strip()
+    market = normalize(f"{row.get('market_name', '')} {row.get('market_code', '')}")
+    selection = normalize(f"{row.get('selection_name', '')} {row.get('selection_code', '')}")
+    if "korner" in market:
+        line = re.search(r"(\d+) (\d)", selection)
+        if line:
+            suffix = f"{line.group(1)}_{line.group(2)}"
+            return f"corners_{'over' if 'ust' in selection else 'under'}_{suffix}"
+    first = "1 yari" in market or "ilk yari" in market
+    second = "2 yari" in market or "ikinci yari" in market
     prefix = "first_half" if first else "second_half" if second else None
-    if prefix and "sonuç" in market:
+    if prefix and "sonuc" in market:
         if selection.startswith("1"):
             return f"{prefix}_home_win"
         if selection.startswith("x"):
@@ -357,9 +379,47 @@ def _nesine_market_key(row: dict[str, Any]) -> str | None:
         if selection.startswith("2"):
             return f"{prefix}_away_win"
         return None
-    if prefix and ("alt" in market or "üst" in market):
-        line = "1_5" if "1.5" in market or "1,5" in market else "0_5"
-        return f"{prefix}_{'over' if 'üst' in selection else 'under'}_{line}"
+    if prefix and ("alt ust" in market or "gol alt" in market):
+        line_match = re.search(r"(\d) 5", market)
+        if line_match:
+            line = f"{line_match.group(1)}_5"
+            return f"{prefix}_{'over' if 'ust' in selection else 'under'}_{line}"
+    team_compact_line = re.search(r"(ev sahibi|deplasman) ([12]) y (\d) 5 gol alt ust", market)
+    if team_compact_line:
+        team, half, line_digit = team_compact_line.groups()
+        team_key = "home" if team == "ev sahibi" else "away"
+        period = "first_half" if half == "1" else "second_half"
+        return f"{team_key}_{period}_{'under' if 'alt' in selection else 'over'}_{line_digit}_5"
+    if "cifte sans" in market:
+        token = selection.split()[0] if selection else ""
+        return f"double_chance_{token}" if token in {"1x", "x2", "12"} else None
+    if "mac sonucu" in market and "ve" not in market:
+        token = selection.split()[0] if selection else ""
+        return {"1": "home_win", "x": "draw", "2": "away_win"}.get(token)
+    if "karsilikli gol" in market or market.startswith("kg"):
+        return "btts_yes" if selection.startswith("var") else "btts_no" if selection.startswith("yok") else None
+    if "mac sonucu" in market and "ve" in market:
+        result_token = selection.split()[0] if selection else ""
+        result_key = {"1": "home_win", "x": "draw", "2": "away_win"}.get(result_token)
+        if not result_key:
+            return None
+        if "karsilikli gol" in market or "kg" in market:
+            return f"{result_key}_btts_{'yes' if 'var' in selection else 'no'}"
+        line_match = re.search(r"(\d) 5", market)
+        if line_match:
+            line = f"{line_match.group(1)}_5"
+            direction = "under" if "alt" in selection else "over"
+            return f"{result_key}_{direction}_{line}"
+    total_line = re.search(r"(\d) 5 gol alt ust", market)
+    if total_line and "korner" not in market:
+        line = f"{total_line.group(1)}_5"
+        return f"{'under' if 'alt' in selection else 'over'}_{line}"
+    team_line = re.search(r"(ev sahibi|deplasman)(?: ([12]) (?:y|yari))? (\d) 5 gol alt ust", market)
+    if team_line:
+        team, half, line_digit = team_line.groups()
+        team_key = "home" if team == "ev sahibi" else "away"
+        period = f"_{'first_half' if half == '1' else 'second_half'}" if half else ""
+        return f"{team_key}{period}_{'under' if 'alt' in selection else 'over'}_{line_digit}_5"
     return None
 
 

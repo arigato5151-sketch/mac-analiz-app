@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from math import exp
 from math import isfinite
 from typing import Any
 
@@ -89,6 +90,98 @@ def derive_market_probabilities(
             for probability, home_score, away_score in ranked_scores
         ],
     }
+
+
+def derive_requested_market_probabilities(
+    poisson: PoissonPrediction,
+    half_time_markets: dict[str, float],
+) -> dict[str, float]:
+    """Derive probabilities for requested result, total, team, combo and half markets."""
+    matrix = np.asarray(poisson.score_matrix, dtype=float)
+    home_goals, away_goals = np.indices(matrix.shape)
+    total = home_goals + away_goals
+    outcomes = {
+        "1": home_goals > away_goals,
+        "x": home_goals == away_goals,
+        "2": home_goals < away_goals,
+    }
+    result_names = {"1": "home_win", "x": "draw", "2": "away_win"}
+    probabilities: dict[str, float] = {}
+    for result, mask in outcomes.items():
+        probabilities[result_names[result]] = float(matrix[mask].sum())
+    probabilities.update({
+        "double_chance_1x": probabilities["home_win"] + probabilities["draw"],
+        "double_chance_x2": probabilities["draw"] + probabilities["away_win"],
+        "double_chance_12": probabilities["home_win"] + probabilities["away_win"],
+        "btts_yes": float(matrix[(home_goals > 0) & (away_goals > 0)].sum()),
+    })
+    probabilities["btts_no"] = 1.0 - probabilities["btts_yes"]
+    for line in (1.5, 2.5, 3.5, 4.5):
+        suffix = f"{int(line)}_5"
+        over = float(matrix[total > line].sum())
+        probabilities[f"over_{suffix}"] = over
+        probabilities[f"under_{suffix}"] = 1.0 - over
+        for result, result_mask in outcomes.items():
+            key = result_names[result]
+            for direction, total_mask in (("over", total > line), ("under", total <= line)):
+                probabilities[f"{key}_{direction}_{suffix}"] = float(matrix[result_mask & total_mask].sum())
+    for team, goals in (("home", home_goals), ("away", away_goals)):
+        for line in (0.5, 1.5, 2.5, 3.5, 4.5):
+            suffix = f"{int(line)}_5"
+            over = float(matrix[goals > line].sum())
+            probabilities[f"{team}_over_{suffix}"] = over
+            probabilities[f"{team}_under_{suffix}"] = 1.0 - over
+            for period in ("first_half", "second_half"):
+                half_goals = half_time_markets.get(
+                    f"{period}_{team}_over_1_5", 0.0
+                ) if line == 1.5 else half_time_markets.get(
+                    f"{period}_{team}_over_0_5", 0.0
+                )
+                if line in (0.5, 1.5):
+                    probabilities[f"{team}_{period}_over_{suffix}"] = float(half_goals)
+                    probabilities[f"{team}_{period}_under_{suffix}"] = 1.0 - float(half_goals)
+    for result, result_mask in outcomes.items():
+        key = result_names[result]
+        btts = (home_goals > 0) & (away_goals > 0)
+        probabilities[f"{key}_btts_yes"] = float(matrix[result_mask & btts].sum())
+        probabilities[f"{key}_btts_no"] = float(matrix[result_mask & ~btts].sum())
+    probabilities.update(half_time_markets)
+    return probabilities
+
+
+def derive_corner_probabilities(
+    home_expected_corners: float,
+    away_expected_corners: float,
+    *,
+    lines: tuple[float, ...] = (7.5, 8.5, 9.5, 10.5, 11.5),
+    max_corners: int = 35,
+) -> dict[str, float]:
+    """Build total-corner over/under probabilities from independent Poisson counts."""
+    if not all(isfinite(float(value)) and float(value) > 0 for value in (home_expected_corners, away_expected_corners)):
+        raise ValueError("Expected corners must be finite and positive")
+    if max_corners < 1 or any(line <= 0 or line % 1 == 0 for line in lines):
+        raise ValueError("Corner lines must be positive half-step lines")
+
+    def pmf(mean: float) -> list[float]:
+        values = [exp(-mean)]
+        for goals in range(1, max_corners + 1):
+            values.append(values[-1] * mean / goals)
+        return values
+
+    home, away = pmf(float(home_expected_corners)), pmf(float(away_expected_corners))
+    total_pmf = np.convolve(home, away)
+    total_pmf = total_pmf / total_pmf.sum()
+    result: dict[str, float] = {
+        "expected_home_corners": float(home_expected_corners),
+        "expected_away_corners": float(away_expected_corners),
+        "expected_total_corners": float(home_expected_corners + away_expected_corners),
+    }
+    for line in lines:
+        suffix = str(line).replace(".", "_")
+        over = float(total_pmf[int(line) + 1:].sum())
+        result[f"over_{suffix}"] = over
+        result[f"under_{suffix}"] = 1.0 - over
+    return result
 
 
 def format_market_summary(markets: dict[str, Any]) -> list[str]:
