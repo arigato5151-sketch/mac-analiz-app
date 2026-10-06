@@ -233,17 +233,22 @@ def _extract_rows_from_page(page: Any, target_fixtures: set[tuple[str, str]] | N
       }).filter(row => row && (!targets.size || targets.has(fixtureKey(row.home_team, row.away_team))));
       if (codedRows.length) return codedRows;
 
-      // Current Nesine football fixtures are OCRow_* event cards, not tr/li
-      // elements. The team and odds buttons are contained by the same card.
-      const eventRows = [...document.querySelectorAll('[class*="OCRow_"]')].map(node => {
+      // Current Nesine football fixtures are OCRow_* event cards identified
+      // by id. Read only explicit 1/X/2 labels; positional buttons shift when
+      // a selection is unavailable and can pull in the next market's price.
+      const eventRows = [...document.querySelectorAll('[id^="OCRow_"]')].map(node => {
         const teamLink = [...node.querySelectorAll('a')]
           .map(link => clean(link.innerText)).find(text => splitPair(text));
         const teams = teamLink && splitPair(teamLink);
-        const values = [...node.querySelectorAll('button')]
-          .map(button => clean(button.innerText)).filter(value => odd.test(value));
-        if (!teams || values.length < 3) return null;
+        if (!teams) return null;
+        const result = {};
+        for (const item of node.querySelectorAll('[data-testid^="odd_Maç Sonucu_"]')) {
+          const selection = (item.getAttribute('data-testid') || '').slice('odd_Maç Sonucu_'.length);
+          if (['1', 'X', '2'].includes(selection)) result[selection] = clean(item.innerText).replace(',', '.');
+        }
+        if (!['1', 'X', '2'].every(selection => result[selection])) return null;
         return {event_id: node.getAttribute('data-code') || null, home_team: teams[0], away_team: teams[1],
-          markets: {"1": values[0].replace(',', '.'), "X": values[1].replace(',', '.'), "2": values[2].replace(',', '.')}};
+          markets: {"1": result['1'], "X": result.X, "2": result['2']}};
       }).filter(row => row && (!targets.size || targets.has(fixtureKey(row.home_team, row.away_team))));
       if (eventRows.length) {
         const seen = new Set();
@@ -255,41 +260,13 @@ def _extract_rows_from_page(page: Any, target_fixtures: set[tuple[str, str]] | N
         });
       }
 
-      const nodes = [...document.querySelectorAll('tr, li, [role="row"]')];
-      return nodes.map(node => {
-        const text = (node.innerText || '').replace(/\\s+/g, ' ').trim();
-        const values = [...text.matchAll(/\\b([1-9]\\d?[.,]\\d{1,3})\\b/g)].map(m => m[1]);
-        if (values.length < 3) return null;
-        const pair = text.match(/(.+?)\\s+[-–—]\\s+(.+?)(?=\\s+\\d|$)/);
-        if (!pair) return null;
-        const teams = [pair[1].trim(), pair[2].trim()];
-        if (teams.some(t => !t || t.length > 80)) return null;
-        if (targets.size && !targets.has(fixtureKey(teams[0], teams[1]))) return null;
-        return {home_team: teams[0], away_team: teams[1], markets: {"1": values[0], "X": values[1], "2": values[2]}};
-      }).filter(Boolean);
+      // Unknown layouts are skipped instead of guessing from text order.
+      return [];
     }""", [
       f"{_normalise(str(home))}|{_normalise(str(away))}"
       for home, away in (target_fixtures or set())
     ])
-    if rows:
-        return rows
-    # Last resort for a future layout change: parse visible text lines.
-    return page.evaluate("""() => {
-      const odd = /^([1-9]\\d?)[.,]\\d{1,3}$/;
-      const lines = (document.body.innerText || '').split(/\\n+/).map(x => x.trim()).filter(Boolean);
-      const result = [];
-      for (let i = 0; i < lines.length; i++) {
-        if (!/\\s[-–—]\\s/.test(lines[i]) || lines[i].length > 120) continue;
-        const teams = lines[i].split(/\\s[-–—]\\s/).map(x => x.trim());
-        if (teams.length !== 2 || teams.some(x => !x)) continue;
-        const values = [];
-        for (let j = i + 1; j < Math.min(i + 10, lines.length) && values.length < 3; j++) {
-          if (odd.test(lines[j])) values.push(lines[j].replace(',', '.'));
-        }
-        if (values.length === 3) result.push({home_team: teams[0], away_team: teams[1], markets: {"1": values[0], "X": values[1], "2": values[2]}});
-      }
-      return result;
-    }""")
+    return rows
 
 
 def _collect_all_rendered_rows(page: Any, *, max_scrolls: int = 80,

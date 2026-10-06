@@ -316,6 +316,13 @@ def load_recent_odds_for_matches(match_ids: tuple[int, ...]) -> pd.DataFrame:
     frame["captured_at"] = pd.to_datetime(frame["captured_at"], utc=True).dt.tz_convert(
         "Europe/Istanbul"
     )
+    # A valid decimal-odds 1-X-2 book has a combined implied probability above
+    # 100%. Reject malformed snapshots where a later market's price was shifted
+    # into an outcome column (e.g. 17.50, 17.50, 3.73 -> 38%).
+    invalid_result_market = frame["odds"].map(_has_suspicious_result_quote)
+    frame = frame.loc[~invalid_result_market].copy()
+    if frame.empty:
+        return frame
     return _latest_quote_per_match(frame)
 
 
@@ -326,6 +333,22 @@ def _latest_quote_per_match(frame: pd.DataFrame) -> pd.DataFrame:
         .drop_duplicates("match_id", keep="first")
         .reset_index(drop=True)
     )
+
+
+def _has_suspicious_result_quote(odds: object) -> bool:
+    if not isinstance(odds, dict):
+        return False
+    keys = ("home_win", "draw", "away_win")
+    if not all(key in odds for key in keys):
+        return False
+    try:
+        prices = [float(odds[key]) for key in keys]
+    except (TypeError, ValueError):
+        return True
+    if any(not pd.notna(price) or price <= 1 for price in prices):
+        return True
+    implied_total = sum(1 / price for price in prices)
+    return not 1.0 <= implied_total <= 1.5
 
 
 def _nesine_market_key(row: dict[str, Any]) -> str | None:

@@ -17,6 +17,18 @@ def test_ambiguous_or_incomplete_rows_are_not_usable():
     assert not quotes[0].has_result_market
 
 
+def test_missing_home_selection_keeps_draw_and_away_prices_in_their_columns():
+    quotes = parse_rendered_text_rows([{
+        "home_team": "Albania", "away_team": "San Marino",
+        "markets": {"1": "-", "X": "17.50", "2": "17.50", "Over 2.5": "3.73"},
+    }])
+
+    assert quotes[0].home_win is None
+    assert quotes[0].draw == "17.50"
+    assert quotes[0].away_win == "17.50"
+    assert not quotes[0].has_result_market
+
+
 def test_only_exact_app_fixtures_are_matched():
     quotes = parse_rendered_text_rows([
         {"home_team": "Hull City U21", "away_team": "Wigan Ath U21",
