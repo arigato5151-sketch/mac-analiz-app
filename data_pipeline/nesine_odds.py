@@ -13,7 +13,7 @@ import logging
 import re
 import unicodedata
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
@@ -68,6 +68,7 @@ class NesineMatchQuote:
     btts_yes: str | None = None
     btts_no: str | None = None
     markets: tuple[dict[str, str], ...] = ()
+    event_id: str | None = None
 
     def snapshot(self) -> dict[str, str | None]:
         return {"home_win": self.home_win, "draw": self.draw, "away_win": self.away_win,
@@ -124,7 +125,10 @@ def parse_rendered_text_rows(rows: Iterable[Mapping[str, Any]]) -> list[NesineMa
             for item in raw_markets
             if isinstance(item, Mapping) and _odd(str(item.get("odd", "")))
         )
-        parsed.append(NesineMatchQuote(home, away, row.get("kickoff_text"), *result, *totals, *btts, markets))
+        event_id = str(row.get("event_id") or "").strip() or None
+        parsed.append(NesineMatchQuote(
+            home, away, row.get("kickoff_text"), *result, *totals, *btts, markets, event_id
+        ))
     return parsed
 
 
@@ -146,14 +150,33 @@ def match_score(quote: NesineMatchQuote, match: Mapping[str, Any]) -> float:
             similarity(_normalise(quote.away_team), away)) / 2
 
 
+def _same_normalised_team(left: str, right: str) -> bool:
+    left_name, right_name = _normalise(left), _normalise(right)
+    if left_name == right_name:
+        return True
+    # Accept common harmless feed abbreviations (for example "Crew" / "Cr.")
+    # only when the shorter full token is a prefix and all other tokens agree.
+    left_tokens, right_tokens = left_name.split(), right_name.split()
+    if len(left_tokens) != len(right_tokens):
+        return False
+    return all(a == b or (len(a) >= 2 and len(b) >= 2 and (a.startswith(b) or b.startswith(a)))
+               for a, b in zip(left_tokens, right_tokens))
+
+
 def match_quotes(quotes: Iterable[NesineMatchQuote], matches: Iterable[Mapping[str, Any]], threshold: float = .82) -> list[tuple[int, NesineMatchQuote, float]]:
     """Return only unambiguous fixture matches above the safety threshold."""
     output: list[tuple[int, NesineMatchQuote, float]] = []
+    match_list = list(matches)
     for quote in quotes:
-        candidates = sorted(((match_score(quote, match), int(match["id"]), match) for match in matches), reverse=True)
+        candidates = sorted(((match_score(quote, match), int(match["id"]), match) for match in match_list), reverse=True)
         if not candidates or candidates[0][0] < threshold:
             continue
         if len(candidates) > 1 and candidates[0][0] - candidates[1][0] < .04:
+            continue
+        # Only accept a fixture when both team names identify the app fixture
+        # exactly after shared Turkish/English and club-prefix normalization.
+        if (not _same_normalised_team(quote.home_team, str(candidates[0][2].get("home_team") or ""))
+                or not _same_normalised_team(quote.away_team, str(candidates[0][2].get("away_team") or ""))):
             continue
         output.append((candidates[0][1], quote, candidates[0][0]))
     return output
@@ -163,28 +186,52 @@ def store_nesine_quotes(db: SupabaseRestClient, matched: Iterable[tuple[int, Nes
     captured_at = captured_at or datetime.now(timezone.utc).isoformat()
     inserted = 0
     for match_id, quote, _score in matched:
-        if not quote.has_result_market:
+        markets = quote.all_markets()
+        if not quote.has_result_market and not markets:
             continue
-        db.insert("odds_quote_history", [{"match_id": match_id, "bookmaker": NESINE_BOOKMAKER,
-            "odds": quote.snapshot(), "source_updated_at": None, "captured_at": captured_at,
-            "is_notification_reference": False}])
-        if quote.all_markets():
+        if quote.has_result_market:
+            db.insert("odds_quote_history", [{"match_id": match_id, "bookmaker": NESINE_BOOKMAKER,
+                "odds": quote.snapshot(), "source_updated_at": None, "captured_at": captured_at,
+                "is_notification_reference": False}])
+        if markets:
             db.insert("nesine_market_quotes", [{"match_id": match_id, **market,
                 "odd": float(market["odd"]), "captured_at": captured_at,
-                "source_url": DEFAULT_NESINE_URL} for market in quote.all_markets()])
+                "source_url": DEFAULT_NESINE_URL} for market in markets])
         inserted += 1
     return inserted
 
 
-def _extract_rows_from_page(page: Any) -> list[dict[str, Any]]:
+def _extract_rows_from_page(page: Any, target_fixtures: set[tuple[str, str]] | None = None) -> list[dict[str, Any]]:
     """Extract 1/X/2 prices from rendered Nesine event cards and table rows."""
-    rows = page.evaluate("""() => {
+    rows = page.evaluate("""targetFixtures => {
       const odd = /^([1-9]\\d?)[.,]\\d{1,3}$/;
       const clean = value => (value || '').replace(/\\s+/g, ' ').trim();
+      const targets = new Set(targetFixtures || []);
+      const fixtureKey = (home, away) => `${home}|${away}`;
       const splitPair = value => {
         const parts = clean(value).split(/\\s+[-–—]\\s+/);
         return parts.length === 2 && parts.every(part => part && part.length <= 80) ? parts : null;
       };
+
+      // Current desktop rows expose event and selection IDs as data-test-id
+      // attributes. Preserve the event ID so its expanded market panel can be
+      // opened after the visible fixture list has been matched to the app.
+      const codedRows = [...document.querySelectorAll('[data-test-id^="r_"][data-code]')].map(node => {
+        const teamLink = node.querySelector('[data-test-id="matchName"]');
+        const teams = teamLink && splitPair(teamLink.innerText);
+        if (!teams) return null;
+        const result = {};
+        for (const item of node.querySelectorAll('[data-testid^="odd_Maç Sonucu_"]')) {
+          const testId = item.getAttribute('data-testid') || '';
+          const selection = testId.slice('odd_Maç Sonucu_'.length);
+          if (['1', 'X', '2'].includes(selection)) result[selection] = clean(item.innerText).replace(',', '.');
+        }
+        if (!result['1'] || !result.X || !result['2']) return null;
+        return {event_id: node.getAttribute('data-code'), home_team: teams[0], away_team: teams[1],
+          kickoff_text: clean(node.querySelector('[data-testid^="time-"]')?.innerText),
+          markets: {"1": result['1'], "X": result.X, "2": result['2']}};
+      }).filter(row => row && (!targets.size || targets.has(fixtureKey(row.home_team, row.away_team))));
+      if (codedRows.length) return codedRows;
 
       // Current Nesine football fixtures are OCRow_* event cards, not tr/li
       // elements. The team and odds buttons are contained by the same card.
@@ -195,9 +242,9 @@ def _extract_rows_from_page(page: Any) -> list[dict[str, Any]]:
         const values = [...node.querySelectorAll('button')]
           .map(button => clean(button.innerText)).filter(value => odd.test(value));
         if (!teams || values.length < 3) return null;
-        return {home_team: teams[0], away_team: teams[1],
+        return {event_id: node.getAttribute('data-code') || null, home_team: teams[0], away_team: teams[1],
           markets: {"1": values[0].replace(',', '.'), "X": values[1].replace(',', '.'), "2": values[2].replace(',', '.')}};
-      }).filter(Boolean);
+      }).filter(row => row && (!targets.size || targets.has(fixtureKey(row.home_team, row.away_team))));
       if (eventRows.length) {
         const seen = new Set();
         return eventRows.filter(row => {
@@ -217,9 +264,13 @@ def _extract_rows_from_page(page: Any) -> list[dict[str, Any]]:
         if (!pair) return null;
         const teams = [pair[1].trim(), pair[2].trim()];
         if (teams.some(t => !t || t.length > 80)) return null;
+        if (targets.size && !targets.has(fixtureKey(teams[0], teams[1]))) return null;
         return {home_team: teams[0], away_team: teams[1], markets: {"1": values[0], "X": values[1], "2": values[2]}};
       }).filter(Boolean);
-    }""")
+    }""", [
+      f"{_normalise(str(home))}|{_normalise(str(away))}"
+      for home, away in (target_fixtures or set())
+    ])
     if rows:
         return rows
     # Last resort for a future layout change: parse visible text lines.
@@ -241,7 +292,8 @@ def _extract_rows_from_page(page: Any) -> list[dict[str, Any]]:
     }""")
 
 
-def _collect_all_rendered_rows(page: Any, *, max_scrolls: int = 80) -> list[dict[str, Any]]:
+def _collect_all_rendered_rows(page: Any, *, max_scrolls: int = 80,
+                               target_fixtures: set[tuple[str, str]] | None = None) -> list[dict[str, Any]]:
     """Collect quotes while scrolling Nesine's virtualized event list."""
     # Nesine locks document scrolling while its welcome/help layer is mounted.
     # Removing the scroll lock affects only this temporary browser page and lets
@@ -255,7 +307,7 @@ def _collect_all_rendered_rows(page: Any, *, max_scrolls: int = 80) -> list[dict
     previous_state: tuple[int, int] | None = None
     stagnant_bottom_steps = 0
     for _ in range(max_scrolls):
-        for row in _extract_rows_from_page(page):
+        for row in _extract_rows_from_page(page, target_fixtures):
             key = (_normalise(str(row.get("home_team", ""))),
                    _normalise(str(row.get("away_team", ""))))
             if all(key):
@@ -278,6 +330,120 @@ def _collect_all_rendered_rows(page: Any, *, max_scrolls: int = 80) -> list[dict
         page.evaluate("window.scrollBy(0, Math.max(400, window.innerHeight * 0.75))")
         page.wait_for_timeout(350)
     return list(rows_by_fixture.values())
+
+
+def _normalise_market_label(value: str) -> str:
+    text = unicodedata.normalize("NFKD", value.casefold())
+    text = "".join(char for char in text if not unicodedata.combining(char)).replace("ı", "i")
+    return re.sub(r"[^a-z0-9]+", " ", text).strip()
+
+
+def _market_slug(value: str) -> str:
+    return _normalise_market_label(value).replace(" ", "_")[:80] or "unknown"
+
+
+def _is_requested_nesine_market(value: str) -> bool:
+    """Keep only the match, half, goal, team-total and corner markets requested."""
+    name = _normalise_market_label(value)
+    if name in {
+        "mac sonucu", "cifte sans", "ilk yari sonucu", "ikinci yari sonucu",
+        "1 yari sonucu", "2 yari sonucu", "1 yarisi sonucu", "2 yarisi sonucu",
+        "1 yari mac sonucu", "2 yari mac sonucu", "ilk yari mac sonucu",
+        "karsilikli gol", "mac sonucu ve karsilikli gol",
+    }:
+        return True
+    if re.fullmatch(r"mac sonucu ve \d+ 5 alt ust", name):
+        return True
+    if re.fullmatch(r"\d+ 5 gol alt ust", name):
+        return True
+    if re.fullmatch(r"(ev sahibi|deplasman)(?: [12] (?:y|yari))? \d+ 5 gol alt ust", name):
+        return True
+    return "korner" in name and "alt ust" in name
+
+
+def _extract_requested_market_rows(page: Any, event_id: str) -> list[dict[str, str]]:
+    """Read selections from Nesine's expanded all-markets panel."""
+    raw = page.evaluate("""eventId => {
+      const root = document.querySelector(`[data-test-id="${eventId}-all"]`);
+      if (!root) return [];
+      const output = [];
+      for (const selection of root.querySelectorAll('[data-mid][data-test-title][data-test-value]')) {
+        let market = selection.parentElement;
+        while (market && !market.querySelector('[data-test-m-id]')) market = market.parentElement;
+        const heading = market?.querySelector('[data-test-m-id]')?.parentElement?.querySelector('span span');
+        output.push({market_name: (heading?.innerText || '').trim(),
+          selection_name: selection.getAttribute('data-test-title') || '',
+          odd: selection.getAttribute('data-test-value') || ''});
+      }
+      return output;
+    }""", str(event_id))
+    return [
+        {"market_code": _market_slug(row["market_name"]), "market_name": row["market_name"],
+         "selection_code": _market_slug(row["selection_name"]), "selection_name": row["selection_name"],
+         "odd": str(_odd(row["odd"]))}
+        for row in raw
+        if _is_requested_nesine_market(str(row.get("market_name", "")))
+        and row.get("selection_name") and _odd(str(row.get("odd", "")))
+    ]
+
+
+def collect_requested_markets_from_nesine(url: str, event_ids: Iterable[str]) -> dict[str, tuple[dict[str, str], ...]]:
+    """Open each matched event's market-count panel and read the requested odds."""
+    wanted_ids = list(dict.fromkeys(str(event_id) for event_id in event_ids if str(event_id).strip()))
+    if not wanted_ids:
+        return {}
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise RuntimeError("Playwright is required for Nesine collection") from exc
+
+    collected: dict[str, tuple[dict[str, str], ...]] = {}
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            page = browser.new_page(locale="tr-TR")
+            for index, event_id in enumerate(wanted_ids):
+                try:
+                    page.goto(url, wait_until="domcontentloaded", timeout=45_000)
+                    page.wait_for_timeout(1_500)
+                    page.evaluate("""() => {
+                      document.body.classList.remove('stop-scrolling');
+                      document.body.style.overflow = 'auto';
+                      document.documentElement.style.overflow = 'auto';
+                    }""")
+                    row_selector = f'[data-test-id="r_{event_id}"]'
+                    count_selector = f'[data-test-id="{event_id}_m"]'
+                    # The home page may initially select another sport. Click
+                    # its visible football tab first, just as a user would.
+                    football = page.get_by_text("Futbol", exact=True).first
+                    if football.count():
+                        football.evaluate("element => element.click()")
+                        page.wait_for_timeout(800)
+                    for _ in range(80):
+                        if page.locator(row_selector).count() and page.locator(count_selector).count():
+                            break
+                        page.evaluate("window.scrollBy(0, Math.max(400, window.innerHeight * 0.75))")
+                        page.wait_for_timeout(250)
+                    if not page.locator(count_selector).count():
+                        LOGGER.warning("Nesine detailed markets unavailable for event %s", event_id)
+                        continue
+                    counter = page.locator(count_selector).locator("span.a4cc134d0a3a892deaa6")
+                    (counter if counter.count() else page.locator(count_selector)).evaluate("element => element.click()")
+                    page.wait_for_timeout(1_200)
+                    markets = _extract_requested_market_rows(page, event_id)
+                    if not markets:
+                        # Some fixtures expand directly in the row without an
+                        # event-wide wrapper; extraction also checks document.
+                        page.wait_for_timeout(800)
+                        markets = _extract_requested_market_rows(page, event_id)
+                    if markets:
+                        collected[event_id] = tuple(markets)
+                    LOGGER.info("Nesine detail event %s: %s selected-market odds", event_id, len(markets))
+                except Exception as exc:
+                    LOGGER.warning("Nesine detail skipped for event %s: %s", event_id, type(exc).__name__)
+        finally:
+            browser.close()
+    return collected
 
 
 def _extract_visible_market_rows(page: Any, home_team: str, away_team: str) -> list[dict[str, str]]:
@@ -327,7 +493,8 @@ def _collect_detail_markets(page: Any, base_rows: list[dict[str, Any]]) -> list[
     return collected
 
 
-def collect_from_nesine_page(url: str = DEFAULT_NESINE_URL, *, headless: bool = True) -> list[NesineMatchQuote]:
+def collect_from_nesine_page(url: str = DEFAULT_NESINE_URL, *, headless: bool = True,
+                             target_fixtures: set[tuple[str, str]] | None = None) -> list[NesineMatchQuote]:
     """Open Nesine and return rendered, parseable quotes.
 
     Playwright is imported lazily so the rest of the pipeline remains usable in
@@ -346,7 +513,7 @@ def collect_from_nesine_page(url: str = DEFAULT_NESINE_URL, *, headless: bool = 
             # The page virtualizes its event list, so a single DOM read only
             # sees the first screenful. Scroll through the feed and aggregate
             # every fixture before parsing/storing its 1/X/2 market.
-            rows = _collect_all_rendered_rows(page)
+            rows = _collect_all_rendered_rows(page, target_fixtures=target_fixtures)
             return parse_rendered_text_rows(rows)
         finally:
             browser.close()
@@ -359,24 +526,39 @@ def main() -> None:
     parser.add_argument("--headed", action="store_true", help="Show Chromium while collecting")
     parser.add_argument("--threshold", type=float, default=.82)
     args = parser.parse_args()
+    settings = get_settings()
+    db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
+    now = datetime.now(timezone.utc).isoformat()
+    raw_matches = db.select_all("matches", columns="id,home_team_id,away_team_id,match_date",
+                                filters={"status": "eq.scheduled", "match_date": f"gte.{now}"},
+                                order="match_date.asc")
+    teams = {int(row["id"]): str(row["name"]) for row in db.select_all("teams", columns="id,name")}
+    matches = [{**row, "home_team": teams.get(int(row["home_team_id"]), ""),
+                "away_team": teams.get(int(row["away_team_id"]), "")} for row in raw_matches]
     if args.rows_json:
         with open(args.rows_json, encoding="utf-8") as handle:
             payload = json.load(handle)
     else:
+        target_fixtures = {
+            (_normalise(str(match["home_team"])), _normalise(str(match["away_team"])))
+            for match in matches if match["home_team"] and match["away_team"]
+        }
         payload = [
             {"home_team": item.home_team, "away_team": item.away_team,
-             "kickoff_text": item.kickoff_text, "markets": item.snapshot()}
-            for item in collect_from_nesine_page(args.url, headless=not args.headed)
+             "kickoff_text": item.kickoff_text, "event_id": item.event_id,
+             "markets": item.snapshot()}
+            for item in collect_from_nesine_page(args.url, headless=not args.headed,
+                                                 target_fixtures=target_fixtures)
         ]
-    settings = get_settings()
-    db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
-    raw_matches = db.select_all("matches", columns="id,home_team_id,away_team_id,match_date",
-                                filters={"status": "eq.scheduled"})
-    teams = {int(row["id"]): str(row["name"]) for row in db.select_all("teams", columns="id,name")}
-    matches = [{**row, "home_team": teams.get(int(row["home_team_id"]), ""),
-                "away_team": teams.get(int(row["away_team_id"]), "")} for row in raw_matches]
     quotes = parse_rendered_text_rows(payload)
     matched = match_quotes(quotes, matches, args.threshold)
+    if not args.rows_json:
+        event_ids = [quote.event_id for _match_id, quote, _score in matched if quote.event_id]
+        detailed = collect_requested_markets_from_nesine(args.url, event_ids)
+        matched = [
+            (match_id, replace(quote, markets=detailed.get(quote.event_id or "", quote.all_markets())), score)
+            for match_id, quote, score in matched
+        ]
     stored = store_nesine_quotes(db, matched)
     market_count = sum(len(quote.all_markets()) for _match_id, quote, _score in matched)
     matched_quotes = {id(quote) for _match_id, quote, _score in matched}

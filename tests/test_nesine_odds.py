@@ -17,6 +17,19 @@ def test_ambiguous_or_incomplete_rows_are_not_usable():
     assert not quotes[0].has_result_market
 
 
+def test_only_exact_app_fixtures_are_matched():
+    quotes = parse_rendered_text_rows([
+        {"home_team": "Hull City U21", "away_team": "Wigan Ath U21",
+         "markets": {"1": "2.00", "X": "3.20", "2": "3.40"}},
+        {"home_team": "Columbus Crew", "away_team": "Inter Miami",
+         "markets": {"1": "2.00", "X": "3.20", "2": "3.40"}},
+    ])
+    matches = [{"id": 10, "home_team": "Hull City", "away_team": "Everton"},
+               {"id": 11, "home_team": "Columbus Crew", "away_team": "Inter Miami"}]
+    matched = match_quotes(quotes, matches)
+    assert [item[0] for item in matched] == [11]
+
+
 def test_detailed_markets_are_preserved():
     quotes = parse_rendered_text_rows([{
         "home_team": "A", "away_team": "B",
