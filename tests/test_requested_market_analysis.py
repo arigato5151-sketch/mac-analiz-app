@@ -16,6 +16,8 @@ def test_nesine_market_labels_map_requested_markets():
         ({"market_name": "Karşılıklı Gol", "selection_name": "KG Var"}, "btts_yes"),
         ({"market_name": "1. Yarı Maç Sonucu", "selection_name": "X"}, "first_half_draw"),
         ({"market_name": "2. Yarı Maç Sonucu", "selection_name": "2"}, "second_half_away_win"),
+        ({"market_name": "1. Yarı Sonucu", "selection_name": "1.Y 1"}, "first_half_home_win"),
+        ({"market_name": "2. Yarı Sonucu", "selection_name": "2.Y X"}, "second_half_draw"),
         ({"market_name": "Maç Sonucu ve 3.5 Alt/Üst", "selection_name": "1 ve Alt"}, "home_win_under_3_5"),
         ({"market_name": "Maç Sonucu ve 1.5 Alt/Üst", "selection_name": "MS1 & Alt"}, "home_win_under_1_5"),
         ({"market_name": "Maç Sonucu ve Karşılıklı Gol", "selection_name": "MS2 & Var"}, "away_win_btts_yes"),

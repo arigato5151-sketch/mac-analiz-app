@@ -393,12 +393,13 @@ def _nesine_market_key(row: dict[str, Any]) -> str | None:
     first = "1 yari" in market or "ilk yari" in market
     second = "2 yari" in market or "ikinci yari" in market
     prefix = "first_half" if first else "second_half" if second else None
-    if prefix and "sonuc" in market:
+    if prefix and ("sonuc" in market or "sonucu" in market):
         # Do not interpret HT/FT combinations (for example "1/1") as a
         # standalone half-time result selection.
         if re.fullmatch(r"[1x2] [1x2]", selection_label):
             return None
-        token = result_token()
+        half_result = re.fullmatch(r"[12] y ([1x2])", selection_label)
+        token = half_result.group(1) if half_result else result_token()
         return {
             "1": f"{prefix}_home_win",
             "x": f"{prefix}_draw",
