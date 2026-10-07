@@ -293,6 +293,8 @@ def _collect_all_rendered_rows(page: Any, *, max_scrolls: int = 80,
     stagnant_bottom_steps = 0
     for _ in range(max_scrolls):
         for row in _extract_rows_from_page(page, target_fixtures):
+            if not isinstance(row, Mapping):
+                continue
             key = (_normalise(str(row.get("home_team", ""))),
                    _normalise(str(row.get("away_team", ""))))
             if all(key):
