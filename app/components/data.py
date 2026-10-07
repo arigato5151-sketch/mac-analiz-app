@@ -361,7 +361,30 @@ def _nesine_market_key(row: dict[str, Any]) -> str | None:
         unaccented = "".join(char for char in folded if not unicodedata.combining(char))
         return re.sub(r"[^a-z0-9]+", " ", unaccented.replace("ı", "i")).strip()
     market = normalize(f"{row.get('market_name', '')} {row.get('market_code', '')}")
+    selection_label = normalize(row.get("selection_name", ""))
     selection = normalize(f"{row.get('selection_name', '')} {row.get('selection_code', '')}")
+    selection_tokens = selection.split()
+
+    def result_token() -> str | None:
+        # Nesine labels full-time selections as "MS 1" / "MS X" / "MS 2"
+        # and combination selections as "MS1 & Alt". Strip those prefixes
+        # before mapping so captured prices are not silently discarded.
+        for token in selection_tokens:
+            token = token.removeprefix("hms").removeprefix("ms")
+            if token in {"1", "x", "2"}:
+                return token
+        return None
+
+    def double_chance_token() -> str | None:
+        allowed = {"1x", "x2", "12"}
+        for index, token in enumerate(selection_tokens):
+            if token in allowed:
+                return token
+            if index + 1 < len(selection_tokens):
+                pair = token + selection_tokens[index + 1]
+                if pair in allowed:
+                    return pair
+        return None
     if "korner" in market:
         line = re.search(r"(\d+) (\d)", selection)
         if line:
@@ -371,13 +394,16 @@ def _nesine_market_key(row: dict[str, Any]) -> str | None:
     second = "2 yari" in market or "ikinci yari" in market
     prefix = "first_half" if first else "second_half" if second else None
     if prefix and "sonuc" in market:
-        if selection.startswith("1"):
-            return f"{prefix}_home_win"
-        if selection.startswith("x"):
-            return f"{prefix}_draw"
-        if selection.startswith("2"):
-            return f"{prefix}_away_win"
-        return None
+        # Do not interpret HT/FT combinations (for example "1/1") as a
+        # standalone half-time result selection.
+        if re.fullmatch(r"[1x2] [1x2]", selection_label):
+            return None
+        token = result_token()
+        return {
+            "1": f"{prefix}_home_win",
+            "x": f"{prefix}_draw",
+            "2": f"{prefix}_away_win",
+        }.get(token or "")
     if prefix and ("alt ust" in market or "gol alt" in market):
         line_match = re.search(r"(\d) 5", market)
         if line_match:
@@ -390,20 +416,25 @@ def _nesine_market_key(row: dict[str, Any]) -> str | None:
         period = "first_half" if half == "1" else "second_half"
         return f"{team_key}_{period}_{'under' if 'alt' in selection else 'over'}_{line_digit}_5"
     if "cifte sans" in market:
-        token = selection.split()[0] if selection else ""
-        return f"double_chance_{token}" if token in {"1x", "x2", "12"} else None
+        token = double_chance_token()
+        return f"double_chance_{token}" if token else None
     if "mac sonucu" in market and "ve" not in market:
-        token = selection.split()[0] if selection else ""
-        return {"1": "home_win", "x": "draw", "2": "away_win"}.get(token)
-    if "karsilikli gol" in market or market.startswith("kg"):
-        return "btts_yes" if selection.startswith("var") else "btts_no" if selection.startswith("yok") else None
+        return {"1": "home_win", "x": "draw", "2": "away_win"}.get(result_token() or "")
+    if ("karsilikli gol" in market or market.startswith("kg")) and not (
+        "mac sonucu" in market and "ve" in market
+    ):
+        return (
+            "btts_yes" if "var" in selection_tokens
+            else "btts_no" if "yok" in selection_tokens
+            else None
+        )
     if "mac sonucu" in market and "ve" in market:
-        result_token = selection.split()[0] if selection else ""
-        result_key = {"1": "home_win", "x": "draw", "2": "away_win"}.get(result_token)
+        result_key = {"1": "home_win", "x": "draw", "2": "away_win"}.get(result_token() or "")
         if not result_key:
             return None
         if "karsilikli gol" in market or "kg" in market:
-            return f"{result_key}_btts_{'yes' if 'var' in selection else 'no'}"
+            outcome = "yes" if "var" in selection_tokens else "no" if "yok" in selection_tokens else None
+            return f"{result_key}_btts_{outcome}" if outcome else None
         line_match = re.search(r"(\d) 5", market)
         if line_match:
             line = f"{line_match.group(1)}_5"

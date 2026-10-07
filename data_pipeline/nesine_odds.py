@@ -319,12 +319,18 @@ def _market_slug(value: str) -> str:
     return _normalise_market_label(value).replace(" ", "_")[:80] or "unknown"
 
 
-def _is_requested_nesine_market(value: str) -> bool:
+def _is_requested_nesine_market(value: str, selection_name: str = "") -> bool:
     """Keep only the match, half, goal, team-total and corner markets requested."""
     name = _normalise_market_label(value)
-    # Nesine uses both explicit market labels ("1. Yarı Maç Sonucu") and
-    # combined labels ("İlk Yarı/Maç Sonucu 1/1").  The latter is a distinct
-    # market family whose selection text is appended to the heading.
+    selection = _normalise_market_label(selection_name)
+    # A half-time/full-time selection such as "1/1" is not a standalone
+    # half-result price. Keep it out of the requested 1st-half result market.
+    if name.startswith(("ilk yari mac sonucu", "1 yari mac sonucu")) and re.search(
+        r"(?:^| )[1x2] [1x2](?: |$)", selection
+    ):
+        return False
+    # Nesine labels the requested market as either "1. Yarı Maç Sonucu" or
+    # "1. Yarı Sonucu" depending on the bulletin section.
     if name.startswith(("ilk yari mac sonucu", "1 yari mac sonucu")):
         return True
     if name in {
@@ -405,7 +411,9 @@ def _extract_requested_market_rows(page: Any, event_id: str) -> list[dict[str, s
          "selection_code": _market_slug(row["selection_name"]), "selection_name": row["selection_name"],
          "odd": str(_odd(row["odd"]))}
         for row in raw
-        if _is_requested_nesine_market(str(row.get("market_name", "")))
+        if _is_requested_nesine_market(
+            str(row.get("market_name", "")), str(row.get("selection_name", ""))
+        )
         and row.get("selection_name") and _odd(str(row.get("odd", "")))
     ]
 
