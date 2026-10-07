@@ -232,7 +232,7 @@ def _extract_rows_from_page(page: Any, target_fixtures: set[tuple[str, str]] | N
           kickoff_text: clean(node.querySelector('[data-testid^="time-"]')?.innerText),
           markets: {"1": result['1'], "X": result.X, "2": result['2']}};
       });
-      const matchesTarget = row => !targets.size || targets.has(fixtureKey(row.home_team, row.away_team));
+      const matchesTarget = row => Boolean(row) && (!targets.size || targets.has(fixtureKey(row.home_team, row.away_team)));
       const targetedRows = codedRows.filter(matchesTarget);
       // If the normalized names differ from the browser text, return the
       // catalogue to Python so its canonical team matching can decide safely.
