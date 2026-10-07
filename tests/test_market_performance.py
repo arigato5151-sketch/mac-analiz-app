@@ -28,7 +28,7 @@ def test_summary_scores_only_markets_that_cleared_publish_thresholds() -> None:
     summary = summarize_diversified_market_performance(rows)
     labels = {row["Pazar"] for row in summary}
 
-    assert labels == {"Çifte şans", "Üst 1.5", "Ev 0.5 Üst", "İlk 3 olası skor"}
+    assert labels == {"Çifte Şans", "1,5 Gol Alt/Üst · Üst", "Ev Sahibi 0,5 Gol Alt/Üst · Üst", "İlk 3 olası skor"}
     assert all(row["İsabet"] == 1.0 for row in summary)
 
 
@@ -40,4 +40,4 @@ def test_summary_accepts_postgrest_json_strings() -> None:
 
     summary = summarize_diversified_market_performance(rows)
 
-    assert summary == [{"Pazar": "Çifte şans", "Örneklem": 1, "İsabet": 0.0, "Brier": 0.5625}]
+    assert summary == [{"Pazar": "Çifte Şans", "Örneklem": 1, "İsabet": 0.0, "Brier": 0.5625}]

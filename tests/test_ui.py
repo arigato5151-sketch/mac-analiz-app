@@ -25,8 +25,8 @@ def test_prediction_signal_prefers_the_highest_available_market() -> None:
         }
     )
 
-    assert prediction_signal(row) == ("Üst 2.5", 0.63, "Güçlü")
-    assert prediction_signal_text(row) == "Üst 2.5 · %63.0 · Güçlü"
+    assert prediction_signal(row) == ("2,5 Gol Alt/Üst Üst", 0.63, "Güçlü")
+    assert prediction_signal_text(row) == "2,5 Gol Alt/Üst Üst · %63.0 · Güçlü"
 
 
 def test_prediction_signal_handles_missing_predictions() -> None:
@@ -37,7 +37,7 @@ def test_prediction_signal_handles_missing_predictions() -> None:
 
 def test_prediction_signal_uses_publish_threshold_for_medium_confidence() -> None:
     assert prediction_signal(pd.Series({"prob_home_win": 0.55})) == (
-        "Ev kazanır",
+        "Maç Sonucu 1",
         0.55,
         "Orta",
     )
@@ -71,11 +71,11 @@ def test_dashboard_formats_each_diversified_market_as_a_separate_cell() -> None:
 
     cells = diversified_prediction_cells(row)
 
-    assert cells["Çifte şans"] == "1X · %82.0"
-    assert cells["Üst 1.5"] == "%71.0"
-    assert cells["Alt 3.5"] == "%68.0"
-    assert cells["Ev 0.5 Üst"] == "%74.0"
-    assert cells["Dep. 0.5 Üst"] == "—"
+    assert cells["Çifte Şans"] == "ÇŞ 1-X · %82.0"
+    assert cells["1,5 Gol Alt/Üst Üst"] == "%71.0"
+    assert cells["3,5 Gol Alt/Üst Alt"] == "%68.0"
+    assert cells["Ev Sahibi 0,5 Gol Alt/Üst Üst"] == "%74.0"
+    assert cells["Deplasman 0,5 Gol Alt/Üst Üst"] == "—"
     assert not any(column.startswith("Skor ") for column in cells)
 
 
@@ -110,7 +110,7 @@ def test_dashboard_display_includes_each_secondary_market_next_to_match() -> Non
 
     display = dashboard_display(frame)
 
-    assert display.loc[0, "Çifte şans"] == "1X · %91.0"
+    assert display.loc[0, "Çifte Şans"] == "ÇŞ 1-X · %91.0"
     assert not any(column.startswith("Skor ") for column in display.columns)
     assert list(display.columns[3:10]) == list(SECONDARY_MARKET_COLUMNS)
 
@@ -133,7 +133,7 @@ def test_compact_dashboard_hides_advanced_markets() -> None:
     display = compact_dashboard_display(frame)
 
     assert list(display.columns) == [
-        "Tarih", "Lig", "Maç", "1", "X", "2", "Üst 2.5", "KG Var", "Öne çıkan"
+        "Tarih", "Lig", "Maç", "1", "X", "2", "2,5 Gol Alt/Üst", "Karşılıklı Gol", "Öne çıkan"
     ]
     assert "Çifte Şans" not in display.columns
 
@@ -173,4 +173,4 @@ def test_legacy_diversified_dashboard_import_remains_compatible() -> None:
 
     display = diversified_dashboard_display(frame)
 
-    assert display.loc[0, "Çifte şans"] == "1X · %91.0"
+    assert display.loc[0, "Çifte Şans"] == "ÇŞ 1-X · %91.0"

@@ -13,12 +13,12 @@ from models.market_forecast import (
 )
 
 MARKET_LABELS = {
-    ("total_goals", "over_1_5"): "Üst 1.5",
-    ("total_goals", "under_3_5"): "Alt 3.5",
-    ("team_goals", "home_over_0_5"): "Ev 0.5 Üst",
-    ("team_goals", "away_over_0_5"): "Dep. 0.5 Üst",
-    ("team_goals", "home_over_1_5"): "Ev 1.5 Üst",
-    ("team_goals", "away_over_1_5"): "Dep. 1.5 Üst",
+    ("total_goals", "over_1_5"): "1,5 Gol Alt/Üst · Üst",
+    ("total_goals", "under_3_5"): "3,5 Gol Alt/Üst · Alt",
+    ("team_goals", "home_over_0_5"): "Ev Sahibi 0,5 Gol Alt/Üst · Üst",
+    ("team_goals", "away_over_0_5"): "Deplasman 0,5 Gol Alt/Üst · Üst",
+    ("team_goals", "home_over_1_5"): "Ev Sahibi 1,5 Gol Alt/Üst · Üst",
+    ("team_goals", "away_over_1_5"): "Deplasman 1,5 Gol Alt/Üst · Üst",
 }
 
 
@@ -48,7 +48,7 @@ def summarize_diversified_market_performance(
             )
             evaluation = (performance.get("double_chance") or {}).get(key) or {}
             if probability >= MINIMUM_DOUBLE_CHANCE_CONFIDENCE and "actual" in evaluation:
-                buckets["Çifte şans"].append(
+                buckets["Çifte Şans"].append(
                     (bool(evaluation["actual"]), float(evaluation["brier_score"]))
                 )
 

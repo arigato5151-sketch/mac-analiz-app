@@ -27,11 +27,11 @@ MARKET_SELECTIONS: dict[str, tuple[str, ...]] = {
 }
 
 SELECTION_KEYS = {
-    "Ev kazanır": "home_win",
-    "Beraberlik": "draw",
-    "Deplasman kazanır": "away_win",
-    "Üst 2.5": "over_2_5",
-    "KG Var": "btts_yes",
+    "Maç Sonucu 1": "home_win",
+    "Maç Sonucu X": "draw",
+    "Maç Sonucu 2": "away_win",
+    "2,5 Gol Alt/Üst Üst": "over_2_5",
+    "Karşılıklı Gol Var": "btts_yes",
 }
 
 
@@ -102,7 +102,7 @@ def requested_match_id(
 
 
 def _published_threshold(market: str, league_id: object) -> float:
-    if market in {"Ev kazanır", "Beraberlik", "Deplasman kazanır"}:
+    if market in {"Maç Sonucu 1", "Maç Sonucu X", "Maç Sonucu 2"}:
         try:
             parsed_league_id = int(league_id)
         except (TypeError, ValueError):

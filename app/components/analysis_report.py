@@ -39,14 +39,17 @@ def build_match_analysis_report(
     if best_probability < confidence_threshold:
         main_pick = f"Pas — {best_label} yalnızca {_pct(best_probability)}"
     value_pick = value_label or "Geçerli oran verisi yok; value tahmini yapılmadı"
-    alternative = f"Üst 2.5 ({_pct(over_25)}) · KG Var ({_pct(btts)})"
+    alternative = (
+        f"2,5 Gol Alt/Üst: Üst ({_pct(over_25)}) · "
+        f"Karşılıklı Gol: Var ({_pct(btts)})"
+    )
     surprise = "Model eşiğini aşan sürpriz pazar bulunmuyor"
     return f"""### 📊 1. MAÇ ÖZETİ VE GENEL BAKIŞ
 
 - **Karşılaşma:** {home_team} vs {away_team}
 - **Lig:** {league_name}
 - **Maç Kriteri:** {criterion}
-- **Ana Analiz Özeti:** Modelin beklenen gol üretimi {home_team} için {expected_goals['home']:.2f}, {away_team} için {expected_goals['away']:.2f}. 1-X-2 olasılıkları sırasıyla {_pct(home_probability)}, {_pct(draw_probability)} ve {_pct(away_probability)}. Sakatlık, hakem, korner veya kart verisi sisteme yüklenmediyse bu alanlar tahmine dahil edilmez.
+- **Ana Analiz Özeti:** Modelin beklenen gol üretimi {home_team} için {expected_goals['home']:.2f}, {away_team} için {expected_goals['away']:.2f}. Maç Sonucu olasılıkları 1, X ve 2 seçimleri için sırasıyla {_pct(home_probability)}, {_pct(draw_probability)} ve {_pct(away_probability)}. Sakatlık, hakem, korner veya kart verisi sisteme yüklenmediyse bu alanlar tahmine dahil edilmez.
 
 ### 🎯 2. MAÇ İÇİN SEÇİLEN EN YÜKSEK OLASILIKLI TAHMİNLER
 
@@ -59,12 +62,12 @@ def build_match_analysis_report(
 🟢 **A) BANKO / DÜŞÜK RİSKLİ KUPON**
 
 - Tahmin: {main_pick}
-- Mantık: Seçim, mevcut 1-X-2 olasılıkları içindeki en yüksek değere dayanır; garanti değildir.
+- Mantık: Seçim, Maç Sonucu pazarının 1, X ve 2 olasılıkları içindeki en yüksek değere dayanır; garanti değildir.
 
 🟡 **B) İDEAL / DENGELİ KUPON**
 
 - Tahmin: {alternative}
-- Mantık: Toplam gol ve karşılıklı gol model olasılıkları üzerinden üretilir; oran/value desteği yoksa sadece istatistiksel sinyaldir.
+- Mantık: 2,5 Gol Alt/Üst ve Karşılıklı Gol pazarları model olasılıkları üzerinden üretilir; oran/value desteği yoksa sadece istatistiksel sinyaldir.
 
 🔴 **C) YÜKSEK ORAN / SÜRPRİZ KUPON**
 

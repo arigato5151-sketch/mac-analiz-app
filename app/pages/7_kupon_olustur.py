@@ -175,9 +175,9 @@ except Exception:
 if not performance.empty:
     performance_rows = []
     for label_name, correct_column in (
-        ("1-X-2", "was_correct"),
-        ("Üst/Alt 2.5", "over_2_5_was_correct"),
-        ("KG Var/Yok", "btts_was_correct"),
+        ("Maç Sonucu", "was_correct"),
+        ("2,5 Gol Alt/Üst", "over_2_5_was_correct"),
+        ("Karşılıklı Gol", "btts_was_correct"),
     ):
         values = performance[correct_column].dropna().astype(bool)
         if not values.empty:
@@ -194,8 +194,8 @@ if not performance.empty:
 
 def label(item: ValueAssessment) -> str:
     names = {
-        "home_win": "MS 1", "draw": "MS X", "away_win": "MS 2",
-        "over_2_5": "Üst 2.5", "btts_yes": "KG Var",
+        "home_win": "Maç Sonucu · 1", "draw": "Maç Sonucu · X", "away_win": "Maç Sonucu · 2",
+        "over_2_5": "2,5 Gol Alt/Üst · Üst", "btts_yes": "Karşılıklı Gol · Var",
     }
     return f"{names.get(item.key, item.key)} · %{item.model_probability * 100:.0f} · oran {item.odds:.2f}"
 

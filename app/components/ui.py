@@ -15,11 +15,11 @@ from models.market_forecast import (
 )
 
 OUTCOME_COLUMNS: tuple[tuple[str, str], ...] = (
-    ("prob_home_win", "Ev kazanır"),
-    ("prob_draw", "Beraberlik"),
-    ("prob_away_win", "Deplasman kazanır"),
-    ("prob_over_2_5", "Üst 2.5"),
-    ("prob_btts", "KG Var"),
+    ("prob_home_win", "Maç Sonucu 1"),
+    ("prob_draw", "Maç Sonucu X"),
+    ("prob_away_win", "Maç Sonucu 2"),
+    ("prob_over_2_5", "2,5 Gol Alt/Üst Üst"),
+    ("prob_btts", "Karşılıklı Gol Var"),
 )
 RESULT_COLUMNS = OUTCOME_COLUMNS[:3]
 
@@ -154,13 +154,13 @@ def prediction_signal_text(row: pd.Series) -> str:
 
 
 SECONDARY_MARKET_COLUMNS: tuple[str, ...] = (
-    "Çifte şans",
-    "Üst 1.5",
-    "Alt 3.5",
-    "Ev 0.5 Üst",
-    "Dep. 0.5 Üst",
-    "Ev 1.5 Üst",
-    "Dep. 1.5 Üst",
+    "Çifte Şans",
+    "1,5 Gol Alt/Üst Üst",
+    "3,5 Gol Alt/Üst Alt",
+    "Ev Sahibi 0,5 Gol Alt/Üst Üst",
+    "Deplasman 0,5 Gol Alt/Üst Üst",
+    "Ev Sahibi 1,5 Gol Alt/Üst Üst",
+    "Deplasman 1,5 Gol Alt/Üst Üst",
 )
 
 
@@ -184,15 +184,15 @@ def diversified_prediction_cells(row: pd.Series) -> dict[str, str]:
                 key=lambda item: item[1],
             )
             if probability >= MINIMUM_DOUBLE_CHANCE_CONFIDENCE:
-                cells["Çifte şans"] = f"{label} · {probability_percent(probability)}"
+                cells["Çifte Şans"] = f"ÇŞ {label.replace('1X', '1-X').replace('X2', 'X-2').replace('12', '1-2')} · {probability_percent(probability)}"
 
         for group, key, column in (
-            ("total_goals", "over_1_5", "Üst 1.5"),
-            ("total_goals", "under_3_5", "Alt 3.5"),
-            ("team_goals", "home_over_0_5", "Ev 0.5 Üst"),
-            ("team_goals", "away_over_0_5", "Dep. 0.5 Üst"),
-            ("team_goals", "home_over_1_5", "Ev 1.5 Üst"),
-            ("team_goals", "away_over_1_5", "Dep. 1.5 Üst"),
+            ("total_goals", "over_1_5", "1,5 Gol Alt/Üst Üst"),
+            ("total_goals", "under_3_5", "3,5 Gol Alt/Üst Alt"),
+            ("team_goals", "home_over_0_5", "Ev Sahibi 0,5 Gol Alt/Üst Üst"),
+            ("team_goals", "away_over_0_5", "Deplasman 0,5 Gol Alt/Üst Üst"),
+            ("team_goals", "home_over_1_5", "Ev Sahibi 1,5 Gol Alt/Üst Üst"),
+            ("team_goals", "away_over_1_5", "Deplasman 1,5 Gol Alt/Üst Üst"),
         ):
             probability = float((raw_markets.get(group) or {}).get(key, 0.0))
             if probability >= MINIMUM_GOAL_MARKET_CONFIDENCE:
@@ -277,16 +277,16 @@ def evaluated_result_display(frame: pd.DataFrame) -> pd.DataFrame:
     btts_evaluations = [
         binary_market_evaluation(
             row.get("prob_btts"), actual_positive=bool(row["btts_actual"]),
-            positive_label="KG Var", negative_label="KG Yok"
+            positive_label="Var", negative_label="Yok"
         )
         for _, row in rows.iterrows()
     ]
-    rows["Üst 2.5 tahmini"] = [prediction for prediction, _, _ in over_evaluations]
-    rows["Üst 2.5 sonucu"] = [actual for _, actual, _ in over_evaluations]
-    rows["Üst 2.5 durum"] = rows["over_2_5_was_correct"].map({True: "✓ Doğru", False: "✗ Yanlış"}).fillna("—")
-    rows["KG tahmini"] = [prediction for prediction, _, _ in btts_evaluations]
-    rows["KG sonucu"] = [actual for _, actual, _ in btts_evaluations]
-    rows["KG durum"] = rows["btts_was_correct"].map({True: "✓ Doğru", False: "✗ Yanlış"}).fillna("—")
+    rows["2,5 Gol Alt/Üst tahmini"] = [prediction for prediction, _, _ in over_evaluations]
+    rows["2,5 Gol Alt/Üst sonucu"] = [actual for _, actual, _ in over_evaluations]
+    rows["2,5 Gol Alt/Üst durum"] = rows["over_2_5_was_correct"].map({True: "✓ Doğru", False: "✗ Yanlış"}).fillna("—")
+    rows["Karşılıklı Gol tahmini"] = [prediction for prediction, _, _ in btts_evaluations]
+    rows["Karşılıklı Gol sonucu"] = [actual for _, actual, _ in btts_evaluations]
+    rows["Karşılıklı Gol durum"] = rows["btts_was_correct"].map({True: "✓ Doğru", False: "✗ Yanlış"}).fillna("—")
     rows["Skor"] = rows.apply(
         lambda row: f"{int(row['home_score'])} – {int(row['away_score'])}", axis=1
     )
@@ -302,8 +302,8 @@ def evaluated_result_display(frame: pd.DataFrame) -> pd.DataFrame:
     return rows[
         [
             "Tarih", "league_name", "Maç", "Skor", "Sonuç", "Model tahmini", "Güven", "Durum",
-            "Üst 2.5 tahmini", "Üst 2.5 sonucu", "Üst 2.5 durum",
-            "KG tahmini", "KG sonucu", "KG durum", "Brier", "Üst Brier", "KG Brier",
+            "2,5 Gol Alt/Üst tahmini", "2,5 Gol Alt/Üst sonucu", "2,5 Gol Alt/Üst durum",
+            "Karşılıklı Gol tahmini", "Karşılıklı Gol sonucu", "Karşılıklı Gol durum", "Brier", "Üst Brier", "KG Brier",
         ]
     ].rename(columns={"league_name": "Lig"})
 
@@ -329,10 +329,10 @@ def dashboard_display(frame: pd.DataFrame) -> pd.DataFrame:
             "2": frame.get("prob_away_win", pd.Series(index=frame.index)).map(
                 probability_percent
             ),
-            "Üst 2.5": frame.get("prob_over_2_5", pd.Series(index=frame.index)).map(
+            "2,5 Gol Alt/Üst": frame.get("prob_over_2_5", pd.Series(index=frame.index)).map(
                 probability_percent
             ),
-            "KG Var": frame.get("prob_btts", pd.Series(index=frame.index)).map(
+            "Karşılıklı Gol": frame.get("prob_btts", pd.Series(index=frame.index)).map(
                 probability_percent
             ),
             "En güçlü sinyal": frame.apply(prediction_signal_text, axis=1),
@@ -356,10 +356,10 @@ def compact_dashboard_display(frame: pd.DataFrame) -> pd.DataFrame:
             "2": frame.get("prob_away_win", pd.Series(index=frame.index)).map(
                 probability_percent
             ),
-            "Üst 2.5": frame.get(
+            "2,5 Gol Alt/Üst": frame.get(
                 "prob_over_2_5", pd.Series(index=frame.index)
             ).map(probability_percent),
-            "KG Var": frame.get("prob_btts", pd.Series(index=frame.index)).map(
+            "Karşılıklı Gol": frame.get("prob_btts", pd.Series(index=frame.index)).map(
                 probability_percent
             ),
             "Öne çıkan": frame.apply(prediction_signal_text, axis=1),

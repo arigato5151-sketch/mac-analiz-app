@@ -49,6 +49,11 @@ def settle_outcome_decision(
         away = int(away_score)
     except (TypeError, ValueError):
         return None
-    actual = "Ev kazanır" if home > away else "Beraberlik" if home == away else "Deplasman kazanır"
+    actual = "1" if home > away else "X" if home == away else "2"
     market = str(decision.get("selected_market") or "")
-    return market == actual if market in {"Ev kazanır", "Beraberlik", "Deplasman kazanır"} else None
+    legacy_selections = {
+        "Ev kazanır": "1", "Beraberlik": "X", "Deplasman kazanır": "2",
+        "Maç Sonucu 1": "1", "Maç Sonucu X": "X", "Maç Sonucu 2": "2",
+    }
+    selected = legacy_selections.get(market)
+    return selected == actual if selected else None

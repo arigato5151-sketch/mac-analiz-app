@@ -97,6 +97,7 @@ else:
     )
 
 st.caption(
-    "Öne çıkan sinyal, 1-X-2, Üst 2.5 ve KG Var olasılıklarının en yükseğidir. "
+    "Öne çıkan sinyal, Maç Sonucu, 2,5 Gol Alt/Üst ve Karşılıklı Gol pazarlarındaki "
+    "en yüksek olasılığı gösterir. "
     "%60 ve üzeri güçlü, %55–59.9 orta sinyaldir; kesinlik değildir."
 )

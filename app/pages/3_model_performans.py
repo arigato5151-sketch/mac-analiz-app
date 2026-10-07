@@ -127,7 +127,7 @@ if metadata:
 
     confidence_rows = metadata.get("confidence_coverage", [])
     if confidence_rows:
-        st.subheader("1-X-2 güven ve kapsama dengesi")
+        st.subheader("Maç Sonucu güven ve kapsama dengesi")
         confidence_frame = pd.DataFrame(confidence_rows)
         confidence_frame["Güven eşiği"] = confidence_frame["threshold"].map(
             lambda value: f"%{value * 100:.0f}"
@@ -433,7 +433,7 @@ try:
             x="Tahmini isabet",
             histnorm="probability",
             nbins=30,
-            labels={"Tahmini isabet": "En güçlü 1-X-2 seçiminin isabet oranı", "probability": "Senaryo payı"},
+            labels={"Tahmini isabet": "En güçlü Maç Sonucu seçiminin isabet oranı", "probability": "Senaryo payı"},
         )
         histogram.add_vline(
             x=mean_accuracy,
@@ -573,7 +573,7 @@ else:
         "kaydedilen tahminleri kapsar."
     )
 
-    st.subheader("1-X-2 güven eşiği karşılaştırması")
+    st.subheader("Maç Sonucu güven eşiği karşılaştırması")
     threshold_rows = []
     for threshold in (MINIMUM_ACTIONABLE_1X2_CONFIDENCE, shadow_threshold):
         selected = experiment_cohort[
@@ -622,15 +622,15 @@ else:
 
     market_rows = [
         {
-            "Pazar": "1-X-2",
+            "Pazar": "Maç Sonucu",
             "Örneklem": len(performance),
             "İsabet": summary.accuracy,
             "Brier": summary.brier_score,
         }
     ]
     for label, correct_column, brier_column in (
-        ("Üst/Alt 2.5", "over_2_5_was_correct", "over_2_5_brier_score"),
-        ("KG Var/Yok", "btts_was_correct", "btts_brier_score"),
+        ("2,5 Gol Alt/Üst", "over_2_5_was_correct", "over_2_5_brier_score"),
+        ("Karşılıklı Gol", "btts_was_correct", "btts_brier_score"),
     ):
         market = performance.dropna(subset=[correct_column, brier_column])
         if not market.empty:
@@ -656,7 +656,7 @@ else:
     breakdowns = build_performance_breakdowns(performance)
     st.subheader("Lig ve güven seviyesi kırılımı")
     section_intro(
-        "Başarı oranını tek ortalamada gizlememek için lig ve en güçlü 1-X-2 "
+        "Başarı oranını tek ortalamada gizlememek için lig ve en güçlü Maç Sonucu "
         "olasılığına göre örneklem, kapsama ve Brier birlikte gösterilir."
     )
     breakdown_columns = st.columns(2)

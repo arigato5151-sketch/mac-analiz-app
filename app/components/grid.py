@@ -28,21 +28,21 @@ def fit_match_dashboard_columns(options: dict[str, object]) -> dict[str, object]
     columns = options.get("columnDefs", [])
     if isinstance(columns, list):
         detailed_market_widths = {
-            "Çifte şans": 64,
-            "Üst 1.5": 45,
-            "Alt 3.5": 45,
-            "Ev 0.5 Üst": 45,
-            "Dep. 0.5 Üst": 45,
-            "Ev 1.5 Üst": 45,
-            "Dep. 1.5 Üst": 45,
+            "Çifte Şans": 64,
+            "1,5 Gol Alt/Üst Üst": 120,
+            "3,5 Gol Alt/Üst Alt": 120,
+            "Ev Sahibi 0,5 Gol Alt/Üst Üst": 160,
+            "Deplasman 0,5 Gol Alt/Üst Üst": 165,
+            "Ev Sahibi 1,5 Gol Alt/Üst Üst": 160,
+            "Deplasman 1,5 Gol Alt/Üst Üst": 165,
             "1": 46,
             "X": 46,
             "2": 46,
-            "Üst 2.5": 54,
-            "KG Var": 54,
+            "2,5 Gol Alt/Üst": 90,
+            "Karşılıklı Gol": 90,
         }
         is_detailed = any(
-            isinstance(column, dict) and column.get("field") == "Çifte şans"
+                isinstance(column, dict) and column.get("field") == "Çifte Şans"
             for column in columns
         )
         widths = {
@@ -52,8 +52,8 @@ def fit_match_dashboard_columns(options: dict[str, object]) -> dict[str, object]
             "1": 70,
             "X": 70,
             "2": 70,
-            "Üst 2.5": 90,
-            "KG Var": 90,
+            "2,5 Gol Alt/Üst": 130,
+            "Karşılıklı Gol": 100,
         }
         for column in columns:
             if not isinstance(column, dict):
@@ -66,7 +66,7 @@ def fit_match_dashboard_columns(options: dict[str, object]) -> dict[str, object]
             elif field in widths:
                 column["width"] = widths[field]
                 column["flex"] = 0
-                if is_detailed and field in {"1", "X", "2", "Üst 2.5", "KG Var"}:
+                if is_detailed and field in {"1", "X", "2", "2,5 Gol Alt/Üst", "Karşılıklı Gol"}:
                     column["filter"] = False
             elif field == "Öne çıkan":
                 column["flex"] = 1

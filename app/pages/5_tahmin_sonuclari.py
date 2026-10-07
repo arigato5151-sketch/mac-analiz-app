@@ -80,10 +80,10 @@ with st.container(border=True):
     first_row = st.columns(2)
     leagues = ["Tümü", *sorted(evaluations["league_name"].dropna().unique())]
     selected_league = first_row[0].selectbox("Lig", leagues)
-    status = first_row[1].selectbox("1-X-2 sonucu", ["Tümü", "Doğru", "Yanlış"])
+    status = first_row[1].selectbox("Maç Sonucu", ["Tümü", "Doğru", "Yanlış"])
     second_row = st.columns(2)
     confidence = second_row[0].selectbox(
-        "1-X-2 güveni", ["Tümü", "Güçlü", "Orta", "Düşük"]
+        "Maç Sonucu güveni", ["Tümü", "Güçlü", "Orta", "Düşük"]
     )
     selected_dates = second_row[1].date_input(
         "Maç tarihi",
@@ -116,9 +116,9 @@ if filtered.empty:
     for column, label in zip(
         summary[1:],
         [
-            "1-X-2 isabet",
-            "Üst/Alt 2.5 isabet",
-            "KG Var/Yok isabet",
+            "Maç Sonucu isabet",
+            "2,5 Gol Alt/Üst isabet",
+            "Karşılıklı Gol isabet",
             "Ortalama Brier",
         ],
     ):
@@ -132,19 +132,19 @@ btts_accuracy = summarize_binary_accuracy(filtered["btts_was_correct"])
 brier_scores = filtered["brier_score"].dropna().astype(float)
 
 summary[1].metric(
-    "1-X-2 isabet",
+    "Maç Sonucu isabet",
     format_accuracy(outcome_accuracy),
     delta=f"n={outcome_accuracy.sample_size}",
     delta_color="off",
 )
 summary[2].metric(
-    "Üst/Alt 2.5 isabet",
+    "2,5 Gol Alt/Üst isabet",
     format_accuracy(over_accuracy),
     delta=f"n={over_accuracy.sample_size}",
     delta_color="off",
 )
 summary[3].metric(
-    "KG Var/Yok isabet",
+    "Karşılıklı Gol isabet",
     format_accuracy(btts_accuracy),
     delta=f"n={btts_accuracy.sample_size}",
     delta_color="off",
@@ -228,9 +228,9 @@ try:
         if valid_quotes:
             odds_by_match[int(match_id)] = (valid_quotes[0], valid_quotes[-1])
     market_labels = {
-        "home_win": "1", "draw": "X", "away_win": "2",
-        "over_2_5": "Üst 2.5", "under_2_5": "Alt 2.5",
-        "btts_yes": "KG Var", "btts_no": "KG Yok",
+        "home_win": "Maç Sonucu · 1", "draw": "Maç Sonucu · X", "away_win": "Maç Sonucu · 2",
+        "over_2_5": "2,5 Gol Alt/Üst · Üst", "under_2_5": "2,5 Gol Alt/Üst · Alt",
+        "btts_yes": "Karşılıklı Gol · Var", "btts_no": "Karşılıklı Gol · Yok",
     }
     historical_bets: dict[tuple[str, str], list[tuple[object, bool]]] = {}
     historical_clv: dict[tuple[str, str], list[float]] = {}
@@ -356,6 +356,6 @@ try:
 except Exception as exc:
     st.warning(f"Geçmiş value performansı hazırlanamadı: {exc}")
 st.caption(
-    "1-X-2, Üst/Alt 2.5 ve KG Var/Yok sonuçları %50 sınıflandırma eşiğiyle ayrı ayrı "
-    "değerlendirilir. Güven etiketi ve Brier skoru yalnızca 1-X-2 tahminine aittir."
+    "Maç Sonucu, 2,5 Gol Alt/Üst ve Karşılıklı Gol sonuçları %50 sınıflandırma eşiğiyle ayrı ayrı "
+    "değerlendirilir. Güven etiketi ve Brier skoru yalnızca Maç Sonucu tahminine aittir."
 )

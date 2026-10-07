@@ -33,6 +33,7 @@ from app.components.freshness import (
     odds_are_current,
 )
 from app.components.match_visuals import build_form_comparison, build_radar_comparison
+from app.components.nesine_labels import nesine_market_name, nesine_selection_name
 from app.components.model_registry import (
     active_production_version,
     version_label,
@@ -86,13 +87,13 @@ def _all_market_display_rows(
     for key, selection in (("home_win", "1"), ("draw", "X"), ("away_win", "2")):
         add(key, "Maç sonucu", selection)
     for token in ("1x", "x2", "12"):
-        add(f"double_chance_{token}", "Çifte şans", token.upper())
+        add(f"double_chance_{token}", "Çifte Şans", token.upper())
     for period, period_label in (("first_half", "1. yarı"), ("second_half", "2. yarı")):
         for key, selection in (("home_win", "1"), ("draw", "X"), ("away_win", "2")):
             add(f"{period}_{key}", f"{period_label} maç sonucu", selection)
     for line in ("1_5", "2_5", "3_5", "4_5"):
         for direction in ("over", "under"):
-            add(f"{direction}_{line}", "Toplam gol", f"{'Üst' if direction == 'over' else 'Alt'} {line.replace('_', '.')}")
+            add(f"{direction}_{line}", f"{line.replace('_', ',')} Gol Alt/Üst", f"{'Üst' if direction == 'over' else 'Alt'}")
             for result, result_label in (("home_win", "1"), ("draw", "X"), ("away_win", "2")):
                 add(f"{result}_{direction}_{line}", f"Maç sonucu ve {line.replace('_', '.')} gol", f"{result_label} + {'Üst' if direction == 'over' else 'Alt'}")
     for line in ("0_5", "1_5", "2_5", "3_5", "4_5"):
@@ -102,8 +103,8 @@ def _all_market_display_rows(
     for result, result_label in (("home_win", "1"), ("draw", "X"), ("away_win", "2")):
         for outcome, outcome_label in (("yes", "Var"), ("no", "Yok")):
             add(f"{result}_btts_{outcome}", "Maç sonucu ve KG", f"{result_label} + {outcome_label}")
-    add("btts_yes", "Karşılıklı gol", "Var")
-    add("btts_no", "Karşılıklı gol", "Yok")
+    add("btts_yes", "Karşılıklı Gol", "Var")
+    add("btts_no", "Karşılıklı Gol", "Yok")
     for team, team_label in (("home", "Ev sahibi"), ("away", "Deplasman")):
         for period, period_label in (("first_half", "1. yarı"), ("second_half", "2. yarı")):
             for line in ("0_5", "1_5"):
@@ -115,15 +116,15 @@ def _all_market_display_rows(
                     )
     for line in ("7_5", "8_5", "9_5", "10_5", "11_5"):
         for direction in ("over", "under"):
-            add(f"corners_{direction}_{line}", "Toplam korner", f"{'Üst' if direction == 'over' else 'Alt'} {line.replace('_', '.')}")
+            add(f"corners_{direction}_{line}", f"{line.replace('_', ',')} Korner Alt/Üst", f"{'Üst' if direction == 'over' else 'Alt'} {line.replace('_', ',')}")
 
     rows = []
     for key, (market, selection) in labels.items():
         probability = probabilities.get(key)
         odd = quote_by_key.get(key)
         rows.append({
-            "Pazar": market,
-            "Seçim": selection,
+            "Pazar": nesine_market_name(key),
+            "Seçim": nesine_selection_name(key),
             "Model olasılığı": f"%{float(probability) * 100:.1f}" if probability is not None else "Tahmin yok",
             "Nesine oranı": f"{odd:.2f}" if odd is not None else "—",
         })
@@ -284,7 +285,7 @@ else:
 metrics = st.columns(5)
 for column, label, key in zip(
     metrics,
-    ["Ev", "Beraberlik", "Deplasman", "Üst 2.5", "KG Var"],
+    ["Maç Sonucu 1", "Maç Sonucu X", "Maç Sonucu 2", "2,5 Gol Alt/Üst Üst", "Karşılıklı Gol Var"],
     ["prob_home_win", "prob_draw", "prob_away_win", "prob_over_2_5", "prob_btts"],
 ):
     column.metric(label, probability_percent(selected.get(key)))
@@ -498,19 +499,11 @@ try:
                 "EV pozitifse model olasılığı mevcut orana göre avantaj gösterir; "
                 "bu sonuç garanti değildir."
             )
-            labels = {
-                "home_win": "1",
-                "draw": "X",
-                "away_win": "2",
-                "over_2_5": "Üst 2.5",
-                "under_2_5": "Alt 2.5",
-                "btts_yes": "KG Var",
-                "btts_no": "KG Yok",
-            }
             value_frame = pd.DataFrame(
                 [
                     {
-                        "Pazar": labels.get(item.key, item.key),
+                        "Pazar": nesine_market_name(item.key),
+                        "Seçim": nesine_selection_name(item.key),
                         "Oran": f"{item.odds:.2f}",
                         "Model": f"%{item.model_probability * 100:.1f}",
                         "Piyasa": f"%{item.fair_market_probability * 100:.1f}",
