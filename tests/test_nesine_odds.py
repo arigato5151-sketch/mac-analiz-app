@@ -80,3 +80,17 @@ def test_detailed_markets_are_preserved():
                          "selection_code": "1", "selection_name": "Üst 9.5", "odd": "1.88"}],
     }])
     assert quotes[0].all_markets()[0]["market_code"] == "corners_total"
+
+
+def test_matches_bragantino_and_mirassol_despite_nesine_suffixes():
+    quotes = parse_rendered_text_rows([{
+        "home_team": "Bragantino", "away_team": "Mirassol SP",
+        "markets": {"1": "1.60", "X": "3.39", "2": "3.89"},
+    }])
+
+    matched = match_quotes(
+        quotes,
+        [{"id": 1492392, "home_team": "RB Bragantino", "away_team": "Mirassol"}],
+    )
+
+    assert [item[0] for item in matched] == [1492392]

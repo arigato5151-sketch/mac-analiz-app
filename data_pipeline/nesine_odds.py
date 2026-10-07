@@ -51,7 +51,7 @@ def _normalise(value: str) -> str:
     text = value.encode("ascii", "ignore").decode()
     tokens = re.sub(r"[^a-z0-9]+", " ", text.lower()).split()
     aliases = {"utd": "united", "munchen": "munich"}
-    generic = {"fc", "afc", "cf", "sc", "sk", "fk"}
+    generic = {"fc", "afc", "cf", "sc", "sk", "fk", "rb", "sp"}
     return " ".join(aliases.get(token, token) for token in tokens if token not in generic)
 
 
