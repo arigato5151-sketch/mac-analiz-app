@@ -221,8 +221,9 @@ def _extract_rows_from_page(page: Any, target_fixtures: set[tuple[str, str]] | N
         const teams = teamLink && splitPair(teamLink.innerText);
         if (!teams) return null;
         const result = {};
-        for (const item of node.querySelectorAll('[data-testid^="odd_Maç Sonucu_"]')) {
+        for (const item of node.querySelectorAll('[data-testid]')) {
           const testId = item.getAttribute('data-testid') || '';
+          if (!testId.startsWith('odd_Maç Sonucu_')) continue;
           const selection = testId.slice('odd_Maç Sonucu_'.length);
           if (['1', 'X', '2'].includes(selection)) result[selection] = clean(item.innerText).replace(',', '.');
         }
@@ -230,7 +231,12 @@ def _extract_rows_from_page(page: Any, target_fixtures: set[tuple[str, str]] | N
         return {event_id: node.getAttribute('data-code'), home_team: teams[0], away_team: teams[1],
           kickoff_text: clean(node.querySelector('[data-testid^="time-"]')?.innerText),
           markets: {"1": result['1'], "X": result.X, "2": result['2']}};
-      }).filter(row => row && (!targets.size || targets.has(fixtureKey(row.home_team, row.away_team))));
+      });
+      const matchesTarget = row => !targets.size || targets.has(fixtureKey(row.home_team, row.away_team));
+      const targetedRows = codedRows.filter(matchesTarget);
+      // If the normalized names differ from the browser text, return the
+      // catalogue to Python so its canonical team matching can decide safely.
+      if (targetedRows.length) return targetedRows;
       if (codedRows.length) return codedRows;
 
       // Current Nesine football fixtures are OCRow_* event cards identified
@@ -242,14 +248,16 @@ def _extract_rows_from_page(page: Any, target_fixtures: set[tuple[str, str]] | N
         const teams = teamLink && splitPair(teamLink);
         if (!teams) return null;
         const result = {};
-        for (const item of node.querySelectorAll('[data-testid^="odd_Maç Sonucu_"]')) {
-          const selection = (item.getAttribute('data-testid') || '').slice('odd_Maç Sonucu_'.length);
+        for (const item of node.querySelectorAll('[data-testid]')) {
+          const testId = item.getAttribute('data-testid') || '';
+          if (!testId.startsWith('odd_Maç Sonucu_')) continue;
+          const selection = testId.slice('odd_Maç Sonucu_'.length);
           if (['1', 'X', '2'].includes(selection)) result[selection] = clean(item.innerText).replace(',', '.');
         }
         if (!['1', 'X', '2'].every(selection => result[selection])) return null;
         return {event_id: node.getAttribute('data-code') || null, home_team: teams[0], away_team: teams[1],
           markets: {"1": result['1'], "X": result.X, "2": result['2']}};
-      }).filter(row => row && (!targets.size || targets.has(fixtureKey(row.home_team, row.away_team))));
+      });
       if (eventRows.length) {
         const seen = new Set();
         return eventRows.filter(row => {
@@ -605,11 +613,21 @@ def main() -> None:
         })
         if len(unmatched_samples) == 5:
             break
-    report = {"rows": len(payload), "matched": len(matched), "stored": stored,
+    report = {"app_fixtures": len(matches), "rows": len(payload), "matched": len(matched), "stored": stored,
               "market_selections": market_count, "unmatched_samples": unmatched_samples}
     print(json.dumps(report, ensure_ascii=False))
+    if not quotes:
+        raise SystemExit(
+            "Nesine collector extracted zero rendered fixtures; page layout, consent overlay, "
+            "or odds availability prevented collection"
+        )
     if not matched:
-        raise SystemExit("Nesine collector matched zero fixtures; no odds were stored")
+        raise SystemExit(
+            f"Nesine collector extracted {len(quotes)} fixtures but none matched the {len(matches)} "
+            "scheduled app fixtures; see unmatched_samples"
+        )
+    if not stored:
+        raise SystemExit("Nesine collector matched fixtures but stored zero quotes")
 
 
 if __name__ == "__main__":

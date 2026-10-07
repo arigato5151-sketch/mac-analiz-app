@@ -1,4 +1,16 @@
-from data_pipeline.nesine_odds import match_quotes, parse_rendered_text_rows
+from data_pipeline.nesine_odds import (
+    _extract_rows_from_page,
+    match_quotes,
+    parse_rendered_text_rows,
+)
+
+
+class _RenderedPage:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def evaluate(self, _script, *_args):
+        return self.rows
 
 
 def test_parse_and_match_nesine_result_market():
@@ -40,6 +52,24 @@ def test_only_exact_app_fixtures_are_matched():
                {"id": 11, "home_team": "Columbus Crew", "away_team": "Inter Miami"}]
     matched = match_quotes(quotes, matches)
     assert [item[0] for item in matched] == [11]
+
+
+def test_rendered_page_falls_back_to_catalog_when_fixture_accents_differ():
+    rows = [{
+        "home_team": "Galatasaray",
+        "away_team": "Kasımpaşa",
+        "markets": {"1": "1.50", "X": "4.00", "2": "6.00"},
+    }]
+    extracted = _extract_rows_from_page(
+        _RenderedPage(rows), {("galatasaray", "kasimpasa")}
+    )
+    assert extracted == rows
+    quotes = parse_rendered_text_rows(extracted)
+    matched = match_quotes(
+        quotes,
+        [{"id": 21, "home_team": "Galatasaray", "away_team": "Kasımpaşa"}],
+    )
+    assert [item[0] for item in matched] == [21]
 
 
 def test_detailed_markets_are_preserved():
