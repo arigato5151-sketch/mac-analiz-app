@@ -25,7 +25,9 @@ HISTORY_TTL_SECONDS = 900
 # because an old reference catalog is still cached.
 REFERENCE_DATA_TTL_SECONDS = 300
 MODEL_METADATA_TTL_SECONDS = 3_600
-UPCOMING_HORIZON_DAYS = 7
+# Keep the rolling schedule long enough to include fixtures two calendar weeks
+# out (for example, when the weekly sync runs early in the day).
+UPCOMING_HORIZON_DAYS = 14
 
 
 def load_historical_matches(db: PublicSupabaseRestClient) -> list[dict[str, Any]]:

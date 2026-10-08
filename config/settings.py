@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-UPCOMING_HORIZON_DAYS = 7
+UPCOMING_HORIZON_DAYS = 14
 PRE_MATCH_DECISION_LEAD_MINUTES = 20
 
 

@@ -58,12 +58,12 @@ jobs:
       - name: Verify production migration ledger
         id: migrations
         run: python -m db.migrations --verify-production | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Sync next seven days
+      - name: Sync next fourteen days
         id: fixtures
-        run: python -m data_pipeline.fetch_fixtures --days 7
+        run: python -m data_pipeline.fetch_fixtures --days 14
       - name: Sync upcoming bookmaker odds
         id: odds
-        run: python -m data_pipeline.sync_odds --days 7 --max-matches 120 | tee -a "$GITHUB_STEP_SUMMARY"
+        run: python -m data_pipeline.sync_odds --days 14 --max-matches 120 | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Collect visible Nesine odds
         id: nesine
         continue-on-error: true
@@ -80,11 +80,11 @@ jobs:
         run: python -m notifications.operational_alerts --notify --reason "Opsiyonel Nesine oran çekimi başarısız oldu"
       - name: Refresh team form, Elo, and availability
         id: context
-        run: python -m data_pipeline.refresh_context --days 7
+        run: python -m data_pipeline.refresh_context --days 14
       - name: Collect daily shadow-candidate predictions
         id: shadow
         continue-on-error: true
-        run: python -m models.shadow --days 7
+        run: python -m models.shadow --days 14
       - name: Alert failed shadow prediction
         if: steps.shadow.outcome == 'failure'
         env:
@@ -95,7 +95,7 @@ jobs:
         run: python -m notifications.operational_alerts --notify --reason "Gölge tahmin adımı başarısız oldu"
       - name: Generate upcoming predictions
         id: predictions
-        run: python -m models.predict --days 7
+        run: python -m models.predict --days 14
       - name: Send daily coupon to Telegram
         id: coupon
         env:
@@ -104,7 +104,7 @@ jobs:
         run: python -m notifications.daily_coupon | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Validate data quality
         id: quality
-        run: python -m data_pipeline.data_quality --days 7 | tee -a "$GITHUB_STEP_SUMMARY"
+        run: python -m data_pipeline.data_quality --days 14 | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Alert logged runtime errors
         if: success()
         continue-on-error: true

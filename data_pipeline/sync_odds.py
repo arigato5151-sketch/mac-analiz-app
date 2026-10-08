@@ -10,9 +10,10 @@ from config.settings import get_settings
 from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.odds import fetch_match_odds, record_odds_quote
 from db.db_client import SupabaseRestClient
+from config.settings import UPCOMING_HORIZON_DAYS
 
 
-def sync_upcoming_odds(*, days: int = 7, max_matches: int = 120) -> dict[str, int]:
+def sync_upcoming_odds(*, days: int = UPCOMING_HORIZON_DAYS, max_matches: int = 120) -> dict[str, int]:
     if days < 1 or max_matches < 1:
         raise ValueError("days and max_matches must be positive")
     settings = get_settings()
@@ -45,7 +46,7 @@ def sync_upcoming_odds(*, days: int = 7, max_matches: int = 120) -> dict[str, in
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--days", type=int, default=7)
+    parser.add_argument("--days", type=int, default=UPCOMING_HORIZON_DAYS)
     parser.add_argument("--max-matches", type=int, default=120)
     args = parser.parse_args()
     print(json.dumps(sync_upcoming_odds(days=args.days, max_matches=args.max_matches)))
