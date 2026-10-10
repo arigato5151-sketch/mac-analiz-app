@@ -14,9 +14,10 @@ import re
 import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 from difflib import SequenceMatcher
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from config.settings import get_settings
 from db.db_client import SupabaseRestClient
@@ -25,6 +26,15 @@ NESINE_BOOKMAKER = "Nesine"
 DEFAULT_NESINE_URL = "https://www.nesine.com/iddaa?et=1&le=2"
 _ODD = re.compile(r"^(?:[1-9]\d?)(?:[.,]\d{1,3})$")
 LOGGER = logging.getLogger(__name__)
+ISTANBUL = ZoneInfo("Europe/Istanbul")
+
+
+def istanbul_day_bounds(now: datetime | None = None) -> tuple[str, str]:
+    """Return the current Istanbul calendar day's UTC bounds for fixture queries."""
+    local_now = now.astimezone(ISTANBUL) if now else datetime.now(ISTANBUL)
+    start = datetime.combine(local_now.date(), time.min, tzinfo=ISTANBUL)
+    end = start + timedelta(days=1)
+    return start.astimezone(timezone.utc).isoformat(), end.astimezone(timezone.utc).isoformat()
 
 
 def _normalise(value: str) -> str:
@@ -569,13 +579,20 @@ def main() -> None:
     args = parser.parse_args()
     settings = get_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
-    now = datetime.now(timezone.utc).isoformat()
+    start, end = istanbul_day_bounds()
     raw_matches = db.select_all("matches", columns="id,home_team_id,away_team_id,match_date",
-                                filters={"status": "eq.scheduled", "match_date": f"gte.{now}"},
+                                filters={
+                                    "status": "eq.scheduled",
+                                    "and": f"(match_date.gte.{start},match_date.lt.{end})",
+                                },
                                 order="match_date.asc")
     teams = {int(row["id"]): str(row["name"]) for row in db.select_all("teams", columns="id,name")}
     matches = [{**row, "home_team": teams.get(int(row["home_team_id"]), ""),
                 "away_team": teams.get(int(row["away_team_id"]), "")} for row in raw_matches]
+    if not matches:
+        print(json.dumps({"app_fixtures": 0, "rows": 0, "matched": 0, "stored": 0,
+                          "market_selections": 0, "message": "Bugün oynanacak maç yok."}, ensure_ascii=False))
+        return
     if args.rows_json:
         with open(args.rows_json, encoding="utf-8") as handle:
             payload = json.load(handle)

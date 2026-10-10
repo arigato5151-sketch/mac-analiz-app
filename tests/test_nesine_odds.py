@@ -1,8 +1,16 @@
 from data_pipeline.nesine_odds import (
     _extract_rows_from_page,
+    istanbul_day_bounds,
     match_quotes,
     parse_rendered_text_rows,
 )
+from datetime import datetime, timezone
+
+
+def test_nesine_fixture_query_bounds_are_istanbul_calendar_day():
+    start, end = istanbul_day_bounds(datetime(2026, 10, 10, 12, tzinfo=timezone.utc))
+    assert start == "2026-10-09T21:00:00+00:00"
+    assert end == "2026-10-10T21:00:00+00:00"
 
 
 class _RenderedPage:
