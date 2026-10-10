@@ -89,7 +89,7 @@ else:
         gridOptions=fit_read_only_grid_columns(
             build_read_only_grid_options(display_df)
         ),
-        fit_columns_on_grid_load=True,
+        fit_columns_on_grid_load=False,
         reload_data=True,
         theme="streamlit",
         enable_enterprise_modules=False,

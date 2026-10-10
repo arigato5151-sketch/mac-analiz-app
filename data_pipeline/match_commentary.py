@@ -39,17 +39,19 @@ def get_gemini_api_key(
     *, env_file: Path | None = None, secrets: Mapping[str, object] | None = None
 ) -> str:
     """Read the key from environment/.env, then Streamlit secrets when available."""
-    _load_env_file(env_file or PROJECT_ROOT / ".env")
-    for key_name in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
-        environment_key = os.getenv(key_name, "").strip()
-        if environment_key:
-            return environment_key
-
+    configured_env_file = env_file or PROJECT_ROOT / ".env"
+    if env_file is None or configured_env_file.exists():
+        _load_env_file(configured_env_file)
     if secrets is not None:
         for key_name in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
             configured_key = str(secrets.get(key_name, "")).strip()
             if configured_key:
                 return configured_key
+
+    for key_name in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        environment_key = os.getenv(key_name, "").strip()
+        if environment_key:
+            return environment_key
 
     try:
         import streamlit as st
