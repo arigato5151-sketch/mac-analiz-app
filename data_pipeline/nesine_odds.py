@@ -216,7 +216,7 @@ def _extract_rows_from_page(page: Any, target_fixtures: set[tuple[str, str]] | N
       // Current desktop rows expose event and selection IDs as data-test-id
       // attributes. Preserve the event ID so its expanded market panel can be
       // opened after the visible fixture list has been matched to the app.
-      const codedRows = [...document.querySelectorAll('[data-test-id^="r_"][data-code]')].map(node => {
+      const codedRows = [...document.querySelectorAll('[data-test-id^="r_"][data-code][data-test-is-live="false"]')].map(node => {
         const teamLink = node.querySelector('[data-test-id="matchName"]');
         const teams = teamLink && splitPair(teamLink.innerText);
         if (!teams) return null;
@@ -242,7 +242,7 @@ def _extract_rows_from_page(page: Any, target_fixtures: set[tuple[str, str]] | N
       // Current Nesine football fixtures are OCRow_* event cards identified
       // by id. Read only explicit 1/X/2 labels; positional buttons shift when
       // a selection is unavailable and can pull in the next market's price.
-      const eventRows = [...document.querySelectorAll('[id^="OCRow_"]')].map(node => {
+      const eventRows = [...document.querySelectorAll('[id^="OCRow_"][data-test-is-live="false"]')].map(node => {
         const teamLink = [...node.querySelectorAll('a')]
           .map(link => clean(link.innerText)).find(text => splitPair(text));
         const teams = teamLink && splitPair(teamLink);

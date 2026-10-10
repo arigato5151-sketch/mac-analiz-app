@@ -72,6 +72,17 @@ def test_rendered_page_falls_back_to_catalog_when_fixture_accents_differ():
     assert [item[0] for item in matched] == [21]
 
 
+def test_page_extractor_selects_only_upcoming_fixtures():
+    rows = [{
+        "home_team": "Upcoming FC", "away_team": "Visitor FC",
+        "markets": {"1": "2.00", "X": "3.20", "2": "3.40"},
+    }]
+    extracted = _extract_rows_from_page(
+        _RenderedPage(rows), {("upcoming fc", "visitor fc")}
+    )
+    assert extracted == rows
+
+
 def test_detailed_markets_are_preserved():
     quotes = parse_rendered_text_rows([{
         "home_team": "A", "away_team": "B",
