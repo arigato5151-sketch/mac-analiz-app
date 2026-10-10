@@ -171,7 +171,7 @@ with results_column:
     AgGrid(
         display_df,
         gridOptions=grid_options,
-        fit_columns_on_grid_load=True,
+        fit_columns_on_grid_load=False,
         theme="streamlit",
         enable_enterprise_modules=False,
         height=680,
