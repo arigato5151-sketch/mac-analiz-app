@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.data import (
+    load_recent_nesine_markets_for_matches,
     load_prediction_performance,
     load_recent_odds_for_matches,
     load_upcoming_dashboard,
@@ -98,6 +99,29 @@ odds_captured_by_match = {
     int(row["match_id"]): row.get("captured_at")
     for _, row in odds.iterrows()
 }
+nesine_market_quotes = load_recent_nesine_markets_for_matches(
+    tuple(int(value) for value in matches["id"])
+)
+nesine_odds_by_match: dict[int, dict[str, float]] = {}
+if not nesine_market_quotes.empty:
+    for match_id, group in nesine_market_quotes.groupby("match_id"):
+        nesine_odds_by_match[int(match_id)] = {
+            str(row["market_key"]): float(row["odd"])
+            for _, row in group.iterrows()
+            if row.get("market_key") and pd.notna(row.get("odd"))
+        }
+    # Prefer today's complete Nesine snapshot, while retaining other-bookmaker
+    # markets where Nesine has no captured selection.
+    for match_id, prices in nesine_odds_by_match.items():
+        if match_id in odds_by_match:
+            odds_by_match[match_id] = {**odds_by_match[match_id], **prices}
+        else:
+            odds_by_match[match_id] = prices
+            latest_quote = nesine_market_quotes.loc[
+                nesine_market_quotes["match_id"] == match_id
+            ].iloc[0]
+            odds_source_by_match[match_id] = "Nesine"
+            odds_captured_by_match[match_id] = latest_quote["captured_at"]
 
 rows: list[dict[str, object]] = []
 filter_counts = {"no_odds": 0, "stale_odds": 0, "sanity": 0, "below_probability": 0}
@@ -123,6 +147,12 @@ for _, match in matches.iterrows():
     persisted_markets = match.get("market_probabilities")
     if isinstance(persisted_markets, dict):
         probabilities.update(persisted_markets)
+    market_quotes = nesine_market_quotes.loc[
+        nesine_market_quotes["match_id"] == match_id
+    ] if not nesine_market_quotes.empty else pd.DataFrame()
+    market_captured_at = market_quotes["captured_at"].max() if not market_quotes.empty else None
+    if market_captured_at is not None and odds_are_current(market_captured_at, now=odds_now):
+        raw_odds = {**raw_odds, **nesine_odds_by_match.get(match_id, {})}
     if fails_prediction_sanity_check(probabilities):
         filter_counts["sanity"] += 1
         continue
@@ -197,7 +227,15 @@ def label(item: ValueAssessment) -> str:
         "home_win": "Maç Sonucu · 1", "draw": "Maç Sonucu · X", "away_win": "Maç Sonucu · 2",
         "over_2_5": "2,5 Gol Alt/Üst · Üst", "btts_yes": "Karşılıklı Gol · Var",
     }
-    return f"{names.get(item.key, item.key)} · %{item.model_probability * 100:.0f} · oran {item.odds:.2f}"
+    market_name, selection_name = _coupon_market_label(item.key)
+    market_label = names.get(item.key, f"{market_name} · {selection_name}")
+    return f"{market_label} · %{item.model_probability * 100:.0f} · oran {item.odds:.2f}"
+
+
+def _coupon_market_label(key: str) -> tuple[str, str]:
+    from app.components.nesine_labels import nesine_market_name, nesine_selection_name
+
+    return nesine_market_name(key), nesine_selection_name(key)
 
 def render_coupon(title: str, selected: list[dict[str, object]], color: str) -> None:
     st.markdown(f"### {color} {title}")

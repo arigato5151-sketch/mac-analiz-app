@@ -73,6 +73,19 @@ def test_same_match_can_use_different_market_families():
     assert {row["best"].key for row in selected} == {"home_win", "btts_yes"}
 
 
+def test_same_match_can_use_multiple_distinct_secondary_markets():
+    def item(key):
+        return SimpleNamespace(key=key, expected_value=.20, model_probability=.6, odds=2.0)
+
+    rows = [{"match_id": 1, "assessments": [
+        item("first_half_home_win"), item("corners_over_9_5"), item("home_over_1_5")
+    ]}]
+    selected = diversified_coupon_rows(rows, min_ev=0.0)
+    assert {row["best"].key for row in selected} == {
+        "first_half_home_win", "corners_over_9_5", "home_over_1_5"
+    }
+
+
 def test_excluded_match_family_allows_other_market_for_same_match():
     def item(key):
         return SimpleNamespace(key=key, expected_value=.40, model_probability=.6, odds=3.0)

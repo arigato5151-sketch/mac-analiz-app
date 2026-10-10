@@ -328,6 +328,35 @@ def load_recent_odds_for_matches(match_ids: tuple[int, ...]) -> pd.DataFrame:
     return _latest_quote_per_match(frame)
 
 
+@st.cache_data(ttl=LIVE_DATA_TTL_SECONDS, show_spinner=False)
+def load_recent_nesine_markets_for_matches(match_ids: tuple[int, ...]) -> pd.DataFrame:
+    """Load each match's latest captured Nesine selection prices."""
+    if not match_ids:
+        return pd.DataFrame()
+    ids_filter = "in.({})".format(",".join(str(int(match_id)) for match_id in match_ids))
+    rows = get_db().select_all(
+        "nesine_market_quotes",
+        columns="match_id,market_code,market_name,selection_code,selection_name,odd,captured_at",
+        filters={"match_id": ids_filter},
+        order="captured_at.desc",
+    )
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame
+    frame["captured_at"] = pd.to_datetime(frame["captured_at"], utc=True).dt.tz_convert(
+        "Europe/Istanbul"
+    )
+    frame["market_key"] = frame.apply(_nesine_market_key, axis=1)
+    frame = frame.loc[frame["market_key"].notna()].copy()
+    if frame.empty:
+        return frame
+    # A refresh stores a full bookmaker snapshot. Keep every selection from
+    # the newest snapshot while dropping duplicates within that snapshot.
+    latest = frame.groupby("match_id")["captured_at"].transform("max")
+    frame = frame.loc[frame["captured_at"] == latest]
+    return frame.drop_duplicates(["match_id", "market_key"], keep="first").reset_index(drop=True)
+
+
 def _latest_quote_per_match(frame: pd.DataFrame) -> pd.DataFrame:
     """Choose the freshest quote, regardless of bookmaker identity."""
     return (
@@ -412,6 +441,12 @@ def _nesine_market_key(row: dict[str, Any]) -> str | None:
         if line_match:
             line = f"{line_match.group(1)}_5"
             return f"{prefix}_{'over' if 'ust' in selection else 'under'}_{line}"
+    team_line = re.search(r"(ev sahibi|deplasman)(?: ([12]) (?:y|yari))? (\d) 5 (?:gol )?alt ust", market)
+    if team_line:
+        team, half, line_digit = team_line.groups()
+        team_key = "home" if team == "ev sahibi" else "away"
+        period = f"_{'first_half' if half == '1' else 'second_half'}" if half else ""
+        return f"{team_key}{period}_{'under' if 'alt' in selection else 'over'}_{line_digit}_5"
     team_compact_line = re.search(r"(ev sahibi|deplasman) ([12]) y (\d) 5 gol alt ust", market)
     if team_compact_line:
         team, half, line_digit = team_compact_line.groups()
@@ -447,12 +482,6 @@ def _nesine_market_key(row: dict[str, Any]) -> str | None:
     if total_line and "korner" not in market:
         line = f"{total_line.group(1)}_5"
         return f"{'under' if 'alt' in selection else 'over'}_{line}"
-    team_line = re.search(r"(ev sahibi|deplasman)(?: ([12]) (?:y|yari))? (\d) 5 gol alt ust", market)
-    if team_line:
-        team, half, line_digit = team_line.groups()
-        team_key = "home" if team == "ev sahibi" else "away"
-        period = f"_{'first_half' if half == '1' else 'second_half'}" if half else ""
-        return f"{team_key}{period}_{'under' if 'alt' in selection else 'over'}_{line_digit}_5"
     return None
 
 

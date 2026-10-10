@@ -31,7 +31,9 @@ def _market_family(key: str) -> str:
         return "totals"
     if key in BTTS_KEYS:
         return "btts"
-    return "other"
+    # Keep selections from distinct named markets available for the same
+    # fixture; prevent duplicates only inside the same market family.
+    return key.rsplit("_", 1)[0]
 
 
 def diversified_coupon_rows(

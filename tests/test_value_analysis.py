@@ -47,6 +47,38 @@ def test_invalid_or_missing_quotes_are_ignored():
     assert result == []
 
 
+def test_assesses_all_secondary_market_groups_with_matching_probabilities():
+    result = assess_market_value(
+        {
+            "first_half_home_win": .60,
+            "first_half_draw": .25,
+            "first_half_away_win": .15,
+            "home_over_1_5": .55,
+            "home_under_1_5": .45,
+            "corners_over_9_5": .52,
+            "corners_under_9_5": .48,
+        },
+        {
+            "first_half_home_win": 1.8,
+            "first_half_draw": 3.5,
+            "first_half_away_win": 5.0,
+            "home_over_1_5": 1.9,
+            "home_under_1_5": 1.9,
+            "corners_over_9_5": 2.0,
+            "corners_under_9_5": 1.8,
+        },
+    )
+    assert {item.key for item in result} == {
+        "first_half_home_win", "first_half_draw", "first_half_away_win",
+        "home_over_1_5", "home_under_1_5", "corners_over_9_5", "corners_under_9_5",
+    }
+
+
+def test_unmodeled_market_prices_are_not_assessed():
+    result = assess_market_value({}, {"exact_score_1_0": 7.0})
+    assert result == []
+
+
 def test_flat_stake_performance_uses_decimal_odds():
     assessments = assess_market_value(
         {"home_win": 0.60, "draw": 0.20, "away_win": 0.20},

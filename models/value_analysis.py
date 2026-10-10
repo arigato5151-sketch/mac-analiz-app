@@ -164,6 +164,40 @@ def assess_market_value(
                     expected_value=probability * price - 1.0,
                 )
             )
+    # Secondary markets include many independent binary outcomes (half-time,
+    # totals, team totals, double chance, combinations, and corners). Group
+    # only selections from the same named market so bookmaker margin is
+    # removed correctly without requiring every possible outcome to exist.
+    secondary_groups: dict[str, list[tuple[str, float, float]]] = {}
+    for key, raw_price in odds.items():
+        if key in {item for market_set in market_sets for item in market_set}:
+            continue
+        if key not in model_probabilities:
+            continue
+        try:
+            price = _odds(raw_price, f"odds[{key}]")
+            probability = _probability(model_probabilities[key], f"probability[{key}]")
+        except (TypeError, ValueError):
+            continue
+        group = key.rsplit("_", 1)[0]
+        secondary_groups.setdefault(group, []).append((key, price, probability))
+    for candidates in secondary_groups.values():
+        raw_implied = [1.0 / price for _, price, _ in candidates]
+        implied_total = sum(raw_implied)
+        if implied_total <= 0:
+            continue
+        for (key, price, probability), implied in zip(candidates, raw_implied):
+            assessments.append(
+                ValueAssessment(
+                    key=key,
+                    odds=price,
+                    model_probability=probability,
+                    implied_probability=implied,
+                    fair_market_probability=implied / implied_total,
+                    probability_edge=probability - implied / implied_total,
+                    expected_value=probability * price - 1.0,
+                )
+            )
     return assessments
 
 

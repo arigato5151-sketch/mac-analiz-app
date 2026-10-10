@@ -29,6 +29,17 @@ def test_nesine_market_labels_map_requested_markets():
     assert [_nesine_market_key(row) for row, _ in cases] == [expected for _, expected in cases]
 
 
+def test_coupon_market_snapshot_maps_every_selection_to_model_key():
+    rows = [
+        {"market_name": "1. Yarı Sonucu", "selection_name": "1.Y 1"},
+        {"market_name": "Toplam Korner Alt/Üst", "selection_name": "Üst 9,5"},
+        {"market_name": "Ev Sahibi 1,5 Gol Alt/Üst", "selection_name": "Alt"},
+    ]
+    assert [_nesine_market_key(row) for row in rows] == [
+        "first_half_home_win", "corners_over_9_5", "home_under_1_5"
+    ]
+
+
 def test_nesine_collector_excludes_half_time_full_time_combo_from_half_result():
     assert not _is_requested_nesine_market("İlk Yarı/Maç Sonucu", "1/1")
     assert _is_requested_nesine_market("1. Yarı Maç Sonucu", "1")
