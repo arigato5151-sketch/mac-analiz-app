@@ -34,7 +34,7 @@ env:
 jobs:
   morning:
     if: >-
-      github.event.schedule == '0 3 * * *' ||
+      github.event.schedule == '17 3 * * *' ||
       github.event.inputs.task == 'morning' ||
       github.event.inputs.task == 'full'
     runs-on: ubuntu-latest

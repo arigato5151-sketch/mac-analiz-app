@@ -6,6 +6,7 @@ from data_pipeline.odds import MatchOdds, MultiBookmakerOdds
 from models.value_analysis import MIN_VALUE_EV, assess_market_value
 from notifications.pre_match import (
     _absence_summary,
+    _pending_matches,
     due_matches,
     persist_production_snapshot,
     pre_match_message,
@@ -21,6 +22,24 @@ def test_due_matches_uses_the_full_pre_kickoff_window() -> None:
     ]
 
     assert [row["id"] for row in due_matches(matches, now=now)] == [1, 2]
+
+
+def test_pending_match_queue_uses_its_real_primary_key_for_pagination() -> None:
+    now = datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc)
+
+    class FakeDb:
+        def __init__(self) -> None:
+            self.orders: dict[str, str | None] = {}
+
+        def select_all(self, table: str, **kwargs: object) -> list[dict[str, object]]:
+            self.orders[table] = kwargs.get("order")  # type: ignore[assignment]
+            if table == "matches":
+                return [{"id": 1, "match_date": "2026-08-29T12:10:00+00:00"}]
+            return []
+
+    db = FakeDb()
+    assert [row["id"] for row in _pending_matches(db, now=now)] == [1]  # type: ignore[arg-type]
+    assert db.orders["pre_match_telegram_queue"] == "match_id.asc"
 
 
 def test_pre_match_message_shows_every_market() -> None:

@@ -230,6 +230,7 @@ def _pending_matches(db: SupabaseRestClient, *, now: datetime) -> list[dict[str,
             "match_id": f"in.({match_ids})",
             "delivered_at": "is.null",
         },
+        order="match_id.asc",
     )
     claimed_ids = {int(row["match_id"]) for row in claimed}
     return [
