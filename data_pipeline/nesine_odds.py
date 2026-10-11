@@ -58,11 +58,82 @@ def _normalise(value: str) -> str:
     }
     for local_name, canonical_name in country_aliases.items():
         value = re.sub(rf"(?<!\w){re.escape(local_name)}(?!\w)", canonical_name, value)
-    text = value.encode("ascii", "ignore").decode()
+    text = value.casefold().replace("ø", "o").replace("æ", "ae").replace("å", "a")
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     tokens = re.sub(r"[^a-z0-9]+", " ", text.lower()).split()
+    # Club-name variants that are common in the Nesine and API-Football feeds.
+    # Apply these to the complete normalized name to avoid changing unrelated
+    # tokens (for example, a standalone "v" is not a safe alias).
+    name_aliases = {
+        "v guimaraes": ("vitoria sc",),
+        "vitoria de guimaraes": ("vitoria sc",),
+        "cska sofya": ("cska sofia",),
+        "cska 1948": ("cska 1948 sofia",),
+        "us yacoub mansour": ("us yacoub el mansour",),
+        "crs salmi": ("cr salmi",),
+        "san roque": ("san roque de lepe",),
+        "club atletico central": ("central atletico",),
+        "st truidense": ("st truiden",),
+        "st truidense vv": ("st truiden",),
+        "lillestrom": ("lillestrom sk",),
+        "molde": ("molde fk",),
+        "f dusseldorf": ("fortuna dusseldorf",),
+        "dusseldorf": ("fortuna dusseldorf",),
+        "kaa gent ii": ("gent ii",),
+        "rfc seraing": ("seraing",),
+        "modena": ("modena fc",),
+        "hellas verona": ("verona",),
+        "dynamo moscow": ("dinamo moscow",),
+        "dinamo moscow": ("dynamo moscow",),
+        "lillestrom sk": ("lillestrom",),
+        "molde fk": ("molde",),
+        "estac troyes": ("troyes",),
+        "marseille": ("marsilya",),
+        "marsilya": ("marseille",),
+        "atl mineiro": ("atletico mg",),
+        "atletico mg": ("atl mineiro",),
+        "s gijon": ("sporting gijon",),
+        "sporting gijon": ("s gijon",),
+        "santander": ("racing santander",),
+        "racing santander": ("santander",),
+        "gremio p": ("gremio",),
+        "gremio": ("gremio p",),
+        "al taawoun": ("al taawon",),
+        "al taawon": ("al taawoun",),
+        "al shabab sar": ("al shabab",),
+        "al shabab": ("al shabab sar",),
+        "olympiakos piraeus": ("olympiakos",),
+        "olympiakos": ("olympiakos piraeus",),
+    }
     aliases = {"utd": "united", "munchen": "munich"}
     generic = {"fc", "afc", "cf", "sc", "sk", "fk", "rb", "sp"}
-    return " ".join(aliases.get(token, token) for token in tokens if token not in generic)
+    # Feeds often shorten common club words while retaining the distinctive
+    # part of a team's name (e.g. "D. Moskova" for "Dynamo Moscow").
+    # Expand only well-known football abbreviations; fuzzy matching remains
+    # gated by the strict team-by-team check below.
+    abbreviations = {
+        "d": "dynamo", "din": "dinamo", "ath": "athletic",
+        "st": "saint", "ints": "internazionale",
+        "inter": "internazionale", "dep": "deportivo",
+        "moskova": "moscow", "moskva": "moscow",
+    }
+    normalized = " ".join(
+        aliases.get(token, abbreviations.get(token, token))
+        for token in tokens if token not in generic
+    )
+    variants = [normalized]
+    variants.extend(name_aliases.get(normalized, ()))
+    without_generic = " ".join(token for token in tokens if token not in generic)
+    variants.append(" ".join(aliases.get(token, token) for token in without_generic.split()))
+    # Common suffixes/prefixes and sponsored/legal forms can appear on either
+    # feed. Permit the distinctive club name to match when it is the complete
+    # remaining name after removing only a known club descriptor.
+    descriptors = {"kv", "kaa", "rfc", "us", "crs", "cr", "sc", "vv", "sk", "fk", "fc", "cf", "afc", "rb"}
+    variants.append(" ".join(token for token in tokens if token not in descriptors))
+    # Expand only a complete club name from the controlled variant table.
+    # This allows app aliases to be compared symmetrically without broad fuzzy
+    # matches across unrelated clubs.
+    return "|".join(dict.fromkeys(variants))
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,10 +214,12 @@ def parse_rendered_text_rows(rows: Iterable[Mapping[str, Any]]) -> list[NesineMa
 
 
 def match_score(quote: NesineMatchQuote, match: Mapping[str, Any]) -> float:
-    home = _normalise(str(match.get("home_team") or match.get("home_name") or ""))
-    away = _normalise(str(match.get("away_team") or match.get("away_name") or ""))
+    home = str(match.get("home_team") or match.get("home_name") or "")
+    away = str(match.get("away_team") or match.get("away_name") or "")
 
     def similarity(left: str, right: str) -> float:
+        if _same_fixture_team_name(left, right):
+            return 1.0
         left_tokens, right_tokens = left.split(), right.split()
         if not left_tokens or not right_tokens:
             return 0.0
@@ -156,21 +229,51 @@ def match_score(quote: NesineMatchQuote, match: Mapping[str, Any]) -> float:
         token_overlap = 2 * common / (len(left_tokens) + len(right_tokens))
         return max(sequence, token_overlap)
 
-    return (similarity(_normalise(quote.home_team), home) +
-            similarity(_normalise(quote.away_team), away)) / 2
+    return (similarity(_normalise(quote.home_team).split("|")[0], _normalise(home).split("|")[0]) +
+            similarity(_normalise(quote.away_team).split("|")[0], _normalise(away).split("|")[0])) / 2
 
 
 def _same_normalised_team(left: str, right: str) -> bool:
     left_name, right_name = _normalise(left), _normalise(right)
-    if left_name == right_name:
+    left_names, right_names = left_name.split("|"), right_name.split("|")
+    if set(left_names) & set(right_names):
         return True
     # Accept common harmless feed abbreviations (for example "Crew" / "Cr.")
     # only when the shorter full token is a prefix and all other tokens agree.
-    left_tokens, right_tokens = left_name.split(), right_name.split()
-    if len(left_tokens) != len(right_tokens):
-        return False
-    return all(a == b or (len(a) >= 2 and len(b) >= 2 and (a.startswith(b) or b.startswith(a)))
-               for a, b in zip(left_tokens, right_tokens))
+    for left_variant in left_names:
+        for right_variant in right_names:
+            left_tokens, right_tokens = left_variant.split(), right_variant.split()
+            if len(left_tokens) != len(right_tokens):
+                continue
+            if all(a == b or (len(a) >= 2 and len(b) >= 2 and (a.startswith(b) or b.startswith(a)))
+                   for a, b in zip(left_tokens, right_tokens)):
+                return True
+    return False
+
+
+def _team_name_variants(value: str) -> set[str]:
+    """Return strict normalized aliases for one complete team name."""
+    variants = set(_normalise(value).split("|"))
+    descriptors = {"fc", "afc", "cf", "sc", "sk", "fk", "rb", "sp", "kv", "kaa", "rfc", "us", "crs", "cr", "vv"}
+    for variant in tuple(variants):
+        variants.add(" ".join(token for token in variant.split() if token not in descriptors))
+    return {variant for variant in variants if variant}
+
+
+def _same_fixture_team_name(left: str, right: str) -> bool:
+    left_variants = _team_name_variants(left)
+    right_variants = _team_name_variants(right)
+    if left_variants & right_variants:
+        return True
+    for left_variant in left_variants:
+        for right_variant in right_variants:
+            left_tokens, right_tokens = left_variant.split(), right_variant.split()
+            if len(left_tokens) == len(right_tokens) and all(
+                a == b or (len(a) >= 2 and len(b) >= 2 and (a.startswith(b) or b.startswith(a)))
+                for a, b in zip(left_tokens, right_tokens)
+            ):
+                return True
+    return False
 
 
 def match_quotes(quotes: Iterable[NesineMatchQuote], matches: Iterable[Mapping[str, Any]], threshold: float = .82) -> list[tuple[int, NesineMatchQuote, float]]:
@@ -185,8 +288,8 @@ def match_quotes(quotes: Iterable[NesineMatchQuote], matches: Iterable[Mapping[s
             continue
         # Only accept a fixture when both team names identify the app fixture
         # exactly after shared Turkish/English and club-prefix normalization.
-        if (not _same_normalised_team(quote.home_team, str(candidates[0][2].get("home_team") or ""))
-                or not _same_normalised_team(quote.away_team, str(candidates[0][2].get("away_team") or ""))):
+        if (not _same_fixture_team_name(quote.home_team, str(candidates[0][2].get("home_team") or ""))
+                or not _same_fixture_team_name(quote.away_team, str(candidates[0][2].get("away_team") or ""))):
             continue
         output.append((candidates[0][1], quote, candidates[0][0]))
     return output

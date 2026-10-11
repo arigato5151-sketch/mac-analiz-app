@@ -113,3 +113,117 @@ def test_matches_bragantino_and_mirassol_despite_nesine_suffixes():
     )
 
     assert [item[0] for item in matched] == [1492392]
+
+
+def test_matches_known_shortened_dynamo_name():
+    quotes = parse_rendered_text_rows([{
+        "home_team": "Rubin Kazan", "away_team": "D. Moskova",
+        "markets": {"1": "2.00", "X": "3.20", "2": "3.40"},
+    }])
+
+    matched = match_quotes(
+        quotes,
+        [{"id": 88, "home_team": "Rubin Kazan", "away_team": "Dynamo Moscow"}],
+    )
+
+    assert [item[0] for item in matched] == [88]
+
+
+def test_known_short_name_does_not_match_unrelated_club():
+    quotes = parse_rendered_text_rows([{
+        "home_team": "Rubin Kazan", "away_team": "D. Moskova",
+        "markets": {"1": "2.00", "X": "3.20", "2": "3.40"},
+    }])
+
+    matched = match_quotes(
+        quotes,
+        [{"id": 88, "home_team": "Rubin Kazan", "away_team": "Dunav Moscow"}],
+    )
+
+    assert matched == []
+
+
+def test_matches_vitoria_guimaraes_feed_name():
+    quotes = parse_rendered_text_rows([{
+        "home_team": "Benfica", "away_team": "V. Guimaraes",
+        "markets": {"1": "1.50", "X": "4.00", "2": "6.00"},
+    }])
+
+    assert [item[0] for item in match_quotes(quotes, [
+        {"id": 91, "home_team": "Benfica", "away_team": "Vitória SC"},
+    ])] == [91]
+
+
+def test_matches_cska_sofia_variants_without_confusing_cska_teams():
+    quotes = parse_rendered_text_rows([
+        {"home_team": "CSKA 1948 Sofia", "away_team": "CSKA Sofya",
+         "markets": {"1": "2.00", "X": "3.00", "2": "3.50"}},
+    ])
+
+    assert [item[0] for item in match_quotes(quotes, [
+        {"id": 92, "home_team": "CSKA 1948", "away_team": "CSKA Sofia"},
+    ])] == [92]
+
+
+def test_matches_moroccan_and_spanish_feed_name_variants():
+    quotes = parse_rendered_text_rows([
+        {"home_team": "US Yacoub Mansour", "away_team": "CRS Salmi",
+         "markets": {"1": "2.00", "X": "3.00", "2": "3.50"}},
+        {"home_team": "Xerez Deportivo", "away_team": "San Roque",
+         "markets": {"1": "2.00", "X": "3.00", "2": "3.50"}},
+    ])
+
+    matched = match_quotes(quotes, [
+        {"id": 93, "home_team": "US Yacoub El Mansour", "away_team": "CR Salmi"},
+        {"id": 94, "home_team": "Xerez Deportivo", "away_team": "San Roque de Lepe"},
+    ])
+
+    assert [item[0] for item in matched] == [93, 94]
+
+
+def test_matches_more_current_feed_variants():
+    quotes = parse_rendered_text_rows([
+        {"home_team": "Mechelen", "away_team": "St. Truidense",
+         "markets": {"1": "2.00", "X": "3.00", "2": "3.50"}},
+        {"home_team": "Lillestrom", "away_team": "Molde",
+         "markets": {"1": "2.00", "X": "3.00", "2": "3.50"}},
+        {"home_team": "F. Dusseldorf", "away_team": "Verl",
+         "markets": {"1": "2.00", "X": "3.00", "2": "3.50"}},
+        {"home_team": "KAA Gent II", "away_team": "RFC Seraing",
+         "markets": {"1": "2.00", "X": "3.00", "2": "3.50"}},
+        {"home_team": "Modena", "away_team": "Hellas Verona",
+         "markets": {"1": "2.00", "X": "3.00", "2": "3.50"}},
+    ])
+
+    matched = match_quotes(quotes, [
+        {"id": 101, "home_team": "KV Mechelen", "away_team": "St. Truiden"},
+        {"id": 102, "home_team": "Lillestrøm SK", "away_team": "Molde FK"},
+        {"id": 103, "home_team": "Fortuna Düsseldorf", "away_team": "SC Verl"},
+        {"id": 104, "home_team": "Gent II", "away_team": "Seraing"},
+        {"id": 105, "home_team": "Modena FC", "away_team": "Verona"},
+    ])
+
+    assert [item[0] for item in matched] == [101, 102, 103, 104, 105]
+
+
+def test_matches_live_nesine_names_to_daily_app_fixtures():
+    cases = [
+        ("Olympiakos", "Panathinaikos", "Olympiakos Piraeus", "Panathinaikos"),
+        ("AL Shabab (Sar)", "AL Taawoun", "Al Shabab", "Al Taawon"),
+        ("Troyes", "Marsilya", "Estac Troyes", "Marseille"),
+        ("Atl Mineiro", "Santos SP", "Atletico-MG", "Santos"),
+        ("Cadiz", "S. Gijon", "Cadiz", "Sporting Gijon"),
+        ("Santander", "Valencia", "Racing Santander", "Valencia"),
+        ("Gremio P.", "Internacional", "Gremio", "Internacional"),
+    ]
+    quotes = parse_rendered_text_rows([
+        {"home_team": home, "away_team": away,
+         "markets": {"1": "2.00", "X": "3.00", "2": "3.50"}}
+        for home, away, _app_home, _app_away in cases
+    ])
+    matches = [
+        {"id": 200 + index, "home_team": app_home, "away_team": app_away}
+        for index, (_home, _away, app_home, app_away) in enumerate(cases)
+    ]
+
+    assert [item[0] for item in match_quotes(quotes, matches)] == list(range(200, 207))
