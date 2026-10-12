@@ -1,8 +1,8 @@
-"""Compact match forecast and personal decision notes."""
-
+import json
 import sys
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -10,9 +10,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.auth import current_user_id, get_user_db, render_auth_panel
-from app.components.data import load_upcoming_dashboard
+from app.components.data import _nesine_market_key, get_db, load_upcoming_dashboard
 from app.components.decision_board import requested_match_id
 from app.components.model_registry import active_production_version, version_label
+from app.components.nesine_labels import nesine_market_name, nesine_selection_name
 from app.components.ui import (
     configure_page,
     disclaimer,
@@ -21,6 +22,72 @@ from app.components.ui import (
     probability_percent,
 )
 from models.decision_policy import minimum_confidence_for_league
+
+def _all_market_display_rows(
+    probabilities: dict[str, float], quotes: list[dict[str, object]]
+) -> list[dict[str, str]]:
+    """Combine supported model markets with the latest matching Nesine quotes."""
+    quote_by_key: dict[str, float] = {}
+    for quote in quotes:
+        key = _nesine_market_key(quote)
+        try:
+            odd = float(quote["odd"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if key and odd > 1:
+            quote_by_key[key] = odd
+
+    labels: dict[str, tuple[str, str]] = {}
+
+    def add(key: str, market: str, selection: str) -> None:
+        labels[key] = (market, selection)
+
+    for key, selection in (("home_win", "1"), ("draw", "X"), ("away_win", "2")):
+        add(key, "Maç sonucu", selection)
+    for token in ("1x", "x2", "12"):
+        add(f"double_chance_{token}", "Çifte Şans", token.upper())
+    for period, period_label in (("first_half", "1. yarı"), ("second_half", "2. yarı")):
+        for key, selection in (("home_win", "1"), ("draw", "X"), ("away_win", "2")):
+            add(f"{period}_{key}", f"{period_label} maç sonucu", selection)
+    for line in ("1_5", "2_5", "3_5", "4_5"):
+        for direction in ("over", "under"):
+            add(f"{direction}_{line}", f"{line.replace('_', ',')} Gol Alt/Üst", f"{'Üst' if direction == 'over' else 'Alt'}")
+            for result, result_label in (("home_win", "1"), ("draw", "X"), ("away_win", "2")):
+                add(f"{result}_{direction}_{line}", f"Maç sonucu ve {line.replace('_', '.')} gol", f"{result_label} + {'Üst' if direction == 'over' else 'Alt'}")
+    for line in ("0_5", "1_5", "2_5", "3_5", "4_5"):
+        for direction in ("over", "under"):
+            for team, team_label in (("home", "Ev sahibi"), ("away", "Deplasman")):
+                add(f"{team}_{direction}_{line}", f"{team_label} gol", f"{'Üst' if direction == 'over' else 'Alt'} {line.replace('_', '.')}")
+    for result, result_label in (("home_win", "1"), ("draw", "X"), ("away_win", "2")):
+        for outcome, outcome_label in (("yes", "Var"), ("no", "Yok")):
+            add(f"{result}_btts_{outcome}", "Maç sonucu ve KG", f"{result_label} + {outcome_label}")
+    add("btts_yes", "Karşılıklı Gol", "Var")
+    add("btts_no", "Karşılıklı Gol", "Yok")
+    for team, team_label in (("home", "Ev sahibi"), ("away", "Deplasman")):
+        for period, period_label in (("first_half", "1. yarı"), ("second_half", "2. yarı")):
+            for line in ("0_5", "1_5"):
+                for direction in ("over", "under"):
+                    add(
+                        f"{team}_{period}_{direction}_{line}",
+                        f"{team_label} {period_label} gol",
+                        f"{'Üst' if direction == 'over' else 'Alt'} {line.replace('_', '.')}",
+                    )
+    for line in ("7_5", "8_5", "9_5", "10_5", "11_5"):
+        for direction in ("over", "under"):
+            add(f"corners_{direction}_{line}", f"{line.replace('_', ',')} Korner Alt/Üst", f"{'Üst' if direction == 'over' else 'Alt'} {line.replace('_', ',')}")
+
+    rows = []
+    for key, (market, selection) in labels.items():
+        probability = probabilities.get(key)
+        odd = quote_by_key.get(key)
+        rows.append({
+            "Pazar": nesine_market_name(key),
+            "Seçim": nesine_selection_name(key),
+            "Model olasılığı": f"%{float(probability) * 100:.1f}" if probability is not None else "Tahmin yok",
+            "Nesine oranı": f"{odd:.2f}" if odd is not None else "—",
+        })
+    return rows
+
 
 configure_page("Maç Detay")
 page_header(
@@ -178,3 +245,71 @@ for column, label, key in zip(
     ["prob_home_win", "prob_draw", "prob_away_win", "prob_over_2_5", "prob_btts"],
 ):
     column.metric(label, probability_percent(selected.get(key)))
+
+# Market probabilities are already part of the saved prediction. Read only this
+# match's captured Nesine prices; do not rebuild the historical Poisson baseline.
+raw_market_probabilities = selected.get("market_probabilities") or {}
+if isinstance(raw_market_probabilities, str):
+    try:
+        raw_market_probabilities = json.loads(raw_market_probabilities)
+    except json.JSONDecodeError:
+        raw_market_probabilities = {}
+market_probabilities: dict[str, float] = {
+    "home_win": selected.get("prob_home_win"),
+    "draw": selected.get("prob_draw"),
+    "away_win": selected.get("prob_away_win"),
+    "over_2_5": selected.get("prob_over_2_5"),
+    "under_2_5": (
+        1 - float(selected.get("prob_over_2_5"))
+        if pd.notna(selected.get("prob_over_2_5"))
+        else None
+    ),
+    "btts_yes": selected.get("prob_btts"),
+    "btts_no": (
+        1 - float(selected.get("prob_btts"))
+        if pd.notna(selected.get("prob_btts"))
+        else None
+    ),
+}
+if isinstance(raw_market_probabilities, dict):
+    double_chance = raw_market_probabilities.get("double_chance") or {}
+    if isinstance(double_chance, dict):
+        for selection, probability in double_chance.items():
+            market_probabilities[f"double_chance_{str(selection).lower()}"] = probability
+    for group in ("total_goals", "team_goals"):
+        values = raw_market_probabilities.get(group) or {}
+        if isinstance(values, dict):
+            market_probabilities.update(values)
+    for key, value in raw_market_probabilities.items():
+        if key not in {"score_matrix", "correct_scores", "expected_goals", "double_chance", "total_goals", "team_goals"}:
+            if isinstance(value, (int, float)):
+                market_probabilities[key] = float(value)
+
+requested_market_rows: list[dict[str, object]] = []
+try:
+    detail_rows = get_db().select_all(
+        "nesine_market_quotes",
+        columns="market_code,market_name,selection_code,selection_name,odd,captured_at",
+        filters={"match_id": f"eq.{int(selected_id)}"},
+        order="captured_at.desc",
+    )
+    seen_markets: set[tuple[str, str]] = set()
+    for row in detail_rows:
+        row_key = (str(row.get("market_code", "")), str(row.get("selection_code", "")))
+        if row_key in seen_markets:
+            continue
+        seen_markets.add(row_key)
+        requested_market_rows.append(row)
+except Exception:
+    requested_market_rows = []
+
+st.subheader("Pazar tahminleri")
+st.caption(
+    "Model tahminleri ve yakalanan Nesine oranları. Oran olmayan pazarlarda —, "
+    "model tahmini olmayanlarda Tahmin yok gösterilir."
+)
+st.dataframe(
+    pd.DataFrame(_all_market_display_rows(market_probabilities, requested_market_rows)),
+    hide_index=True,
+    width="stretch",
+)
