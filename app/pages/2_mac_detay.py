@@ -195,14 +195,6 @@ selected_id = st.selectbox(
 selected = matches.loc[matches["id"] == selected_id].iloc[0]
 st.subheader(f"{selected['home_team']} — {selected['away_team']}")
 st.caption(f"{selected['league_name']} · {selected['match_date'].strftime('%d.%m.%Y %H:%M')}")
-metrics = st.columns(5)
-for column, label, key in zip(
-    metrics,
-    ["Maç Sonucu 1", "Maç Sonucu X", "Maç Sonucu 2", "2,5 Gol Üst", "Karşılıklı Gol Var"],
-    ["prob_home_win", "prob_draw", "prob_away_win", "prob_over_2_5", "prob_btts"],
-):
-    column.metric(label, probability_percent(selected.get(key)))
-
 # Market probabilities are already part of the saved prediction. Read only this
 # match's captured Nesine prices; do not rebuild the historical Poisson baseline.
 raw_market_probabilities = selected.get("market_probabilities") or {}
