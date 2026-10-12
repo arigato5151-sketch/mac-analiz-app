@@ -104,6 +104,11 @@ def _normalise(value: str) -> str:
         "al shabab": ("al shabab sar",),
         "olympiakos piraeus": ("olympiakos",),
         "olympiakos": ("olympiakos piraeus",),
+        # The app's fixture feed and Nesine use the short/official city names
+        # interchangeably for these same Spanish and Greek clubs.
+        "real valladolid": ("valladolid",),
+        "real oviedo": ("oviedo",),
+        "pae ps kalamata": ("kalamata",),
     }
     aliases = {"utd": "united", "munchen": "munich"}
     generic = {"fc", "afc", "cf", "sc", "sk", "fk", "rb", "sp"}
