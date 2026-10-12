@@ -1,6 +1,8 @@
 """Auditable live prediction results for completed fixtures."""
 
+import json
 import sys
+from html import escape
 from pathlib import Path
 
 import pandas as pd
@@ -21,8 +23,122 @@ from app.components.ui import (
     disclaimer,
     outcome_prediction_signal,
     page_header,
+    probability_percent,
     section_intro,
+    binary_market_evaluation,
 )
+
+
+def _market_result_lines(row: pd.Series) -> tuple[list[str], list[str]]:
+    """Build visible primary-market outcomes and saved secondary-market results."""
+    result_names = {
+        "home_win": "Maç Sonucu 1",
+        "draw": "Maç Sonucu X",
+        "away_win": "Maç Sonucu 2",
+    }
+    predicted_result, probability, _ = outcome_prediction_signal(row)
+    actual_result = result_names.get(str(row.get("actual_result")), "Bilinmiyor")
+    outcome_correct = bool(row.get("was_correct"))
+    primary = [
+        (
+            f"Maç Sonucu: tahmin {predicted_result}"
+            f" ({probability_percent(probability)}) · gerçekleşen {actual_result} · "
+            f"{'✓ Doğru' if outcome_correct else '✕ Yanlış'}"
+        )
+    ]
+
+    for market_name, probability_key, actual_key, positive_label, negative_label in (
+        ("2,5 Gol Alt/Üst", "prob_over_2_5", "over_2_5_actual", "Üst", "Alt"),
+        ("Karşılıklı Gol", "prob_btts", "btts_actual", "Var", "Yok"),
+    ):
+        probability_value = row.get(probability_key)
+        actual_value = row.get(actual_key)
+        if pd.isna(probability_value) or pd.isna(actual_value):
+            primary.append(f"{market_name}: sonuç verisi yok")
+            continue
+        prediction, actual, correct = binary_market_evaluation(
+            probability_value,
+            actual_positive=bool(actual_value),
+            positive_label=positive_label,
+            negative_label=negative_label,
+        )
+        status = "✓ Doğru" if correct else "✕ Yanlış"
+        primary.append(f"{market_name}: tahmin {prediction} · gerçekleşen {actual} · {status}")
+
+    performance = row.get("market_performance")
+    if performance is None or (isinstance(performance, float) and pd.isna(performance)):
+        performance = {}
+    if isinstance(performance, str):
+        try:
+            performance = json.loads(performance)
+        except json.JSONDecodeError:
+            performance = {}
+    if not isinstance(performance, dict):
+        performance = {}
+
+    labels = {
+        "double_chance": {
+            "1X": "Çifte Şans 1X", "X2": "Çifte Şans X2", "12": "Çifte Şans 12",
+        },
+        "total_goals": {
+            "over_1_5": "Toplam Gol 1,5 Üst", "under_1_5": "Toplam Gol 1,5 Alt",
+            "over_3_5": "Toplam Gol 3,5 Üst", "under_3_5": "Toplam Gol 3,5 Alt",
+        },
+        "team_goals": {
+            "home_over_0_5": "Ev Sahibi Gol 0,5 Üst",
+            "away_over_0_5": "Deplasman Gol 0,5 Üst",
+            "home_over_1_5": "Ev Sahibi Gol 1,5 Üst",
+            "away_over_1_5": "Deplasman Gol 1,5 Üst",
+        },
+    }
+    secondary: list[str] = []
+    for group, markets in performance.items():
+        if group == "correct_score" and isinstance(markets, dict):
+            scores = row.get("market_probabilities")
+            if scores is None or (isinstance(scores, float) and pd.isna(scores)):
+                scores = {}
+            if isinstance(scores, str):
+                try:
+                    scores = json.loads(scores)
+                except json.JSONDecodeError:
+                    scores = {}
+            predicted_scores = (scores.get("correct_scores") or []) if isinstance(scores, dict) else []
+            score_text = " · ".join(
+                f"{item.get('score')} ({float(item.get('probability', 0)) * 100:.1f}%)"
+                for item in predicted_scores if isinstance(item, dict)
+            ) or "Tahmin yok"
+            hit = bool(markets.get("top_3_hit"))
+            secondary.append(
+                f"Doğru Skor İlk 3: tahmin {score_text} · gerçekleşen "
+                f"{markets.get('actual', '—')} · {'✓ Tuttu' if hit else '✕ Tutmadı'}"
+            )
+            continue
+        if group not in labels or not isinstance(markets, dict):
+            continue
+        for key, item in markets.items():
+            if key not in labels[group] or not isinstance(item, dict):
+                continue
+            if item.get("probability") is None or item.get("actual") is None:
+                continue
+            probability_value = float(item["probability"])
+            actual_value = bool(item["actual"])
+            predicted_value = probability_value >= 0.5
+            result = "✓ Doğru" if predicted_value == actual_value else "✕ Yanlış"
+            if group == "double_chance":
+                selection = key
+                actual_selection = "Evet" if actual_value else "Hayır"
+            else:
+                selection = "Üst" if "over" in key else "Alt"
+                actual_selection = selection if actual_value else (
+                    "Alt" if selection == "Üst" else "Üst"
+                )
+            secondary.append(
+                f"{labels[group][key]}: tahmin "
+                f"{selection if group == 'double_chance' else selection} "
+                f"(%{probability_value * 100:.1f}) · gerçekleşen "
+                f"{actual_selection} · {result}"
+            )
+    return primary, secondary
 configure_page("Tahmin Sonuçları")
 page_header(
     "Tahmin geçmişi",
@@ -147,18 +263,25 @@ if len(filtered) < 100:
 st.subheader("Sonuç mesajları")
 st.caption("Seçili filtrelere uyan tüm maç sonuçları gösterilir.")
 for _, result_row in filtered.iterrows():
+    primary_markets, secondary_markets = _market_result_lines(result_row)
     is_correct = bool(result_row["was_correct"])
     status_label = "✓ Doğru" if is_correct else "✕ Yanlış"
     status_color = "#35C48D" if is_correct else "#FF6B6B"
+    market_lines = primary_markets + secondary_markets
+    market_html = "".join(f"<li>{escape(line)}</li>" for line in market_lines)
     st.markdown(
         (
             '<div style="border:1px solid rgba(120,120,120,.22);border-radius:.8rem;'
             'padding:.7rem .8rem;margin-bottom:.65rem;background:rgba(23,28,36,.72);">'
-            f'<div style="font-size:.76rem;color:rgba(242,245,247,.62);">{result_row["match_date"].strftime("%d.%m.%Y %H:%M")}</div>'
-            f'<div style="font-weight:700;margin:.25rem 0;">{result_row["home_team"]} — {result_row["away_team"]}</div>'
+            f'<div style="font-size:.76rem;color:rgba(242,245,247,.62);">{escape(result_row["match_date"].strftime("%d.%m.%Y %H:%M"))}</div>'
+            f'<div style="font-weight:700;margin:.25rem 0;">{escape(str(result_row["home_team"]))} — {escape(str(result_row["away_team"]))}</div>'
             f'<div style="font-size:1.15rem;font-weight:800;">{int(result_row["home_score"])} — {int(result_row["away_score"])} '
             f'<span style="float:right;color:{status_color};font-size:.82rem;">{status_label}</span></div>'
-            f'<div style="font-size:.78rem;color:rgba(242,245,247,.62);">{result_row["league_name"]}</div>'
+            f'<div style="font-size:.78rem;color:rgba(242,245,247,.62);">{escape(str(result_row["league_name"]))}</div>'
+            '<div style="margin-top:.7rem;padding-top:.55rem;border-top:1px solid rgba(120,120,120,.18);">'
+            '<div style="font-weight:700;margin-bottom:.25rem;">Pazar sonuçları</div>'
+            f'<ul style="margin:.2rem 0 0;padding-left:1.2rem;">{market_html}</ul>'
+            '</div>'
             '</div>'
         ),
         unsafe_allow_html=True,
