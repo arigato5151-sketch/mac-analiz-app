@@ -42,6 +42,19 @@ jobs:
       - name: Refresh and notify matches near kickoff
         id: pre_match
         run: python -m notifications.pre_match
+      - name: Send coupon when current Nesine odds arrive
+        id: nesine_coupon
+        if: always() && steps.deps.outcome == 'success'
+        continue-on-error: true
+        run: python -m notifications.daily_coupon | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Alert failed Nesine coupon delivery
+        if: steps.nesine_coupon.outcome == 'failure'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          APP_RUN_STARTED_AT: ${{ steps.run_started.outputs.started_at }}
+          FAILED_STEPS: Nesine kupon gönderimi
+        run: python -m notifications.operational_alerts --notify --workflow "Maç önü bildirimleri" --reason "Nesine oranlı kupon gönderimi başarısız oldu"
       - name: Capture fixed-horizon forecasts
         id: horizons
         run: python -m evaluation.forecast_horizons --capture | tee -a "$GITHUB_STEP_SUMMARY"

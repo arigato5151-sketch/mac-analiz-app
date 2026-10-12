@@ -192,7 +192,7 @@ def build_daily_coupon_message(rows: list[dict[str, Any]], *, market_warning: st
         return "🎟️ Günlük kupon\nBugünün kalan maçlarında eşleşen oran ve model tahmini bulunamadı."
     groups = _coupon_groups(rows)
     low, balanced, high = groups["low_risk"], groups["balanced"], groups["high_odds"]
-    sections = [f"🎟️ Günlük kupon · {len(rows)} oranlı maç"]
+    sections = [f"🎟️ Nesine günlük kupon · {len(rows)} oranlı maç"]
     if market_warning:
         sections.append(f"⚠️ {market_warning}")
     for title, selected in (("🟢 Düşük risk", low), ("🟡 Dengeli", balanced), ("🔴 Yüksek oran", high)):
@@ -252,19 +252,31 @@ def _market_gate_warning(db: SupabaseRestClient) -> str | None:
 def run_daily_coupon() -> dict[str, int | str]:
     settings = get_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
-    rows = _rows(db, datetime.now(timezone.utc))
+    now = datetime.now(timezone.utc)
+    rows = _rows(db, now)
     if not rows:
         return {
             "matches": 0,
             "sent": 0,
             "skipped": "no_current_nesine_coupon_selections",
         }
-    _persist_coupon_runs(db, rows, datetime.now(TZ).date().isoformat())
+    groups = _coupon_groups(rows)
+    if not any(groups.values()):
+        return {"matches": len(rows), "sent": 0, "skipped": "no_eligible_coupon"}
+    coupon_date = now.astimezone(TZ).date().isoformat()
+    existing = db.select_all(
+        "daily_coupon_runs",
+        columns="id",
+        filters={"coupon_date": f"eq.{coupon_date}"},
+    )
+    if existing:
+        return {"matches": len(rows), "sent": 0, "skipped": "already_sent_today"}
     market_warning = _market_gate_warning(db)
     token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN", "").strip(), os.getenv("TELEGRAM_CHAT_ID", "").strip()
     if not token or not chat_id:
         return {"matches": len(rows), "sent": 0, "skipped": "telegram_not_configured"}
     send_telegram_message(build_daily_coupon_message(rows, market_warning=market_warning), bot_token=token, chat_id=chat_id)
+    _persist_coupon_runs(db, rows, coupon_date)
     return {"matches": len(rows), "sent": 1}
 
 
