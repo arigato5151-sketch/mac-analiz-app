@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+from st_aggrid import AgGrid
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -11,12 +12,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.components.data import _nesine_market_key, get_db, load_upcoming_dashboard
 from app.components.decision_board import requested_match_id
+from app.components.grid import build_read_only_grid_options
 from app.components.nesine_labels import nesine_market_name, nesine_selection_name
 from app.components.ui import (
     configure_page,
     disclaimer,
     page_header,
-    probability_percent,
 )
 
 COUNTRY_NAMES_TR = {
@@ -80,7 +81,7 @@ LEAGUE_NAMES_TR = {
 
 def _all_market_display_rows(
     probabilities: dict[str, float], quotes: list[dict[str, object]]
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     """Combine supported model markets with the latest matching Nesine quotes."""
     quote_by_key: dict[str, float] = {}
     for quote in quotes:
@@ -138,7 +139,7 @@ def _all_market_display_rows(
         rows.append({
             "Pazar": nesine_market_name(key),
             "Seçim": nesine_selection_name(key),
-            "Model olasılığı": f"%{float(probability) * 100:.1f}" if probability is not None else "Tahmin yok",
+            "Model olasılığı": float(probability) if probability is not None else None,
             "Nesine oranı": f"{odd:.2f}" if odd is not None else "—",
         })
     return rows
@@ -257,8 +258,24 @@ st.caption(
     "Model tahminleri ve yakalanan Nesine oranları. Oran olmayan pazarlarda —, "
     "model tahmini olmayanlarda Tahmin yok gösterilir."
 )
-st.dataframe(
-    pd.DataFrame(_all_market_display_rows(market_probabilities, requested_market_rows)),
-    hide_index=True,
-    width="stretch",
+market_frame = pd.DataFrame(
+    _all_market_display_rows(market_probabilities, requested_market_rows)
+)
+grid_options = build_read_only_grid_options(market_frame)
+for column in grid_options.get("columnDefs", []):
+    if isinstance(column, dict) and column.get("field") == "Model olasılığı":
+        # Keep numeric values for correct sorting; format only the rendered cell.
+        column["valueFormatter"] = (
+            "value == null ? 'Tahmin yok' : '%' + (value * 100).toFixed(1)"
+        )
+        column["sortingOrder"] = ["desc", "asc", None]
+        break
+AgGrid(
+    market_frame,
+    gridOptions=grid_options,
+    fit_columns_on_grid_load=True,
+    reload_data=True,
+    theme="streamlit",
+    enable_enterprise_modules=False,
+    height=min(640, 44 + 36 * (len(market_frame) + 1)),
 )
