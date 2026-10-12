@@ -109,6 +109,9 @@ def _normalise(value: str) -> str:
         "real valladolid": ("valladolid",),
         "real oviedo": ("oviedo",),
         "pae ps kalamata": ("kalamata",),
+        "botafogo rj": ("botafogo",),
+        "newcastle utd": ("newcastle",),
+        "newcastle united": ("newcastle",),
     }
     aliases = {"utd": "united", "munchen": "munich"}
     generic = {"fc", "afc", "cf", "sc", "sk", "fk", "rb", "sp"}
