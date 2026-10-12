@@ -14,7 +14,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.components.data import load_evaluated_predictions
 from app.components.metrics import format_accuracy, summarize_binary_accuracy
-from app.components.market_performance import MARKET_LABELS
 from app.components.model_registry import (
     active_production_version,
     version_label,
@@ -77,21 +76,6 @@ def _market_result_lines(row: pd.Series) -> tuple[list[str], list[str]]:
     if not isinstance(performance, dict):
         performance = {}
 
-    labels = {
-        "double_chance": {
-            "1X": "Çifte Şans 1X", "X2": "Çifte Şans X2", "12": "Çifte Şans 12",
-        },
-        "total_goals": {
-            "over_1_5": "Toplam Gol 1,5 Üst", "under_1_5": "Toplam Gol 1,5 Alt",
-            "over_3_5": "Toplam Gol 3,5 Üst", "under_3_5": "Toplam Gol 3,5 Alt",
-        },
-        "team_goals": {
-            "home_over_0_5": "Ev Sahibi Gol 0,5 Üst",
-            "away_over_0_5": "Deplasman Gol 0,5 Üst",
-            "home_over_1_5": "Ev Sahibi Gol 1,5 Üst",
-            "away_over_1_5": "Deplasman Gol 1,5 Üst",
-        },
-    }
     secondary: list[str] = []
     for group, markets in performance.items():
         if group == "correct_score" and isinstance(markets, dict):
@@ -114,10 +98,10 @@ def _market_result_lines(row: pd.Series) -> tuple[list[str], list[str]]:
                 f"{markets.get('actual', '—')} · {'✓ Tuttu' if hit else '✕ Tutmadı'}"
             )
             continue
-        if group not in labels or not isinstance(markets, dict):
+        if not isinstance(markets, dict):
             continue
         for key, item in markets.items():
-            if key not in labels[group] or not isinstance(item, dict):
+            if not isinstance(item, dict):
                 continue
             if item.get("probability") is None or item.get("actual") is None:
                 continue
@@ -125,21 +109,74 @@ def _market_result_lines(row: pd.Series) -> tuple[list[str], list[str]]:
             actual_value = bool(item["actual"])
             predicted_value = probability_value >= 0.5
             result = "✓ Doğru" if predicted_value == actual_value else "✕ Yanlış"
-            if group == "double_chance":
-                selection = key
-                actual_selection = "Evet" if actual_value else "Hayır"
-            else:
-                selection = "Üst" if "over" in key else "Alt"
-                actual_selection = selection if actual_value else (
-                    "Alt" if selection == "Üst" else "Üst"
-                )
+            label = _market_label(group, key)
+            selection = _selection_label(key, predicted_value)
+            actual_selection = _selection_label(key, actual_value)
             secondary.append(
-                f"{labels[group][key]}: tahmin "
-                f"{selection if group == 'double_chance' else selection} "
+                f"{label}: tahmin {selection} "
                 f"(%{probability_value * 100:.1f}) · gerçekleşen "
                 f"{actual_selection} · {result}"
             )
     return primary, secondary
+
+
+def _market_label(group: str, key: str) -> str:
+    """Translate stored market keys to readable labels, including new market keys."""
+    known = {
+        ("double_chance", "1X"): "Çifte Şans 1X",
+        ("double_chance", "X2"): "Çifte Şans X2",
+        ("double_chance", "12"): "Çifte Şans 12",
+        ("correct_score", "top_3_hit"): "Doğru Skor İlk 3",
+        ("total_goals", "over_1_5"): "Toplam Gol 1,5 Üst",
+        ("total_goals", "under_1_5"): "Toplam Gol 1,5 Alt",
+        ("total_goals", "over_3_5"): "Toplam Gol 3,5 Üst",
+        ("total_goals", "under_3_5"): "Toplam Gol 3,5 Alt",
+        ("team_goals", "home_over_0_5"): "Ev Sahibi Gol 0,5 Üst",
+        ("team_goals", "away_over_0_5"): "Deplasman Gol 0,5 Üst",
+        ("team_goals", "home_over_1_5"): "Ev Sahibi Gol 1,5 Üst",
+        ("team_goals", "away_over_1_5"): "Deplasman Gol 1,5 Üst",
+    }
+    if (group, key) in known:
+        return known[(group, key)]
+
+    group_names = {
+        "total_goals": "Toplam Gol",
+        "team_goals": "Takım Golü",
+        "half_time": "İlk Yarı",
+        "full_time": "Maç Sonucu",
+        "result": "Maç Sonucu",
+        "btts": "Karşılıklı Gol",
+        "correct_score": "Doğru Skor",
+    }
+    key_names = {
+        "home": "Ev Sahibi",
+        "away": "Deplasman",
+        "over": "Üst",
+        "under": "Alt",
+        "yes": "Var",
+        "no": "Yok",
+        "1": "1",
+        "x": "X",
+        "2": "2",
+    }
+    tokens = [key_names.get(token.lower(), token.replace("_", " ")) for token in key.split("_")]
+    return " ".join([group_names.get(group, group.replace("_", " ").title()), *tokens])
+
+
+def _selection_label(key: str, positive: bool) -> str:
+    """Describe a boolean market selection and its opposite in Turkish."""
+    lowered = key.lower()
+    if lowered in {"1x", "x2", "12"}:
+        return key if positive else "Diğer sonuç"
+    if "over" in lowered:
+        return "Üst" if positive else "Alt"
+    if "under" in lowered:
+        return "Alt" if positive else "Üst"
+    if "yes" in lowered or "btts" in lowered:
+        return "Var" if positive else "Yok"
+    if "no" in lowered:
+        return "Yok" if positive else "Var"
+    return "Evet" if positive else "Hayır"
 
 
 def _market_accuracy(evaluations: pd.DataFrame) -> list[tuple[str, int, float]]:
@@ -168,17 +205,19 @@ def _market_accuracy(evaluations: pd.DataFrame) -> list[tuple[str, int, float]]:
             if group == "correct_score" and isinstance(markets, dict):
                 add("Doğru Skor İlk 3", markets.get("top_3_hit"))
                 continue
-            if group not in MARKET_LABELS or not isinstance(markets, dict):
+            if not isinstance(markets, dict):
                 continue
             for key, market in markets.items():
-                label = MARKET_LABELS.get((group, key))
-                if label is None or not isinstance(market, dict):
+                if not isinstance(market, dict):
                     continue
                 probability = market.get("probability")
                 actual = market.get("actual")
                 if probability is None or actual is None:
                     continue
-                add(label, (float(probability) >= 0.5) == bool(actual))
+                add(
+                    _market_label(group, key),
+                    (float(probability) >= 0.5) == bool(actual),
+                )
 
     return [
         (label, len(values), sum(values) / len(values))
@@ -300,7 +339,10 @@ summary[4].metric(
 market_accuracy = _market_accuracy(filtered)
 if market_accuracy:
     st.subheader("Pazar başarı oranları")
-    st.caption("Yüzde, filtrelenmiş ve sonucu bulunan tahminlerden hesaplanır; n değerlendirme sayısıdır.")
+    st.caption(
+        "Tahmin ve gerçekleşen sonucu kaydedilmiş tüm pazarlar listelenir. "
+        "Yüzde filtrelenmiş maçlardan hesaplanır; n değerlendirme sayısıdır."
+    )
     for start in range(0, len(market_accuracy), 4):
         metric_row = st.columns(4)
         for column, (market_label, sample_size, accuracy) in zip(
