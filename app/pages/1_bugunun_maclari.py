@@ -64,7 +64,7 @@ with st.container(border=True):
     days = right.multiselect(
         "Günler",
         available_days,
-        default=available_days,
+        default=[istanbul_today] if istanbul_today in available_days else [],
         format_func=lambda value: "Bugün" if value == istanbul_today else value.strftime("%d.%m.%Y"),
     )
 filtered = matches[matches["match_date"].dt.date.isin(days)]
