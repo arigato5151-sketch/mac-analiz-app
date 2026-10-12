@@ -254,7 +254,10 @@ def sync_soon_lineups(api: ApiFootballClient, db: SupabaseRestClient, *, now: da
         return 0
     match_ids = ",".join(str(int(row["id"])) for row in soon)
     existing = db.select_all(
-        "fixture_lineups", columns="match_id", filters={"match_id": f"in.({match_ids})"}
+        "fixture_lineups",
+        columns="match_id",
+        filters={"match_id": f"in.({match_ids})"},
+        order="match_id.asc,team_id.asc",
     )
     confirmed_counts: dict[int, int] = {}
     for row in existing:

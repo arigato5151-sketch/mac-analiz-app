@@ -275,9 +275,12 @@ class FixtureLineup(Base):
 
     __tablename__ = "fixture_lineups"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    match_id: Mapped[int] = mapped_column(Integer, ForeignKey("matches.id"), nullable=False)
-    team_id: Mapped[int] = mapped_column(Integer, ForeignKey("teams.id"), nullable=False)
+    match_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("matches.id"), primary_key=True
+    )
+    team_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("teams.id"), primary_key=True
+    )
     formation: Mapped[str | None] = mapped_column(String(20), nullable=True)
     confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     coach_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -288,7 +291,6 @@ class FixtureLineup(Base):
     __table_args__ = (
         Index("ix_fixture_lineups_match", "match_id"),
         Index("ix_fixture_lineups_team", "team_id"),
-        UniqueConstraint("match_id", "team_id", name="uq_lineup_match_team"),
     )
 
 
