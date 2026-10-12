@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from config.settings import get_settings
 from db.db_client import SupabaseRestClient
-from app.components.data import _has_suspicious_result_quote, _nesine_market_key
+from app.components.data import _nesine_market_key
 from app.components.freshness import odds_are_current
 from models.coupon_policy import diversified_coupon_rows
 from models.value_analysis import (
@@ -74,12 +74,6 @@ def _rows(db: SupabaseRestClient, now: datetime) -> list[dict[str, Any]]:
         filters={"match_id": f"in.({ids})"},
         order="predicted_at.desc",
     )
-    odds = db.select_all(
-        "odds_quote_history",
-        columns="match_id,bookmaker,odds,captured_at",
-        filters={"match_id": f"in.({ids})"},
-        order="captured_at.desc",
-    )
     nesine_quotes = db.select_all(
         "nesine_market_quotes",
         columns="match_id,market_code,market_name,selection_code,selection_name,odd,captured_at",
@@ -87,12 +81,8 @@ def _rows(db: SupabaseRestClient, now: datetime) -> list[dict[str, Any]]:
         order="captured_at.desc",
     )
     latest_predictions: dict[int, dict[str, Any]] = {}
-    latest_odds: dict[int, dict[str, Any]] = {}
     for row in predictions:
         latest_predictions.setdefault(int(row["match_id"]), row)
-    for row in odds:
-        if isinstance(row.get("odds"), dict) and not _has_suspicious_result_quote(row["odds"]):
-            latest_odds.setdefault(int(row["match_id"]), row)
     latest_nesine_time: dict[int, datetime] = {}
     nesine_odds: dict[int, dict[str, float]] = {}
     for quote in nesine_quotes:
@@ -118,7 +108,6 @@ def _rows(db: SupabaseRestClient, now: datetime) -> list[dict[str, Any]]:
     for match in matches:
         match_id = int(match["id"])
         prediction = latest_predictions.get(match_id)
-        quote = latest_odds.get(match_id)
         if not prediction:
             continue
 
@@ -138,15 +127,10 @@ def _rows(db: SupabaseRestClient, now: datetime) -> list[dict[str, Any]]:
         if isinstance(persisted_markets, dict):
             probabilities.update(persisted_markets)
 
-        match_odds = dict(quote["odds"]) if quote else {}
         nesine_time = latest_nesine_time.get(match_id)
-        base_quote_time = quote.get("captured_at") if quote else nesine_time
-        if not match_odds and nesine_time and odds_are_current(nesine_time, now=now):
-            match_odds.update(nesine_odds.get(match_id, {}))
-        if not match_odds or not odds_are_current(base_quote_time, now=now):
+        match_odds = nesine_odds.get(match_id, {})
+        if not match_odds or not odds_are_current(nesine_time, now=now):
             continue
-        if nesine_time and odds_are_current(nesine_time, now=now):
-            match_odds.update(nesine_odds.get(match_id, {}))
         if _fails_prediction_sanity_check(probabilities):
             continue
         probabilities.update(
@@ -269,6 +253,12 @@ def run_daily_coupon() -> dict[str, int | str]:
     settings = get_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     rows = _rows(db, datetime.now(timezone.utc))
+    if not rows:
+        return {
+            "matches": 0,
+            "sent": 0,
+            "skipped": "no_current_nesine_coupon_selections",
+        }
     _persist_coupon_runs(db, rows, datetime.now(TZ).date().isoformat())
     market_warning = _market_gate_warning(db)
     token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN", "").strip(), os.getenv("TELEGRAM_CHAT_ID", "").strip()
