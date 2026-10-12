@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.data import load_upcoming_dashboard
+from app.components.football_names import country_name_tr, league_name_tr
 from app.components.ui import (
     configure_page,
     dashboard_display,
@@ -75,7 +76,14 @@ if filtered.empty:
         "Bu filtrelerle maç bulunamadı. Lig veya gün seçimini genişletip tekrar deneyin."
     )
 else:
-    display_df = dashboard_display(filtered)[["Tarih", "Lig", "Maç"]].copy()
+    match_display = dashboard_display(filtered)
+    display_df = match_display[["Tarih", "Lig", "Maç"]].copy()
+    display_df["Ülke"] = filtered["country"].map(country_name_tr).to_numpy()
+    display_df["Lig"] = [
+        league_name_tr(country, league)
+        for country, league in zip(filtered["country"], filtered["league_name"])
+    ]
+    display_df = display_df[["Tarih", "Ülke", "Lig", "Maç"]]
     display_df["match_id"] = filtered["id"].astype(int).to_numpy()
     builder = GridOptionsBuilder.from_dataframe(display_df)
     builder.configure_default_column(
