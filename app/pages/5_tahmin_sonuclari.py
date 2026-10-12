@@ -145,8 +145,8 @@ if len(filtered) < 100:
     )
 
 st.subheader("Sonuç mesajları")
-st.caption("En yeni değerlendirmeler burada gösterilir.")
-for _, result_row in filtered.head(8).iterrows():
+st.caption("Seçili filtrelere uyan tüm maç sonuçları gösterilir.")
+for _, result_row in filtered.iterrows():
     is_correct = bool(result_row["was_correct"])
     status_label = "✓ Doğru" if is_correct else "✕ Yanlış"
     status_color = "#35C48D" if is_correct else "#FF6B6B"
