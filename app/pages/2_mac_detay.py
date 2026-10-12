@@ -109,13 +109,19 @@ if matches.empty:
     st.stop()
 
 matches = matches.copy()
-matches["label"] = (
-    matches["match_date"].dt.strftime("%d.%m %H:%M")
-    + " · "
-    + matches["home_team"]
-    + " — "
-    + matches["away_team"]
-)
+def _match_label(match: pd.Series) -> str:
+    country = match.get("country")
+    league = match.get("league_name")
+    country = country.strip() if isinstance(country, str) and country.strip() else "Ülke bilinmiyor"
+    league = league.strip() if isinstance(league, str) and league.strip() else "Lig bilinmiyor"
+    kickoff = match["match_date"].strftime("%d.%m %H:%M")
+    return (
+        f"{kickoff} · {country} · {league} · "
+        f"{match['home_team']} — {match['away_team']}"
+    )
+
+
+matches["label"] = matches.apply(_match_label, axis=1)
 deep_linked_id = requested_match_id(st.query_params.to_dict(), matches)
 if deep_linked_id is None:
     deep_linked_id = requested_match_id(
