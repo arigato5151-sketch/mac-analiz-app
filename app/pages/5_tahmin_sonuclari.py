@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.components.data import load_evaluated_predictions
 from app.components.metrics import format_accuracy, summarize_binary_accuracy
+from app.components.market_performance import MARKET_LABELS
 from app.components.model_registry import (
     active_production_version,
     version_label,
@@ -139,6 +140,53 @@ def _market_result_lines(row: pd.Series) -> tuple[list[str], list[str]]:
                 f"{actual_selection} · {result}"
             )
     return primary, secondary
+
+
+def _market_accuracy(evaluations: pd.DataFrame) -> list[tuple[str, int, float]]:
+    """Summarize accuracy for each market that has stored predictions and outcomes."""
+    correct_by_market: dict[str, list[bool]] = {}
+
+    def add(label: str, correct: object) -> None:
+        if pd.notna(correct):
+            correct_by_market.setdefault(label, []).append(bool(correct))
+
+    for _, row in evaluations.iterrows():
+        add("Maç Sonucu", row.get("was_correct"))
+        add("2,5 Gol Alt/Üst", row.get("over_2_5_was_correct"))
+        add("Karşılıklı Gol", row.get("btts_was_correct"))
+
+        performance = row.get("market_performance")
+        if isinstance(performance, str):
+            try:
+                performance = json.loads(performance)
+            except json.JSONDecodeError:
+                performance = {}
+        if not isinstance(performance, dict):
+            continue
+
+        for group, markets in performance.items():
+            if group == "correct_score" and isinstance(markets, dict):
+                add("Doğru Skor İlk 3", markets.get("top_3_hit"))
+                continue
+            if group not in MARKET_LABELS or not isinstance(markets, dict):
+                continue
+            for key, market in markets.items():
+                label = MARKET_LABELS.get((group, key))
+                if label is None or not isinstance(market, dict):
+                    continue
+                probability = market.get("probability")
+                actual = market.get("actual")
+                if probability is None or actual is None:
+                    continue
+                add(label, (float(probability) >= 0.5) == bool(actual))
+
+    return [
+        (label, len(values), sum(values) / len(values))
+        for label, values in sorted(correct_by_market.items())
+        if values
+    ]
+
+
 configure_page("Tahmin Sonuçları")
 page_header(
     "Tahmin geçmişi",
@@ -212,15 +260,10 @@ if confidence != "Tümü":
 summary = st.columns(5)
 summary[0].metric("Değerlendirilen maç", len(filtered))
 if filtered.empty:
-    for column, label in zip(
-        summary[1:],
-        [
-            "Maç Sonucu isabet",
-            "2,5 Gol Alt/Üst isabet",
-            "Karşılıklı Gol isabet",
-            "Ortalama Brier",
-        ],
-    ):
+    for column, label in zip(summary[1:5], [
+        "Maç Sonucu isabet", "2,5 Gol Alt/Üst isabet",
+        "Karşılıklı Gol isabet", "Ortalama Brier",
+    ]):
         column.metric(label, "—")
     st.info("Bu filtrelerle eşleşen değerlendirilmiş tahmin bulunamadı.")
     st.stop()
@@ -254,6 +297,21 @@ summary[4].metric(
     delta=f"n={len(brier_scores)}",
     delta_color="off",
 )
+market_accuracy = _market_accuracy(filtered)
+if market_accuracy:
+    st.subheader("Pazar başarı oranları")
+    st.caption("Yüzde, filtrelenmiş ve sonucu bulunan tahminlerden hesaplanır; n değerlendirme sayısıdır.")
+    for start in range(0, len(market_accuracy), 4):
+        metric_row = st.columns(4)
+        for column, (market_label, sample_size, accuracy) in zip(
+            metric_row, market_accuracy[start : start + 4]
+        ):
+            column.metric(
+                f"{market_label} isabet",
+                f"%{accuracy * 100:.1f}",
+                delta=f"n={sample_size}",
+                delta_color="off",
+            )
 if len(filtered) < 100:
     st.info(
         f"Bu filtrede yalnızca {len(filtered)} maç var. Başarı oranını kesin bir "
