@@ -343,17 +343,20 @@ if market_accuracy:
         "Tahmin ve gerçekleşen sonucu kaydedilmiş tüm pazarlar listelenir. "
         "Yüzde filtrelenmiş maçlardan hesaplanır; n değerlendirme sayısıdır."
     )
-    for start in range(0, len(market_accuracy), 4):
-        metric_row = st.columns(4)
-        for column, (market_label, sample_size, accuracy) in zip(
-            metric_row, market_accuracy[start : start + 4]
-        ):
-            column.metric(
-                f"{market_label} isabet",
-                f"%{accuracy * 100:.1f}",
-                delta=f"n={sample_size}",
-                delta_color="off",
-            )
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "Pazar": market_label,
+                    "Başarı oranı": f"%{accuracy * 100:.1f}",
+                    "Değerlendirme sayısı": sample_size,
+                }
+                for market_label, sample_size, accuracy in market_accuracy
+            ]
+        ),
+        hide_index=True,
+        use_container_width=True,
+    )
 if len(filtered) < 100:
     st.info(
         f"Bu filtrede yalnızca {len(filtered)} maç var. Başarı oranını kesin bir "
