@@ -23,6 +23,65 @@ from app.components.ui import (
 )
 from models.decision_policy import minimum_confidence_for_league
 
+COUNTRY_NAMES_TR = {
+    "austria": "Avusturya",
+    "belgium": "Belçika",
+    "brazil": "Brezilya",
+    "england": "İngiltere",
+    "france": "Fransa",
+    "germany": "Almanya",
+    "greece": "Yunanistan",
+    "italy": "İtalya",
+    "mexico": "Meksika",
+    "netherlands": "Hollanda",
+    "portugal": "Portekiz",
+    "saudi-arabia": "Suudi Arabistan",
+    "saudi arabia": "Suudi Arabistan",
+    "scotland": "İskoçya",
+    "spain": "İspanya",
+    "switzerland": "İsviçre",
+    "turkey": "Türkiye",
+    "usa": "ABD",
+    "united states": "ABD",
+    "world": "Uluslararası",
+}
+LEAGUE_NAMES_TR = {
+    ("england", "premier league"): "Premier Lig",
+    ("england", "championship"): "İngiltere Championship",
+    ("spain", "la liga"): "La Liga",
+    ("spain", "segunda división"): "İspanya 2. Ligi",
+    ("italy", "serie a"): "Serie A",
+    ("italy", "serie b"): "Serie B",
+    ("brazil", "serie a"): "Série A",
+    ("germany", "bundesliga"): "Bundesliga",
+    ("france", "ligue 1"): "Ligue 1",
+    ("france", "ligue 2"): "Ligue 2",
+    ("portugal", "primeira liga"): "Portekiz Premier Ligi",
+    ("netherlands", "eredivisie"): "Hollanda Eredivisie",
+    ("belgium", "jupiler pro league"): "Belçika Pro Ligi",
+    ("saudi-arabia", "pro league"): "Suudi Arabistan Pro Ligi",
+    ("saudi arabia", "pro league"): "Suudi Arabistan Pro Ligi",
+    ("usa", "major league soccer"): "ABD MLS",
+    ("united states", "major league soccer"): "ABD MLS",
+    ("mexico", "liga mx"): "Meksika Liga MX",
+    ("scotland", "premiership"): "İskoçya Premiership",
+    ("austria", "bundesliga"): "Avusturya Bundesliga",
+    ("switzerland", "super league"): "İsviçre Süper Ligi",
+    ("greece", "super league 1"): "Yunanistan Süper Ligi",
+    ("world", "uefa champions league"): "UEFA Şampiyonlar Ligi",
+    ("world", "uefa europa league"): "UEFA Avrupa Ligi",
+    ("world", "uefa europa conference league"): "UEFA Konferans Ligi",
+    ("world", "conmebol libertadores"): "Libertadores Kupası",
+    ("world", "fifa world cup"): "Dünya Kupası",
+    ("world", "euro championship"): "Avrupa Şampiyonası",
+    ("world", "uefa nations league"): "UEFA Uluslar Ligi",
+    ("world", "africa cup of nations"): "Afrika Uluslar Kupası",
+    ("world", "asian cup"): "Asya Kupası",
+    ("world", "copa america"): "Amerika Kupası",
+    ("world", "concacaf gold cup"): "CONCACAF Altın Kupa",
+}
+
+
 def _all_market_display_rows(
     probabilities: dict[str, float], quotes: list[dict[str, object]]
 ) -> list[dict[str, str]]:
@@ -114,6 +173,9 @@ def _match_label(match: pd.Series) -> str:
     league = match.get("league_name")
     country = country.strip() if isinstance(country, str) and country.strip() else "Ülke bilinmiyor"
     league = league.strip() if isinstance(league, str) and league.strip() else "Lig bilinmiyor"
+    country_key = country.casefold()
+    league = LEAGUE_NAMES_TR.get((country_key, league.casefold()), league)
+    country = COUNTRY_NAMES_TR.get(country_key, country)
     kickoff = match["match_date"].strftime("%d.%m %H:%M")
     return (
         f"{kickoff} · {country} · {league} · "
