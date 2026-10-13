@@ -199,6 +199,26 @@ def _normalise(value: str) -> str:
         "botafogo rj": ("botafogo",),
         "newcastle utd": ("newcastle",),
         "newcastle united": ("newcastle",),
+        "sabah": ("sabah fa",),
+        "sabah fa": ("sabah",),
+        "slavia prag": ("slavia praha",),
+        "slavia praha": ("slavia prag",),
+        "rc lens": ("lens",),
+        "lens": ("rc lens",),
+        "w bromwich": ("west brom",),
+        "west brom": ("w bromwich",),
+        "blackburn r": ("blackburn",),
+        "blackburn": ("blackburn r",),
+        "swansea city": ("swansea",),
+        "swansea": ("swansea city",),
+        "cardiff city": ("cardiff",),
+        "cardiff": ("cardiff city",),
+        "wolverhampton": ("wolves",),
+        "wolves": ("wolverhampton",),
+        "bayern munih": ("bayern munich",),
+        "bayern munich": ("bayern munih",),
+        "psv eindhoven": ("psv",),
+        "psv": ("psv eindhoven",),
     }
     aliases = {"utd": "united", "munchen": "munich"}
     generic = {"fc", "afc", "cf", "sc", "sk", "fk", "rb", "sp"}
@@ -925,8 +945,6 @@ def main() -> None:
             "best_candidate": (f"{best[1].get('home_team')} - {best[1].get('away_team')}" if best else None),
             "score": round(best[0], 3) if best else None,
         })
-        if len(unmatched_samples) == 5:
-            break
     report = {"nesine_tracked_league_fixtures": len(quotes),
               "api_football_daily_fixtures": len(api_fixtures),
               "matched": len(matched), "fixtures_synced": len(selected_fixtures), "stored": stored,
