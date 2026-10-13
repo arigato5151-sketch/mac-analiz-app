@@ -20,6 +20,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from config.settings import get_settings
+from config.leagues import TRACKED_LEAGUE_IDS
 from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_fixtures import transform_fixtures
 from db.db_client import SupabaseRestClient
@@ -329,8 +330,15 @@ def _extract_rows_from_page(page: Any, target_fixtures: set[tuple[str, str]] | N
     rows = page.evaluate("""targetFixtures => {
       const odd = /^([1-9]\\d?)[.,]\\d{1,3}$/;
       const clean = value => (value || '').replace(/\\s+/g, ' ').trim();
-      const targets = new Set(targetFixtures || []);
-      const fixtureKey = (home, away) => `${home}|${away}`;
+      const targets = targetFixtures || [];
+      const normalizeTeam = value => value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase().replace(/\\butd\\b/g, '').replace(/\\brj\\b/g, '')
+        .replace(/\\b(munchen)\\b/g, 'munich').replace(/[^a-z0-9]+/g, ' ')
+        .split(/\\s+/).filter(token => token && !['fc','afc','cf','sc','sk','fk','rb','sp'].includes(token))
+        .join(' ').trim();
+      const teamMatches = (raw, variants) => variants.some(value => normalizeTeam(value) === normalizeTeam(raw));
+      const matchesTarget = row => Boolean(row) && (!targets.length || targets.some(target =>
+        teamMatches(row.home_team, target.home) && teamMatches(row.away_team, target.away)));
       const splitPair = value => {
         const parts = clean(value).split(/\\s+[-–—]\\s+/);
         return parts.length === 2 && parts.every(part => part && part.length <= 80) ? parts : null;
@@ -355,11 +363,8 @@ def _extract_rows_from_page(page: Any, target_fixtures: set[tuple[str, str]] | N
           kickoff_text: clean(node.querySelector('[data-testid^="time-"]')?.innerText),
           markets: {"1": result['1'], "X": result.X, "2": result['2']}};
       });
-      const matchesTarget = row => Boolean(row) && (!targets.size || targets.has(fixtureKey(row.home_team, row.away_team)));
       const targetedRows = codedRows.filter(matchesTarget);
-      // If the normalized names differ from the browser text, return the
-      // catalogue to Python so its canonical team matching can decide safely.
-      if (targetedRows.length) return targetedRows;
+      if (targets.length) return targetedRows;
       if (codedRows.length) return codedRows;
 
       // Current Nesine football fixtures are OCRow_* event cards identified
@@ -381,6 +386,8 @@ def _extract_rows_from_page(page: Any, target_fixtures: set[tuple[str, str]] | N
         return {event_id: node.getAttribute('data-code') || null, home_team: teams[0], away_team: teams[1],
           markets: {"1": result['1'], "X": result.X, "2": result['2']}};
       });
+      const targetedEventRows = eventRows.filter(matchesTarget);
+      if (targets.length) return targetedEventRows;
       if (eventRows.length) {
         const seen = new Set();
         return eventRows.filter(row => {
@@ -394,7 +401,7 @@ def _extract_rows_from_page(page: Any, target_fixtures: set[tuple[str, str]] | N
       // Unknown layouts are skipped instead of guessing from text order.
       return [];
     }""", [
-      f"{_normalise(str(home))}|{_normalise(str(away))}"
+      {"home": _normalise(str(home)).split("|"), "away": _normalise(str(away)).split("|")}
       for home, away in (target_fixtures or set())
     ])
     return rows
@@ -694,13 +701,22 @@ def main() -> None:
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     local_today = datetime.now(ISTANBUL).date()
     api = ApiFootballClient(settings.api_football_key)
-    api_fixtures = api.get("fixtures", {"date": local_today.isoformat(), "timezone": "Europe/Istanbul"})
+    api_fixtures = [
+        item for item in api.get(
+            "fixtures", {"date": local_today.isoformat(), "timezone": "Europe/Istanbul"}
+        )
+        if int(item["league"]["id"]) in TRACKED_LEAGUE_IDS
+    ]
     api_matches = [
         {"id": int(item["fixture"]["id"]),
          "home_team": str(item["teams"]["home"]["name"]),
          "away_team": str(item["teams"]["away"]["name"])}
         for item in api_fixtures
     ]
+    target_fixtures = {
+        (match["home_team"], match["away_team"])
+        for match in api_matches
+    }
     if args.rows_json:
         with open(args.rows_json, encoding="utf-8") as handle:
             payload = json.load(handle)
@@ -709,7 +725,9 @@ def main() -> None:
             {"home_team": item.home_team, "away_team": item.away_team,
              "kickoff_text": item.kickoff_text, "event_id": item.event_id,
              "markets": item.snapshot()}
-            for item in collect_from_nesine_page(args.url, headless=not args.headed)
+            for item in collect_from_nesine_page(
+                args.url, headless=not args.headed, target_fixtures=target_fixtures
+            )
         ]
     quotes = parse_rendered_text_rows(payload)
     # Nesine is authoritative for which fixtures are offered today. API-Football
