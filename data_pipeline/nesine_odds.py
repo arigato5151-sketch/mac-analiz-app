@@ -31,6 +31,70 @@ _ODD = re.compile(r"^(?:[1-9]\d?)(?:[.,]\d{1,3})$")
 LOGGER = logging.getLogger(__name__)
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 
+# Names as displayed in Nesine's football bulletin. These names are used to
+# filter the Nesine fixture feed before we read detailed markets. Keep this
+# keyed by API-Football league id so only the app's configured competitions
+# are considered.
+NESINE_LEAGUE_NAMES: dict[int, tuple[str, ...]] = {
+    39: ("ingiltere premier lig", "ingiltere premier league", "premier league"),
+    140: ("ispanya la liga", "ispanya laliga", "la liga", "laliga"),
+    135: ("italya serie a", "serie a italya"),
+    78: ("almanya bundesliga", "almanya 1 bundesliga", "bundesliga almanya"),
+    61: ("fransa ligue 1", "ligue 1 fransa"),
+    2: ("uefa sampiyonlar ligi", "uefa champions league"),
+    3: ("uefa avrupa ligi", "uefa europa league"),
+    848: ("uefa konferans ligi", "uefa avrupa konferans ligi", "uefa europa conference league"),
+    203: ("turkiye super lig", "super lig"),
+    94: ("portekiz premier ligi", "portekiz 1 ligi", "portekiz ligi", "primeira liga"),
+    88: ("hollanda eredivisie", "eredivisie"),
+    144: ("belcika jupiler pro lig", "belcika jupiler league", "belcika 1 lig", "jupiler pro league"),
+    40: ("ingiltere championship", "championship"),
+    307: ("suudi arabistan pro ligi", "suudi arabistan pro league", "suudi pro lig", "saudi pro league"),
+    253: ("abd mls", "abd major league soccer", "amerika mls", "major league soccer"),
+    71: ("brezilya serie a", "serie a brezilya"),
+    262: ("meksika liga mx", "liga mx"),
+    179: ("iskocya premiership", "scottish premiership"),
+    218: ("avusturya bundesliga", "bundesliga avusturya"),
+    207: ("isvicre super league", "super league isvicre"),
+    136: ("italya serie b", "serie b italya"),
+    141: ("ispanya 2 ligi", "ispanya segunda division", "segunda division"),
+    62: ("fransa ligue 2", "ligue 2 fransa"),
+    197: ("yunanistan super league 1", "yunanistan super ligi", "super league 1"),
+    13: ("conmebol libertadores", "guney amerika libertadores", "libertadores"),
+    1: ("fifa dunya kupasi", "dunya kupasi", "fifa world cup"),
+    4: ("avrupa sampiyonasi", "euro championship"),
+    5: ("uefa uluslar ligi", "uefa nations league"),
+    6: ("afrika uluslar kupasi", "africa cup of nations"),
+    7: ("asya kupasi", "afc asian cup"),
+    9: ("copa america", "amerika kupasi"),
+    22: ("concacaf gold cup", "concacaf altin kupa"),
+}
+
+
+def _normalise_league_name(value: str) -> str:
+    value = unicodedata.normalize("NFKD", value.casefold().replace("ı", "i"))
+    value = "".join(char for char in value if not unicodedata.combining(char))
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", value).split())
+
+
+NESINE_TRACKED_LEAGUE_NAMES = {
+    _normalise_league_name(name)
+    for league_id in TRACKED_LEAGUE_IDS
+    for name in NESINE_LEAGUE_NAMES.get(league_id, ())
+}
+if set(TRACKED_LEAGUE_IDS) - NESINE_LEAGUE_NAMES.keys():
+    raise ValueError("Every app-tracked league needs a Nesine bulletin name mapping")
+NESINE_LEAGUE_IDS_BY_NAME: dict[str, set[int]] = {}
+for _league_id, _names in NESINE_LEAGUE_NAMES.items():
+    for _name in _names:
+        NESINE_LEAGUE_IDS_BY_NAME.setdefault(_normalise_league_name(_name), set()).add(_league_id)
+
+
+def _tracked_league_ids_for_nesine_name(value: str | None) -> set[int]:
+    if not value:
+        return set()
+    return NESINE_LEAGUE_IDS_BY_NAME.get(_normalise_league_name(value), set()) & set(TRACKED_LEAGUE_IDS)
+
 
 def istanbul_day_bounds(now: datetime | None = None) -> tuple[str, str]:
     """Return the current Istanbul calendar day's UTC bounds for fixture queries."""
@@ -161,6 +225,7 @@ class NesineMatchQuote:
     btts_no: str | None = None
     markets: tuple[dict[str, str], ...] = ()
     event_id: str | None = None
+    league_name: str | None = None
 
     def snapshot(self) -> dict[str, str | None]:
         return {"home_win": self.home_win, "draw": self.draw, "away_win": self.away_win,
@@ -219,7 +284,8 @@ def parse_rendered_text_rows(rows: Iterable[Mapping[str, Any]]) -> list[NesineMa
         )
         event_id = str(row.get("event_id") or "").strip() or None
         parsed.append(NesineMatchQuote(
-            home, away, row.get("kickoff_text"), *result, *totals, *btts, markets, event_id
+            home, away, row.get("kickoff_text"), *result, *totals, *btts, markets, event_id,
+            str(row.get("league_name") or "").strip() or None,
         ))
     return parsed
 
@@ -292,7 +358,15 @@ def match_quotes(quotes: Iterable[NesineMatchQuote], matches: Iterable[Mapping[s
     output: list[tuple[int, NesineMatchQuote, float]] = []
     match_list = list(matches)
     for quote in quotes:
-        candidates = sorted(((match_score(quote, match), int(match["id"]), match) for match in match_list), reverse=True)
+        quote_leagues = _tracked_league_ids_for_nesine_name(quote.league_name)
+        candidate_matches = match_list
+        if quote_leagues and any("league_id" in match for match in match_list):
+            candidate_matches = [
+                match for match in match_list
+                if int(match.get("league_id", -1)) in quote_leagues
+            ]
+        candidates = sorted(((match_score(quote, match), int(match["id"]), match)
+                             for match in candidate_matches), reverse=True)
         if not candidates or candidates[0][0] < threshold:
             continue
         if len(candidates) > 1 and candidates[0][0] - candidates[1][0] < .04:
@@ -325,12 +399,32 @@ def store_nesine_quotes(db: SupabaseRestClient, matched: Iterable[tuple[int, Nes
     return inserted
 
 
-def _extract_rows_from_page(page: Any, target_fixtures: set[tuple[str, str]] | None = None) -> list[dict[str, Any]]:
-    """Extract 1/X/2 prices from rendered Nesine event cards and table rows."""
-    rows = page.evaluate("""targetFixtures => {
+def _extract_rows_from_page(
+    page: Any,
+    target_fixtures: set[tuple[str, str]] | None = None,
+    target_league_names: set[str] | None = None,
+    previous_league_name: str = "",
+) -> tuple[list[dict[str, Any]], str]:
+    """Extract tracked league fixtures and visible 1/X/2 prices from Nesine."""
+    result = page.evaluate("""({targetFixtures, targetLeagueNames, previousLeagueName}) => {
       const odd = /^([1-9]\\d?)[.,]\\d{1,3}$/;
       const clean = value => (value || '').replace(/\\s+/g, ' ').trim();
       const targets = targetFixtures || [];
+      const targetLeagues = new Set(targetLeagueNames || []);
+      const normalizeLeague = value => value.normalize('NFKD').replace(/[\\u0300-\\u036f]/g, '')
+        .toLowerCase().replace(/ı/g, 'i').replace(/[^a-z0-9]+/g, ' ').trim().replace(/\\s+/g, ' ');
+      const leagueByEvent = new Map();
+      let currentLeague = previousLeagueName || '';
+      for (const group of document.querySelectorAll('[id^="OCRow_"]')) {
+        const groupHeader = [...group.children]
+          .map(child => child.querySelector('strong'))
+          .find(element => element && !element.closest('[data-test-id^="r_"]'));
+        if (groupHeader) currentLeague = clean(groupHeader.innerText);
+        const event = group.querySelector('[data-test-id^="r_"][data-code][data-test-is-live="false"]');
+        if (event) leagueByEvent.set(event, currentLeague);
+      }
+      const supportedLeague = row => !targetLeagues.size || targetLeagues.has(normalizeLeague(row.league_name || ''));
+      const finish = rows => ({rows, lastLeagueName: currentLeague});
       const normalizeTeam = value => value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
         .toLowerCase().replace(/\\butd\\b/g, '').replace(/\\brj\\b/g, '')
         .replace(/\\b(munchen)\\b/g, 'munich').replace(/[^a-z0-9]+/g, ' ')
@@ -358,14 +452,15 @@ def _extract_rows_from_page(page: Any, target_fixtures: set[tuple[str, str]] | N
           const selection = testId.slice('odd_Maç Sonucu_'.length);
           if (['1', 'X', '2'].includes(selection)) result[selection] = clean(item.innerText).replace(',', '.');
         }
-        if (!result['1'] || !result.X || !result['2']) return null;
         return {event_id: node.getAttribute('data-code'), home_team: teams[0], away_team: teams[1],
+          league_name: leagueByEvent.get(node) || '',
           kickoff_text: clean(node.querySelector('[data-testid^="time-"]')?.innerText),
           markets: {"1": result['1'], "X": result.X, "2": result['2']}};
       });
-      const targetedRows = codedRows.filter(matchesTarget);
-      if (targets.length) return targetedRows;
-      if (codedRows.length) return codedRows;
+      const targetedRows = codedRows.filter(row => supportedLeague(row) && matchesTarget(row));
+      if (targets.length) return finish(targetedRows);
+      if (targetLeagues.size) return finish(targetedRows);
+      if (codedRows.length) return finish(codedRows);
 
       // Current Nesine football fixtures are OCRow_* event cards identified
       // by id. Read only explicit 1/X/2 labels; positional buttons shift when
@@ -382,33 +477,40 @@ def _extract_rows_from_page(page: Any, target_fixtures: set[tuple[str, str]] | N
           const selection = testId.slice('odd_Maç Sonucu_'.length);
           if (['1', 'X', '2'].includes(selection)) result[selection] = clean(item.innerText).replace(',', '.');
         }
-        if (!['1', 'X', '2'].every(selection => result[selection])) return null;
+        const eventNode = node.querySelector('[data-test-id^="r_"][data-code]');
         return {event_id: node.getAttribute('data-code') || null, home_team: teams[0], away_team: teams[1],
+          league_name: (eventNode && leagueByEvent.get(eventNode)) || '',
           markets: {"1": result['1'], "X": result.X, "2": result['2']}};
       });
-      const targetedEventRows = eventRows.filter(matchesTarget);
-      if (targets.length) return targetedEventRows;
+      const targetedEventRows = eventRows.filter(row => supportedLeague(row) && matchesTarget(row));
+      if (targets.length) return finish(targetedEventRows);
+      if (targetLeagues.size) return finish(targetedEventRows);
       if (eventRows.length) {
         const seen = new Set();
-        return eventRows.filter(row => {
+        return finish(eventRows.filter(row => {
           const key = `${row.home_team.toLowerCase()}|${row.away_team.toLowerCase()}|${row.markets['1']}|${row.markets.X}|${row.markets['2']}`;
           if (seen.has(key)) return false;
           seen.add(key);
           return true;
-        });
+        }));
       }
 
       // Unknown layouts are skipped instead of guessing from text order.
-      return [];
-    }""", [
+      return finish([]);
+    }""", {
+      "targetFixtures": [
       {"home": _normalise(str(home)).split("|"), "away": _normalise(str(away)).split("|")}
       for home, away in (target_fixtures or set())
-    ])
-    return rows
+      ],
+      "targetLeagueNames": sorted(target_league_names or ()),
+      "previousLeagueName": previous_league_name,
+    })
+    return result["rows"], str(result.get("lastLeagueName") or previous_league_name)
 
 
 def _collect_all_rendered_rows(page: Any, *, max_scrolls: int = 80,
-                               target_fixtures: set[tuple[str, str]] | None = None) -> list[dict[str, Any]]:
+                               target_fixtures: set[tuple[str, str]] | None = None,
+                               target_league_names: set[str] | None = None) -> list[dict[str, Any]]:
     """Collect quotes while scrolling Nesine's virtualized event list."""
     # Nesine locks document scrolling while its welcome/help layer is mounted.
     # Removing the scroll lock affects only this temporary browser page and lets
@@ -418,14 +520,19 @@ def _collect_all_rendered_rows(page: Any, *, max_scrolls: int = 80,
       document.body.style.overflow = 'auto';
       document.documentElement.style.overflow = 'auto';
     }""")
-    rows_by_fixture: dict[tuple[str, str], dict[str, Any]] = {}
+    rows_by_fixture: dict[tuple[str, str, str], dict[str, Any]] = {}
     previous_state: tuple[int, int] | None = None
     stagnant_bottom_steps = 0
+    current_league_name = ""
     for _ in range(max_scrolls):
-        for row in _extract_rows_from_page(page, target_fixtures):
+        page_rows, current_league_name = _extract_rows_from_page(
+            page, target_fixtures, target_league_names, current_league_name
+        )
+        for row in page_rows:
             if not isinstance(row, Mapping):
                 continue
-            key = (_normalise(str(row.get("home_team", ""))),
+            key = (_normalise_league_name(str(row.get("league_name", ""))),
+                   _normalise(str(row.get("home_team", ""))),
                    _normalise(str(row.get("away_team", ""))))
             if all(key):
                 rows_by_fixture[key] = row
@@ -665,7 +772,8 @@ def _collect_detail_markets(page: Any, base_rows: list[dict[str, Any]]) -> list[
 
 
 def collect_from_nesine_page(url: str = DEFAULT_NESINE_URL, *, headless: bool = True,
-                             target_fixtures: set[tuple[str, str]] | None = None) -> list[NesineMatchQuote]:
+                             target_fixtures: set[tuple[str, str]] | None = None,
+                             target_league_names: set[str] | None = None) -> list[NesineMatchQuote]:
     """Open Nesine and return rendered, parseable quotes.
 
     Playwright is imported lazily so the rest of the pipeline remains usable in
@@ -684,7 +792,10 @@ def collect_from_nesine_page(url: str = DEFAULT_NESINE_URL, *, headless: bool = 
             # The page virtualizes its event list, so a single DOM read only
             # sees the first screenful. Scroll through the feed and aggregate
             # every fixture before parsing/storing its 1/X/2 market.
-            rows = _collect_all_rendered_rows(page, target_fixtures=target_fixtures)
+            rows = _collect_all_rendered_rows(
+                page, target_fixtures=target_fixtures,
+                target_league_names=target_league_names,
+            )
             return parse_rendered_text_rows(rows)
         finally:
             browser.close()
@@ -701,6 +812,23 @@ def main() -> None:
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     local_today = datetime.now(ISTANBUL).date()
     api = ApiFootballClient(settings.api_football_key)
+    # Read the Nesine bulletin first. Its league headings limit browser-side
+    # extraction to competitions configured in this app; API-Football is used
+    # afterwards only to attach stable fixture IDs and the app's match data.
+    if args.rows_json:
+        with open(args.rows_json, encoding="utf-8") as handle:
+            payload = json.load(handle)
+    else:
+        payload = [
+            {"home_team": item.home_team, "away_team": item.away_team,
+             "kickoff_text": item.kickoff_text, "event_id": item.event_id,
+             "league_name": item.league_name, "markets": item.snapshot()}
+            for item in collect_from_nesine_page(
+                args.url, headless=not args.headed,
+                target_league_names=NESINE_TRACKED_LEAGUE_NAMES,
+            )
+        ]
+    quotes = parse_rendered_text_rows(payload)
     api_fixtures = [
         item for item in api.get(
             "fixtures", {"date": local_today.isoformat(), "timezone": "Europe/Istanbul"}
@@ -709,27 +837,11 @@ def main() -> None:
     ]
     api_matches = [
         {"id": int(item["fixture"]["id"]),
+         "league_id": int(item["league"]["id"]),
          "home_team": str(item["teams"]["home"]["name"]),
          "away_team": str(item["teams"]["away"]["name"])}
         for item in api_fixtures
     ]
-    target_fixtures = {
-        (match["home_team"], match["away_team"])
-        for match in api_matches
-    }
-    if args.rows_json:
-        with open(args.rows_json, encoding="utf-8") as handle:
-            payload = json.load(handle)
-    else:
-        payload = [
-            {"home_team": item.home_team, "away_team": item.away_team,
-             "kickoff_text": item.kickoff_text, "event_id": item.event_id,
-             "markets": item.snapshot()}
-            for item in collect_from_nesine_page(
-                args.url, headless=not args.headed, target_fixtures=target_fixtures
-            )
-        ]
-    quotes = parse_rendered_text_rows(payload)
     # Nesine is authoritative for which fixtures are offered today. API-Football
     # supplies stable fixture/team/league IDs and the match data used by the app.
     matched = match_quotes(quotes, api_matches, args.threshold)
@@ -774,7 +886,8 @@ def main() -> None:
         })
         if len(unmatched_samples) == 5:
             break
-    report = {"nesine_rows": len(quotes), "api_football_daily_fixtures": len(api_fixtures),
+    report = {"nesine_tracked_league_fixtures": len(quotes),
+              "api_football_daily_fixtures": len(api_fixtures),
               "matched": len(matched), "fixtures_synced": len(selected_fixtures), "stored": stored,
               "market_selections": market_count, "unmatched_samples": unmatched_samples}
     print(json.dumps(report, ensure_ascii=False))
