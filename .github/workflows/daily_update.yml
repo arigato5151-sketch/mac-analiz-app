@@ -52,9 +52,24 @@ jobs:
           cache: pip
       - run: python -m pip install --disable-pip-version-check -r requirements.txt
         id: deps
+      - name: Install Nesine browser collector
+        id: nesine_deps
+        run: python -m pip install --disable-pip-version-check playwright
+      - name: Cache Chromium
+        id: nesine_cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-chromium-v1
+      - name: Install Chromium
+        id: nesine_browser
+        run: python -m playwright install chromium
       - name: Verify production migration ledger
         id: migrations
         run: python -m db.migrations --verify-production | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Collect today's Nesine fixtures and odds
+        id: nesine
+        run: python -m data_pipeline.nesine_odds | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Sync next fourteen days
         id: fixtures
         run: python -m data_pipeline.fetch_fixtures --days 14
@@ -136,7 +151,10 @@ jobs:
             ${{ steps.checkout.outcome == 'failure' && 'Checkout; ' || '' }}
             ${{ steps.python.outcome == 'failure' && 'Python kurulumu; ' || '' }}
             ${{ steps.deps.outcome == 'failure' && 'Bağımlılıklar; ' || '' }}
+            ${{ steps.nesine_deps.outcome == 'failure' && 'Nesine tarayıcı bağımlılıkları; ' || '' }}
+            ${{ steps.nesine_browser.outcome == 'failure' && 'Nesine Chromium kurulumu; ' || '' }}
             ${{ steps.migrations.outcome == 'failure' && 'Migration doğrulama; ' || '' }}
+            ${{ steps.nesine.outcome == 'failure' && 'Nesine fikstür/oran çekimi; ' || '' }}
             ${{ steps.fixtures.outcome == 'failure' && 'Fikstür senkronu; ' || '' }}
             ${{ steps.odds.outcome == 'failure' && 'Oran senkronu; ' || '' }}
             ${{ steps.context.outcome == 'failure' && 'Takım bağlamı; ' || '' }}

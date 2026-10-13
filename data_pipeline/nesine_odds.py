@@ -104,6 +104,26 @@ def istanbul_day_bounds(now: datetime | None = None) -> tuple[str, str]:
     return start.astimezone(timezone.utc).isoformat(), end.astimezone(timezone.utc).isoformat()
 
 
+def _is_nesine_today_label(value: Any, today: Any = None) -> bool:
+    """Accept only the bulletin section explicitly labeled for Istanbul today."""
+    label = unicodedata.normalize("NFKD", str(value or "").strip().casefold().replace("ı", "i"))
+    label = "".join(char for char in label if not unicodedata.combining(char))
+    if label == "bugun":
+        return True
+    match = re.fullmatch(r"(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?", label)
+    if not match:
+        return False
+    day, month, year = match.groups()
+    current = today or datetime.now(ISTANBUL).date()
+    parsed_year = int(year) if year else current.year
+    if parsed_year < 100:
+        parsed_year += 2000
+    try:
+        return current == current.replace(year=parsed_year, month=int(month), day=int(day))
+    except ValueError:
+        return False
+
+
 def _normalise(value: str) -> str:
     # Turkish dotless ı does not decompose under NFKD and was being dropped,
     # turning names such as "Iğdır" into a different string.
@@ -404,9 +424,10 @@ def _extract_rows_from_page(
     target_fixtures: set[tuple[str, str]] | None = None,
     target_league_names: set[str] | None = None,
     previous_league_name: str = "",
-) -> tuple[list[dict[str, Any]], str]:
+    previous_day_label: str = "",
+) -> tuple[list[dict[str, Any]], str, str]:
     """Extract tracked league fixtures and visible 1/X/2 prices from Nesine."""
-    result = page.evaluate("""({targetFixtures, targetLeagueNames, previousLeagueName}) => {
+    result = page.evaluate("""({targetFixtures, targetLeagueNames, previousLeagueName, previousDayLabel}) => {
       const odd = /^([1-9]\\d?)[.,]\\d{1,3}$/;
       const clean = value => (value || '').replace(/\\s+/g, ' ').trim();
       const targets = targetFixtures || [];
@@ -414,17 +435,29 @@ def _extract_rows_from_page(
       const normalizeLeague = value => value.normalize('NFKD').replace(/[\\u0300-\\u036f]/g, '')
         .toLowerCase().replace(/ı/g, 'i').replace(/[^a-z0-9]+/g, ' ').trim().replace(/\\s+/g, ' ');
       const leagueByEvent = new Map();
+      const dayByEvent = new Map();
       let currentLeague = previousLeagueName || '';
+      let currentDay = previousDayLabel || '';
       for (const group of document.querySelectorAll('[id^="OCRow_"]')) {
+        const lines = group.innerText.split(/\\n/).map(clean);
         const groupHeader = [...group.children]
           .map(child => child.querySelector('strong'))
           .find(element => element && !element.closest('[data-test-id^="r_"]'));
-        if (groupHeader) currentLeague = clean(groupHeader.innerText);
+        if (groupHeader) {
+          currentLeague = clean(groupHeader.innerText);
+          const headingIndex = lines.indexOf(currentLeague);
+          const sectionLines = headingIndex >= 0 ? lines.slice(headingIndex + 1, headingIndex + 4) : [];
+          const dayLabel = sectionLines.find(line => /^(bug[uü]n|yar[iı]n|\\d{1,2}[./-]\\d{1,2}(?:[./-]\\d{2,4})?)$/i.test(line));
+          if (dayLabel) currentDay = dayLabel;
+        }
         const event = group.querySelector('[data-test-id^="r_"][data-code][data-test-is-live="false"]');
-        if (event) leagueByEvent.set(event, currentLeague);
+        if (event) {
+          leagueByEvent.set(event, currentLeague);
+          dayByEvent.set(event, currentDay);
+        }
       }
       const supportedLeague = row => Boolean(row) && (!targetLeagues.size || targetLeagues.has(normalizeLeague(row.league_name || '')));
-      const finish = rows => ({rows, lastLeagueName: currentLeague});
+      const finish = rows => ({rows, lastLeagueName: currentLeague, lastDayLabel: currentDay});
       const normalizeTeam = value => value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
         .toLowerCase().replace(/\\butd\\b/g, '').replace(/\\brj\\b/g, '')
         .replace(/\\b(munchen)\\b/g, 'munich').replace(/[^a-z0-9]+/g, ' ')
@@ -454,6 +487,7 @@ def _extract_rows_from_page(
         }
         return {event_id: node.getAttribute('data-code'), home_team: teams[0], away_team: teams[1],
           league_name: leagueByEvent.get(node) || '',
+          day_label: dayByEvent.get(node) || '',
           kickoff_text: clean(node.querySelector('[data-testid^="time-"]')?.innerText),
           markets: {"1": result['1'], "X": result.X, "2": result['2']}};
       });
@@ -480,6 +514,7 @@ def _extract_rows_from_page(
         const eventNode = node.querySelector('[data-test-id^="r_"][data-code]');
         return {event_id: node.getAttribute('data-code') || null, home_team: teams[0], away_team: teams[1],
           league_name: (eventNode && leagueByEvent.get(eventNode)) || '',
+          day_label: (eventNode && dayByEvent.get(eventNode)) || '',
           markets: {"1": result['1'], "X": result.X, "2": result['2']}};
       });
       const targetedEventRows = eventRows.filter(row => supportedLeague(row) && matchesTarget(row));
@@ -504,8 +539,10 @@ def _extract_rows_from_page(
       ],
       "targetLeagueNames": sorted(target_league_names or ()),
       "previousLeagueName": previous_league_name,
+      "previousDayLabel": previous_day_label,
     })
-    return result["rows"], str(result.get("lastLeagueName") or previous_league_name)
+    return (result["rows"], str(result.get("lastLeagueName") or previous_league_name),
+            str(result.get("lastDayLabel") or previous_day_label))
 
 
 def _collect_all_rendered_rows(page: Any, *, max_scrolls: int = 80,
@@ -524,9 +561,10 @@ def _collect_all_rendered_rows(page: Any, *, max_scrolls: int = 80,
     previous_state: tuple[int, int] | None = None
     stagnant_bottom_steps = 0
     current_league_name = ""
+    current_day_label = ""
     for _ in range(max_scrolls):
-        page_rows, current_league_name = _extract_rows_from_page(
-            page, target_fixtures, target_league_names, current_league_name
+        page_rows, current_league_name, current_day_label = _extract_rows_from_page(
+            page, target_fixtures, target_league_names, current_league_name, current_day_label
         )
         for row in page_rows:
             if not isinstance(row, Mapping):
@@ -796,7 +834,8 @@ def collect_from_nesine_page(url: str = DEFAULT_NESINE_URL, *, headless: bool = 
                 page, target_fixtures=target_fixtures,
                 target_league_names=target_league_names,
             )
-            return parse_rendered_text_rows(rows)
+            today_rows = [row for row in rows if _is_nesine_today_label(row.get("day_label"))]
+            return parse_rendered_text_rows(today_rows)
         finally:
             browser.close()
 
@@ -829,6 +868,15 @@ def main() -> None:
             )
         ]
     quotes = parse_rendered_text_rows(payload)
+    # Complete Nesine's fixture/odds phase before querying API-Football.
+    # The bulletin's first pass already contains the common result markets;
+    # this pass loads the selected detailed markets for every today's fixture.
+    detailed = {}
+    if not args.rows_json:
+        event_ids = [quote.event_id for quote in quotes if quote.event_id]
+        detailed = collect_requested_markets_from_nesine(args.url, event_ids)
+        quotes = [replace(quote, markets=detailed.get(quote.event_id or "", quote.all_markets()))
+                  for quote in quotes]
     api_fixtures = [
         item for item in api.get(
             "fixtures", {"date": local_today.isoformat(), "timezone": "Europe/Istanbul"}
@@ -864,13 +912,6 @@ def main() -> None:
         db.upsert("leagues", list(leagues.values()), on_conflict="id")
         db.upsert("teams", teams, on_conflict="id")
         db.upsert("matches", matches, on_conflict="id")
-    if not args.rows_json:
-        event_ids = [quote.event_id for _match_id, quote, _score in matched if quote.event_id]
-        detailed = collect_requested_markets_from_nesine(args.url, event_ids)
-        matched = [
-            (match_id, replace(quote, markets=detailed.get(quote.event_id or "", quote.all_markets())), score)
-            for match_id, quote, score in matched
-        ]
     stored = store_nesine_quotes(db, matched)
     market_count = sum(len(quote.all_markets()) for _match_id, quote, _score in matched)
     matched_quotes = {id(quote) for _match_id, quote, _score in matched}

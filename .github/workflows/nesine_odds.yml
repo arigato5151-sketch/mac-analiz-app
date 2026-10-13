@@ -1,10 +1,10 @@
 name: Nesine daily odds collection
 
 on:
-  # Retry throughout the Turkish football day so late-published markets are collected.
-  # UTC+3: 06:17, 08:17, ... 22:17 Istanbul time.
+  # Daily update collects Nesine fixtures/odds first at 06:17 Istanbul time.
+  # Retry later for prices published during the day: 08:17, 10:17, ... 22:17.
   schedule:
-    - cron: "17 3-19/2 * * *"
+    - cron: "17 5-19/2 * * *"
   workflow_dispatch:
 
 concurrency:
