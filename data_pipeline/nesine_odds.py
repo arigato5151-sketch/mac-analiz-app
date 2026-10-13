@@ -19,7 +19,7 @@ from difflib import SequenceMatcher
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from config.settings import get_settings
+from config.settings import get_supabase_admin_settings
 from db.db_client import SupabaseRestClient
 
 NESINE_BOOKMAKER = "Nesine"
@@ -688,7 +688,7 @@ def main() -> None:
     parser.add_argument("--headed", action="store_true", help="Show Chromium while collecting")
     parser.add_argument("--threshold", type=float, default=.82)
     args = parser.parse_args()
-    settings = get_settings()
+    settings = get_supabase_admin_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     start, end = istanbul_day_bounds()
     raw_matches = db.select_all("matches", columns="id,home_team_id,away_team_id,match_date",
