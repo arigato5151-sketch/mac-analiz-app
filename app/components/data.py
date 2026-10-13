@@ -6,6 +6,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -91,6 +92,40 @@ def load_upcoming_dashboard(
         },
         order="match_date.asc,id.asc",
     )
+    if not matches:
+        return pd.DataFrame({"latest_prediction_at": [latest_prediction]})
+
+    # Today's fixture list follows Nesine's actual bulletin. Historical and
+    # future dates continue to use the API-Football schedule as before.
+    istanbul = ZoneInfo("Europe/Istanbul")
+    today = datetime.now(istanbul).date()
+    day_start = datetime.combine(today, datetime.min.time(), tzinfo=istanbul)
+    day_end = day_start + timedelta(days=1)
+    odds_filters = {
+        "and": (
+            f"(captured_at.gte.{day_start.astimezone(timezone.utc).isoformat()}"
+            f",captured_at.lte.{day_end.astimezone(timezone.utc).isoformat()})"
+        )
+    }
+    result_quotes = db.select_all(
+        "odds_quote_history",
+        columns="match_id",
+        filters={"bookmaker": "eq.Nesine", **odds_filters},
+    )
+    market_quotes = db.select_all(
+        "nesine_market_quotes",
+        columns="match_id",
+        filters=odds_filters,
+    )
+    nesine_today_ids = {
+        int(row["match_id"]) for row in [*result_quotes, *market_quotes]
+        if row.get("match_id") is not None
+    }
+    matches = [
+        match for match in matches
+        if datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
+        .astimezone(istanbul).date() != today or int(match["id"]) in nesine_today_ids
+    ]
     if not matches:
         return pd.DataFrame({"latest_prediction_at": [latest_prediction]})
 

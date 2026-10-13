@@ -19,7 +19,9 @@ from difflib import SequenceMatcher
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from config.settings import get_supabase_admin_settings
+from config.settings import get_settings
+from data_pipeline.api_client import ApiFootballClient
+from data_pipeline.fetch_fixtures import transform_fixtures
 from db.db_client import SupabaseRestClient
 
 NESINE_BOOKMAKER = "Nesine"
@@ -688,39 +690,50 @@ def main() -> None:
     parser.add_argument("--headed", action="store_true", help="Show Chromium while collecting")
     parser.add_argument("--threshold", type=float, default=.82)
     args = parser.parse_args()
-    settings = get_supabase_admin_settings()
+    settings = get_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
-    start, end = istanbul_day_bounds()
-    raw_matches = db.select_all("matches", columns="id,home_team_id,away_team_id,match_date",
-                                filters={
-                                    "status": "eq.scheduled",
-                                    "and": f"(match_date.gte.{start},match_date.lt.{end})",
-                                },
-                                order="match_date.asc")
-    teams = {int(row["id"]): str(row["name"]) for row in db.select_all("teams", columns="id,name")}
-    matches = [{**row, "home_team": teams.get(int(row["home_team_id"]), ""),
-                "away_team": teams.get(int(row["away_team_id"]), "")} for row in raw_matches]
-    if not matches:
-        print(json.dumps({"app_fixtures": 0, "rows": 0, "matched": 0, "stored": 0,
-                          "market_selections": 0, "message": "Bugün oynanacak maç yok."}, ensure_ascii=False))
-        return
+    local_today = datetime.now(ISTANBUL).date()
+    api = ApiFootballClient(settings.api_football_key)
+    api_fixtures = api.get("fixtures", {"date": local_today.isoformat(), "timezone": "Europe/Istanbul"})
+    api_matches = [
+        {"id": int(item["fixture"]["id"]),
+         "home_team": str(item["teams"]["home"]["name"]),
+         "away_team": str(item["teams"]["away"]["name"])}
+        for item in api_fixtures
+    ]
     if args.rows_json:
         with open(args.rows_json, encoding="utf-8") as handle:
             payload = json.load(handle)
     else:
-        target_fixtures = {
-            (_normalise(str(match["home_team"])), _normalise(str(match["away_team"])))
-            for match in matches if match["home_team"] and match["away_team"]
-        }
         payload = [
             {"home_team": item.home_team, "away_team": item.away_team,
              "kickoff_text": item.kickoff_text, "event_id": item.event_id,
              "markets": item.snapshot()}
-            for item in collect_from_nesine_page(args.url, headless=not args.headed,
-                                                 target_fixtures=target_fixtures)
+            for item in collect_from_nesine_page(args.url, headless=not args.headed)
         ]
     quotes = parse_rendered_text_rows(payload)
-    matched = match_quotes(quotes, matches, args.threshold)
+    # Nesine is authoritative for which fixtures are offered today. API-Football
+    # supplies stable fixture/team/league IDs and the match data used by the app.
+    matched = match_quotes(quotes, api_matches, args.threshold)
+    selected_ids = {match_id for match_id, _quote, _score in matched}
+    selected_fixtures = [
+        item for item in api_fixtures if int(item["fixture"]["id"]) in selected_ids
+    ]
+    if selected_fixtures:
+        leagues = {
+            int(item["league"]["id"]): {
+                "id": int(item["league"]["id"]),
+                "name": str(item["league"]["name"]),
+                "country": str(item["league"].get("country") or ""),
+                "season": int(item["league"]["season"]),
+                "is_active": True,
+            }
+            for item in selected_fixtures
+        }
+        teams, matches = transform_fixtures(selected_fixtures)
+        db.upsert("leagues", list(leagues.values()), on_conflict="id")
+        db.upsert("teams", teams, on_conflict="id")
+        db.upsert("matches", matches, on_conflict="id")
     if not args.rows_json:
         event_ids = [quote.event_id for _match_id, quote, _score in matched if quote.event_id]
         detailed = collect_requested_markets_from_nesine(args.url, event_ids)
@@ -733,7 +746,7 @@ def main() -> None:
     matched_quotes = {id(quote) for _match_id, quote, _score in matched}
     unmatched_samples = []
     for quote in (quote for quote in quotes if id(quote) not in matched_quotes):
-        candidates = sorted(((match_score(quote, match), match) for match in matches),
+        candidates = sorted(((match_score(quote, match), match) for match in api_matches),
                             key=lambda item: item[0], reverse=True)
         best = candidates[0] if candidates else None
         unmatched_samples.append({
@@ -743,7 +756,8 @@ def main() -> None:
         })
         if len(unmatched_samples) == 5:
             break
-    report = {"app_fixtures": len(matches), "rows": len(payload), "matched": len(matched), "stored": stored,
+    report = {"nesine_rows": len(quotes), "api_football_daily_fixtures": len(api_fixtures),
+              "matched": len(matched), "fixtures_synced": len(selected_fixtures), "stored": stored,
               "market_selections": market_count, "unmatched_samples": unmatched_samples}
     print(json.dumps(report, ensure_ascii=False))
     if not quotes:
@@ -753,8 +767,8 @@ def main() -> None:
         )
     if not matched:
         raise SystemExit(
-            f"Nesine collector extracted {len(quotes)} fixtures but none matched the {len(matches)} "
-            "scheduled app fixtures; see unmatched_samples"
+            f"Nesine collector extracted {len(quotes)} fixtures but none matched the "
+            f"{len(api_matches)} API-Football fixtures for {local_today}; see unmatched_samples"
         )
     if not stored:
         raise SystemExit("Nesine collector matched fixtures but stored zero quotes")
