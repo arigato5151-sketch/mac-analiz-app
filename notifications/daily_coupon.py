@@ -264,10 +264,12 @@ def run_daily_coupon() -> dict[str, int | str]:
     if not any(groups.values()):
         return {"matches": len(rows), "sent": 0, "skipped": "no_eligible_coupon"}
     coupon_date = now.astimezone(TZ).date().isoformat()
+    # An earlier run with no current Nesine quotes creates no coupon run. Once
+    # quotes arrive later today, allow the first eligible coupon to be sent.
     existing = db.select_all(
         "daily_coupon_runs",
         columns="id",
-        filters={"coupon_date": f"eq.{coupon_date}"},
+        filters={"coupon_date": f"eq.{coupon_date}", "coupon_type": "in.(low_risk,balanced,high_odds)"},
     )
     if existing:
         return {"matches": len(rows), "sent": 0, "skipped": "already_sent_today"}

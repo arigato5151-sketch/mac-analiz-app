@@ -48,7 +48,7 @@ jobs:
         continue-on-error: true
         run: python -m notifications.daily_coupon | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Alert failed Nesine coupon delivery
-        if: steps.nesine_coupon.outcome == 'failure'
+        if: steps.nesine_coupon.outcome == 'failure' && !contains(steps.nesine_coupon.outcome, 'skipped')
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
