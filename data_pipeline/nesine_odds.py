@@ -423,7 +423,7 @@ def _extract_rows_from_page(
         const event = group.querySelector('[data-test-id^="r_"][data-code][data-test-is-live="false"]');
         if (event) leagueByEvent.set(event, currentLeague);
       }
-      const supportedLeague = row => !targetLeagues.size || targetLeagues.has(normalizeLeague(row.league_name || ''));
+      const supportedLeague = row => Boolean(row) && (!targetLeagues.size || targetLeagues.has(normalizeLeague(row.league_name || '')));
       const finish = rows => ({rows, lastLeagueName: currentLeague});
       const normalizeTeam = value => value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
         .toLowerCase().replace(/\\butd\\b/g, '').replace(/\\brj\\b/g, '')
