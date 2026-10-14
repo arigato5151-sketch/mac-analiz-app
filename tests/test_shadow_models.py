@@ -41,6 +41,40 @@ def test_recovery_candidate_uses_its_own_verified_manifest(tmp_path, monkeypatch
     assert requests[-1] == f"recovery/{version}/artifact_manifest.json"
 
 
+def test_remote_candidate_manifest_does_not_replace_local_training_manifest(tmp_path, monkeypatch):
+    monkeypatch.setattr(shadow, "PROJECT_ROOT", tmp_path)
+    model_dir = tmp_path / "models" / "saved_models"
+    model_dir.mkdir(parents=True)
+    local_version = "model_v20261014T072031Z"
+    local_model = model_dir / f"{local_version}.joblib"
+    joblib.dump({"model_version": local_version}, local_model)
+    local_manifest = model_dir / "artifact_manifest.json"
+    local_manifest.write_text(
+        json.dumps(build_artifact_manifest(model_dir)), encoding="utf-8"
+    )
+    before = local_manifest.read_text(encoding="utf-8")
+    remote_version = "model_v20261001T082640Z"
+
+    def fake_download(name, *, dest_dir):
+        target = dest_dir / name.rsplit("/", 1)[-1]
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        if target.suffix == ".joblib":
+            joblib.dump({"model_version": remote_version}, target)
+        else:
+            target.write_text(
+                json.dumps(build_artifact_manifest(dest_dir)), encoding="utf-8"
+            )
+        return target
+
+    monkeypatch.setattr(shadow, "download_model", fake_download)
+
+    cached_path = shadow.candidate_path(remote_version)
+
+    assert cached_path.parent == model_dir / "candidates" / remote_version
+    assert local_manifest.read_text(encoding="utf-8") == before
+    shadow.load_verified_joblib(local_model)
+
+
 def test_explicit_registration_rejects_mismatched_version(tmp_path):
     path = tmp_path / "model_v20261001T082640Z.joblib"
     joblib.dump({"model_version": "other"}, path)

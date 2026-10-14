@@ -50,9 +50,13 @@ def candidate_path(model_version: str) -> Path:
         load_verified_joblib(path)
         return path
     # Normal weekly candidates share the production bundle manifest.
+    # Keep downloaded older candidates isolated: replacing the working
+    # production manifest here can make a newly trained local model appear
+    # untrusted when the next candidate is loaded in this same process.
+    cache_dir = path.parent / "candidates" / model_version
     try:
-        result = download_model(f"{model_version}.joblib", dest_dir=path.parent)
-        download_model("artifact_manifest.json", dest_dir=path.parent)
+        result = download_model(f"{model_version}.joblib", dest_dir=cache_dir)
+        download_model("artifact_manifest.json", dest_dir=cache_dir)
         load_verified_joblib(result)
         return result
     except ArtifactStoreError:
