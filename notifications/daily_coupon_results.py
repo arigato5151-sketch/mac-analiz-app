@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from config.settings import get_settings
 from db.db_client import SupabaseRestClient
+from models.coupon_settlement import settle_coupon_selection
 from notifications.telegram import send_telegram_message
 
 
@@ -23,20 +24,42 @@ def settle_daily_coupons() -> dict[str, int]:
         ids = ",".join(str(int(item["match_id"])) for item in selections)
         if not ids:
             continue
-        matches = db.select_all("matches", columns="id,status,home_score,away_score", filters={"id": f"in.({ids})"})
+        matches = db.select_all(
+            "matches",
+            columns="id,status,home_score,away_score,home_corners,away_corners",
+            filters={"id": f"in.({ids})"},
+        )
         matches_checked += len(matches)
         if len(matches) != len(selections) or any(row.get("status") != "finished" or row.get("home_score") is None or row.get("away_score") is None for row in matches):
             continue
         by_id = {int(row["id"]): row for row in matches}
-        outcomes: list[str] = []
+        settled_selections: list[tuple[dict, dict, bool]] = []
+        unresolved = False
         won = True
         for item in selections:
             match = by_id[int(item["match_id"])]
             home, away = int(match["home_score"]), int(match["away_score"])
-            key = item["key"]
-            hit = ((key == "home_win" and home > away) or (key == "draw" and home == away) or (key == "away_win" and away > home) or (key == "over_2_5" and home + away >= 3) or (key == "btts_yes" and home > 0 and away > 0))
+            hit = settle_coupon_selection(
+                str(item["key"]),
+                home_score=home,
+                away_score=away,
+                home_corners=match.get("home_corners"),
+                away_corners=match.get("away_corners"),
+            )
+            if hit is None:
+                unresolved = True
+                continue
             won = won and hit
-            outcomes.append(f"{'✅' if hit else '❌'} {item.get('label', key)} ({home}-{away})")
+            settled_selections.append((item, match, hit))
+        # Never record an unsupported market as a loss. Leave the coupon
+        # pending until its required result statistics are available.
+        if unresolved:
+            continue
+        outcomes = [
+            f"{'✅' if hit else '❌'} {item.get('label', item['key'])} "
+            f"({match['home_score']}-{match['away_score']})"
+            for item, match, hit in settled_selections
+        ]
         status = "won" if won else "lost"
         now = datetime.now(timezone.utc).isoformat()
         db.update("daily_coupon_runs", {"status": status, "settled_at": now}, filters={"id": f"eq.{coupon['id']}"})

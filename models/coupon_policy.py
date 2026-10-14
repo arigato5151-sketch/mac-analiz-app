@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from models.value_analysis import MAX_PUBLISHABLE_EXPECTED_VALUE
@@ -22,6 +23,32 @@ MARKET_MIN_PROBABILITY = {
     "btts_yes": 0.55,
     "btts_no": 0.55,
 }
+
+
+def coupon_market_is_settleable(key: str) -> bool:
+    """Only include markets whose outcome can be checked from stored match stats."""
+    score_based_markets = {
+        "double_chance_1x",
+        "double_chance_x2",
+        "double_chance_12",
+        "btts_yes",
+        "btts_no",
+    }
+    if key in RESULT_KEYS | score_based_markets:
+        return True
+    if re.fullmatch(r"(?:over|under)_\d+_\d", key):
+        return True
+    if re.fullmatch(r"(?:home|away)_(?:over|under)_\d+_\d", key):
+        return True
+    if re.fullmatch(r"(?:home_win|draw|away_win)_(?:over|under)_\d+_\d", key):
+        return True
+    if re.fullmatch(r"(?:home_win|draw|away_win)_btts_(?:yes|no)", key):
+        return True
+    if re.fullmatch(r"corners_(?:over|under)_\d+_\d", key):
+        return True
+    # Half-time and other stat markets need fields the results table does not
+    # currently persist, so they must not enter coupons that cannot be settled.
+    return False
 
 
 def _market_family(key: str) -> str:
@@ -58,7 +85,8 @@ def diversified_coupon_rows(
                 continue
             market_floor = MARKET_MIN_PROBABILITY.get(str(assessment.key), MIN_COUPON_PROBABILITY)
             if (
-                probability < max(min_probability, market_floor)
+                not coupon_market_is_settleable(str(assessment.key))
+                or probability < max(min_probability, market_floor)
                 or odds > MAX_PUBLISHABLE_ODDS
                 or expected_value < min_ev
                 or expected_value > MAX_PUBLISHABLE_EXPECTED_VALUE

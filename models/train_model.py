@@ -40,10 +40,10 @@ from models.artifact_store import (
     load_verified_joblib,
 )
 from models.calibration import (
-    apply_binary_temperature,
+    apply_binary_logit_bias,
     apply_multiclass_temperature,
     expected_calibration_error,
-    guarded_binary_temperature,
+    guarded_binary_logit_bias,
     guarded_multiclass_temperature,
     multiclass_brier_score,
 )
@@ -592,7 +592,7 @@ def train_models(
     result_temperature = guarded_multiclass_temperature(
         y_result[calibration_slice], calibration_result_probabilities
     )
-    over_temperature = guarded_binary_temperature(
+    over_logit_bias = guarded_binary_logit_bias(
         y_over[calibration_slice],
         binary_blend(
             over_model,
@@ -601,7 +601,7 @@ def train_models(
             over_blend_weight,
         ),
     )
-    btts_temperature = guarded_binary_temperature(
+    btts_logit_bias = guarded_binary_logit_bias(
         y_btts[calibration_slice],
         binary_blend(
             btts_model,
@@ -634,17 +634,17 @@ def train_models(
             f"prior baseline {baseline_loss:.4f}"
         )
 
-    over_probabilities = apply_binary_temperature(
+    over_probabilities = apply_binary_logit_bias(
         binary_blend(
             over_model, x_test, "market_implied_over_2_5", over_blend_weight
         ),
-        over_temperature,
+        over_logit_bias,
     )
-    btts_probabilities = apply_binary_temperature(
+    btts_probabilities = apply_binary_logit_bias(
         binary_blend(
             btts_model, x_test, "market_implied_btts", btts_blend_weight
         ),
-        btts_temperature,
+        btts_logit_bias,
     )
     test_dates = labels.iloc[test_slice]["match_date"]
     metrics = EvaluationMetrics(
@@ -754,10 +754,12 @@ test_start=test_dates.iloc[0].isoformat(),
             "btts": btts_shap_status,
         },
         "calibration": {
-            "method": "guarded_chronological_temperature_scaling",
+            "method": "guarded_chronological_logit_bias",
             "result_temperature": result_temperature,
-            "over_2_5_temperature": over_temperature,
-            "btts_temperature": btts_temperature,
+            "over_2_5_temperature": 1.0,
+            "btts_temperature": 1.0,
+            "over_2_5_logit_bias": over_logit_bias,
+            "btts_logit_bias": btts_logit_bias,
             "training_half_life_days": 365.0,
         },
         "model_selection": {

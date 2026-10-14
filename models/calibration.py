@@ -94,6 +94,15 @@ def apply_binary_temperature(
     return 1.0 / (1.0 + np.exp(-logits))
 
 
+def apply_binary_logit_bias(
+    probabilities: np.ndarray, bias: float
+) -> np.ndarray:
+    """Shift binary probabilities to correct systematic under/overprediction."""
+    values = np.clip(np.asarray(probabilities, dtype=float), EPSILON, 1.0 - EPSILON)
+    logits = np.log(values / (1.0 - values)) + float(bias)
+    return 1.0 / (1.0 + np.exp(-logits))
+
+
 def fit_multiclass_temperature(
     y_true: np.ndarray, probabilities: np.ndarray
 ) -> float:
@@ -131,6 +140,25 @@ def fit_binary_temperature(
         options={"xatol": 1e-4},
     )
     return float(result.x) if result.success else 1.0
+
+
+def fit_binary_logit_bias(y_true: np.ndarray, probabilities: np.ndarray) -> float:
+    """Fit an intercept-only logistic correction on chronological calibration data."""
+    labels = np.asarray(y_true, dtype=int)
+    values = np.asarray(probabilities, dtype=float)
+    if len(labels) != len(values) or len(labels) < 50:
+        raise ValueError("At least 50 aligned calibration rows are required")
+    result = minimize_scalar(
+        lambda bias: log_loss(
+            labels,
+            apply_binary_logit_bias(values, float(bias)),
+            labels=[0, 1],
+        ),
+        bounds=(-2.5, 2.5),
+        method="bounded",
+        options={"xatol": 1e-4},
+    )
+    return float(result.x) if result.success else 0.0
 
 
 def guarded_multiclass_temperature(
@@ -187,6 +215,34 @@ def guarded_binary_temperature(
     ):
         return 1.0
     return fit_binary_temperature(labels, values)
+
+
+def guarded_binary_logit_bias(
+    y_true: np.ndarray,
+    probabilities: np.ndarray,
+    *,
+    minimum_improvement: float = 1e-4,
+) -> float:
+    """Apply a bias only when a later chronological guard set confirms gains."""
+    labels = np.asarray(y_true, dtype=int)
+    values = np.asarray(probabilities, dtype=float)
+    if len(labels) != len(values) or len(labels) < 100:
+        raise ValueError("At least 100 aligned calibration rows are required")
+    split = max(50, int(len(labels) * 0.6))
+    if len(labels) - split < 50:
+        split = len(labels) - 50
+    candidate = fit_binary_logit_bias(labels[:split], values[:split])
+    raw_quality = _binary_quality(labels[split:], values[split:])
+    candidate_quality = _binary_quality(
+        labels[split:], apply_binary_logit_bias(values[split:], candidate)
+    )
+    if not calibration_candidate_is_safe(
+        raw_quality,
+        candidate_quality,
+        minimum_log_loss_improvement=minimum_improvement,
+    ):
+        return 0.0
+    return fit_binary_logit_bias(labels, values)
 
 
 def expected_calibration_error(

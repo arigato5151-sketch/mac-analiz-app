@@ -21,7 +21,11 @@ from models.artifact_store import (
     download_model_artifacts,
     load_verified_joblib,
 )
-from models.calibration import apply_binary_temperature, apply_multiclass_temperature
+from models.calibration import (
+    apply_binary_logit_bias,
+    apply_binary_temperature,
+    apply_multiclass_temperature,
+)
 from models.feature_engineering import (
     FEATURE_COLUMNS,
     build_upcoming_corner_predictions,
@@ -360,6 +364,11 @@ def generate_prediction_rows(
         raw_over_probabilities,
         float(calibration.get("over_2_5_temperature", 1.0)),
     )
+    if "over_2_5_logit_bias" in calibration:
+        over_probabilities = apply_binary_logit_bias(
+            over_probabilities,
+            float(calibration["over_2_5_logit_bias"]),
+        )
     raw_btts_probabilities = bundle["btts_model"].predict_proba(binary_features)[:, 1]
     raw_btts_probabilities = btts_model_weight * raw_btts_probabilities + (
         1.0 - btts_model_weight
@@ -368,6 +377,11 @@ def generate_prediction_rows(
         raw_btts_probabilities,
         float(calibration.get("btts_temperature", 1.0)),
     )
+    if "btts_logit_bias" in calibration:
+        btts_probabilities = apply_binary_logit_bias(
+            btts_probabilities,
+            float(calibration["btts_logit_bias"]),
+        )
 
     if result_probabilities.shape != (len(ordered_upcoming), 3):
         raise RuntimeError("Result model returned an unexpected probability shape")
