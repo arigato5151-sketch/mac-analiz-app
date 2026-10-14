@@ -107,25 +107,31 @@ def load_upcoming_dashboard(
             f",captured_at.lte.{day_end.astimezone(timezone.utc).isoformat()})"
         )
     }
-    result_quotes = db.select_all(
-        "odds_quote_history",
-        columns="match_id",
-        filters={"bookmaker": "eq.Nesine", **odds_filters},
-    )
-    market_quotes = db.select_all(
-        "nesine_market_quotes",
-        columns="match_id",
-        filters=odds_filters,
-    )
-    nesine_today_ids = {
-        int(row["match_id"]) for row in [*result_quotes, *market_quotes]
-        if row.get("match_id") is not None
-    }
-    matches = [
+    today_matches = [
         match for match in matches
         if datetime.fromisoformat(str(match["match_date"]).replace("Z", "+00:00"))
-        .astimezone(istanbul).date() != today or int(match["id"]) in nesine_today_ids
+        .astimezone(istanbul).date() == today
     ]
+    if today_matches:
+        result_quotes = db.select_all(
+            "odds_quote_history",
+            columns="match_id",
+            filters={"bookmaker": "eq.Nesine", **odds_filters},
+        )
+        market_quotes = db.select_all(
+            "nesine_market_quotes",
+            columns="match_id",
+            filters=odds_filters,
+        )
+        nesine_today_ids = {
+            int(row["match_id"]) for row in [*result_quotes, *market_quotes]
+            if row.get("match_id") is not None
+        }
+        today_ids = {int(match["id"]) for match in today_matches}
+        matches = [
+            match for match in matches
+            if int(match["id"]) not in today_ids or int(match["id"]) in nesine_today_ids
+        ]
     if not matches:
         return pd.DataFrame({"latest_prediction_at": [latest_prediction]})
 

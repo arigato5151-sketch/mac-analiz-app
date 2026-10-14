@@ -18,7 +18,11 @@ class _RenderedPage:
         self.rows = rows
 
     def evaluate(self, _script, *_args):
-        return self.rows
+        return {
+            "rows": self.rows,
+            "lastLeagueName": "",
+            "lastDayLabel": "",
+        }
 
 
 def test_parse_and_match_nesine_result_market():
@@ -68,7 +72,7 @@ def test_rendered_page_falls_back_to_catalog_when_fixture_accents_differ():
         "away_team": "Kasımpaşa",
         "markets": {"1": "1.50", "X": "4.00", "2": "6.00"},
     }]
-    extracted = _extract_rows_from_page(
+    extracted, _, _ = _extract_rows_from_page(
         _RenderedPage(rows), {("galatasaray", "kasimpasa")}
     )
     assert extracted == rows
@@ -85,7 +89,7 @@ def test_page_extractor_selects_only_upcoming_fixtures():
         "home_team": "Upcoming FC", "away_team": "Visitor FC",
         "markets": {"1": "2.00", "X": "3.20", "2": "3.40"},
     }]
-    extracted = _extract_rows_from_page(
+    extracted, _, _ = _extract_rows_from_page(
         _RenderedPage(rows), {("upcoming fc", "visitor fc")}
     )
     assert extracted == rows
