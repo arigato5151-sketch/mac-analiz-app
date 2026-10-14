@@ -16,6 +16,8 @@ def _is_coupon_message(text: str) -> bool:
     return text.lstrip().startswith((
         "🎟️ Günlük kupon",
         "⚠️ Maç Analiz · Operasyon uyarısı",
+        "✅ Maç Analiz · Yerel iş tamamlandı",
+        "❌ Maç Analiz · Yerel iş başarısız",
     ))
 
 

@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 
 from config.settings import get_settings
 from config.leagues import TRACKED_LEAGUE_IDS
+from config.nesine_team_aliases import NESINE_TEAM_IDS_BY_LEAGUE
 from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_fixtures import transform_fixtures
 from db.db_client import SupabaseRestClient
@@ -393,18 +394,91 @@ def _same_fixture_team_name(left: str, right: str) -> bool:
     return False
 
 
+def _team_identity_keys(value: str) -> set[str]:
+    """Build normalized exact keys, including only explicitly known variants."""
+    return {key for key in _normalise(value).split("|") if key}
+
+
+def _quote_kickoff_matches(quote: NesineMatchQuote, match: Mapping[str, Any]) -> bool:
+    raw_time = str(quote.kickoff_text or "").strip()
+    raw_date = str(match.get("kickoff") or match.get("match_date") or "").strip()
+    if not raw_time or not raw_date:
+        return True
+    time_match = re.fullmatch(r"(\d{1,2}):(\d{2})", raw_time)
+    try:
+        fixture_time = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if not time_match or fixture_time.tzinfo is None:
+        return True
+    local_fixture_time = fixture_time.astimezone(ISTANBUL)
+    quote_minutes = int(time_match.group(1)) * 60 + int(time_match.group(2))
+    fixture_minutes = local_fixture_time.hour * 60 + local_fixture_time.minute
+    difference = abs(quote_minutes - fixture_minutes)
+    return min(difference, 24 * 60 - difference) <= 15
+
+
 def match_quotes(quotes: Iterable[NesineMatchQuote], matches: Iterable[Mapping[str, Any]], threshold: float = .82) -> list[tuple[int, NesineMatchQuote, float]]:
-    """Return only unambiguous fixture matches above the safety threshold."""
+    """Match production quotes by league/team IDs; fuzzy names are diagnostic only.
+
+    The legacy name-only path is retained for fixture-free tooling callers. Real
+    Nesine rows include a league label and are rejected if their league or team
+    identity cannot be resolved to exactly one API-Football fixture.
+    """
     output: list[tuple[int, NesineMatchQuote, float]] = []
     match_list = list(matches)
+    api_team_ids: dict[tuple[int, str], set[int]] = {}
+    for match in match_list:
+        league_id = int(match.get("league_id", -1))
+        for name_key in ("home_team", "home_name", "away_team", "away_name"):
+            name = str(match.get(name_key) or "").strip()
+            team_id_key = "home_team_id" if name_key.startswith("home") else "away_team_id"
+            if name and match.get(team_id_key) is not None:
+                for name_key in _team_identity_keys(name):
+                    api_team_ids.setdefault((league_id, name_key), set()).add(
+                        int(match[team_id_key])
+                    )
+
+    catalog_team_ids: dict[tuple[int, str], set[int]] = {}
+    for league_id, aliases in NESINE_TEAM_IDS_BY_LEAGUE.items():
+        for alias, team_id in aliases.items():
+            for name_key in _team_identity_keys(alias):
+                catalog_team_ids.setdefault((league_id, name_key), set()).add(team_id)
+
     for quote in quotes:
         quote_leagues = _tracked_league_ids_for_nesine_name(quote.league_name)
-        candidate_matches = match_list
-        if quote_leagues and any("league_id" in match for match in match_list):
+        if quote.league_name:
+            # A rendered league heading must be recognized; never search the
+            # entire slate when the competition could not be identified.
+            if len(quote_leagues) != 1:
+                continue
+            league_id = next(iter(quote_leagues))
+            home_ids: set[int] = set()
+            away_ids: set[int] = set()
+            for home_key in _team_identity_keys(quote.home_team):
+                home_ids.update(catalog_team_ids.get((league_id, home_key), set()))
+                home_ids.update(api_team_ids.get((league_id, home_key), set()))
+            for away_key in _team_identity_keys(quote.away_team):
+                away_ids.update(catalog_team_ids.get((league_id, away_key), set()))
+                away_ids.update(api_team_ids.get((league_id, away_key), set()))
+            if len(home_ids) != 1 or len(away_ids) != 1:
+                continue
             candidate_matches = [
                 match for match in match_list
-                if int(match.get("league_id", -1)) in quote_leagues
+                if int(match.get("league_id", -1)) == league_id
+                and int(match.get("home_team_id", -1)) in home_ids
+                and int(match.get("away_team_id", -1)) in away_ids
+                and _quote_kickoff_matches(quote, match)
             ]
+            if len(candidate_matches) == 1:
+                match = candidate_matches[0]
+                output.append((int(match["id"]), quote, 1.0))
+            continue
+
+        # Name-only matching is available only to legacy/internal callers that
+        # do not have a real bulletin league heading. It cannot be used by the
+        # production collector because rendered Nesine rows carry that heading.
+        candidate_matches = match_list
         candidates = sorted(((match_score(quote, match), int(match["id"]), match)
                              for match in candidate_matches), reverse=True)
         if not candidates or candidates[0][0] < threshold:
@@ -907,7 +981,10 @@ def main() -> None:
         {"id": int(item["fixture"]["id"]),
          "league_id": int(item["league"]["id"]),
          "home_team": str(item["teams"]["home"]["name"]),
-         "away_team": str(item["teams"]["away"]["name"])}
+         "away_team": str(item["teams"]["away"]["name"]),
+         "home_team_id": int(item["teams"]["home"]["id"]),
+         "away_team_id": int(item["teams"]["away"]["id"]),
+         "kickoff": str(item["fixture"]["date"])}
         for item in api_fixtures
     ]
     # Nesine is authoritative for which fixtures are offered today. API-Football
@@ -937,12 +1014,22 @@ def main() -> None:
     matched_quotes = {id(quote) for _match_id, quote, _score in matched}
     unmatched_samples = []
     for quote in (quote for quote in quotes if id(quote) not in matched_quotes):
-        candidates = sorted(((match_score(quote, match), match) for match in api_matches),
+        quote_leagues = _tracked_league_ids_for_nesine_name(quote.league_name)
+        league_candidates = [
+            match for match in api_matches
+            if not quote_leagues or int(match.get("league_id", -1)) in quote_leagues
+        ]
+        candidates = sorted(((match_score(quote, match), match) for match in league_candidates),
                             key=lambda item: item[0], reverse=True)
         best = candidates[0] if candidates else None
         unmatched_samples.append({
+            "nesine_league": quote.league_name,
+            "api_league_id": next(iter(quote_leagues)) if len(quote_leagues) == 1 else None,
             "nesine": f"{quote.home_team} - {quote.away_team}",
             "best_candidate": (f"{best[1].get('home_team')} - {best[1].get('away_team')}" if best else None),
+            "best_candidate_team_ids": (
+                [best[1].get("home_team_id"), best[1].get("away_team_id")] if best else None
+            ),
             "score": round(best[0], 3) if best else None,
         })
     report = {"nesine_tracked_league_fixtures": len(quotes),
@@ -962,6 +1049,12 @@ def main() -> None:
         )
     if not stored:
         raise SystemExit("Nesine collector matched fixtures but stored zero quotes")
+    if len(matched) != len(quotes):
+        raise SystemExit(
+            f"Nesine fixture identity coverage is incomplete: {len(matched)}/{len(quotes)} "
+            "matched. Matched odds were stored safely; unmatched fixtures need a verified "
+            "league-scoped team ID alias before analysis can continue."
+        )
 
 
 if __name__ == "__main__":
