@@ -94,6 +94,9 @@ jobs:
       - name: Generate upcoming predictions
         id: predictions
         run: python -m models.predict --days 1
+      - name: Publish refreshed feature snapshots
+        id: snapshots
+        run: python -m models.artifact_store --push models/saved_models
       - name: Send daily coupon to Telegram
         id: coupon
         env:

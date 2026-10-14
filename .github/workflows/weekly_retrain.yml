@@ -49,6 +49,8 @@ jobs:
           python -m models.artifact_store
           --pull-bundle latest
           --dest-dir models/saved_models
+      - name: Rebuild missing training reference snapshot
+        run: python -m monitoring.initialize_reference_snapshot
       - name: Drift check — abort on critical data drift
         run: python -m evaluation.drift_check --fail-on-critical --strict
         env:
