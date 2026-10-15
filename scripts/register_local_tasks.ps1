@@ -21,7 +21,7 @@ $Principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.Wind
 $DailyTrigger = New-ScheduledTaskTrigger -Daily -At '06:17'
 Register-ScheduledTask -TaskName 'MacAnaliz-GunlukAkis' -TaskPath '\' -Action $DailyAction -Trigger $DailyTrigger -Settings $Settings -Principal $Principal -Description 'Nesine günlük fikstür/oranları, API-Football verileri, tahminler ve uygun günlük kupon bildirimi.' -Force | Out-Null
 
-$RetryTimes = @('08:17', '10:17', '12:17', '14:17', '16:17', '18:17', '20:17', '22:17')
+$RetryTimes = @('06:17', '08:17', '10:17', '12:17', '14:17', '16:17', '18:17', '20:17', '22:17')
 $RetryTriggers = @($RetryTimes | ForEach-Object { New-ScheduledTaskTrigger -Daily -At $_ })
 Register-ScheduledTask -TaskName 'MacAnaliz-NesineOranYenileme' -TaskPath '\' -Action $RetryAction -Trigger $RetryTriggers -Settings $Settings -Principal $Principal -Description 'Nesine güncel oranlarını alır, tahminleri yeniler ve gün içinde henüz gönderilmediyse uygun kuponu iletir.' -Force | Out-Null
 

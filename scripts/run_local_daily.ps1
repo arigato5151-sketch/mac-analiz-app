@@ -65,7 +65,7 @@ try {
     }
 
     if ($OddsRefreshOnly) {
-        Invoke-PythonStep 'Nesine daily fixtures and odds' @('-m', 'data_pipeline.nesine_odds')
+        Invoke-PythonStep 'Nesine daily fixtures and odds' @('-m', 'data_pipeline.nesine_odds', '--once-daily')
         Invoke-PythonStep 'Refresh predictions using latest odds' @('-m', 'models.predict', '--days', '1')
         Invoke-PythonStep 'Send eligible daily coupon' @('-m', 'notifications.daily_coupon')
     }

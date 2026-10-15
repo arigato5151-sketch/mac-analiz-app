@@ -1,5 +1,6 @@
 from data_pipeline.nesine_odds import (
     _extract_rows_from_page,
+    _has_successful_nesine_capture_today,
     _partition_quotes_to_api_slate,
     istanbul_day_bounds,
     match_quotes,
@@ -12,6 +13,31 @@ def test_nesine_fixture_query_bounds_are_istanbul_calendar_day():
     start, end = istanbul_day_bounds(datetime(2026, 10, 10, 12, tzinfo=timezone.utc))
     assert start == "2026-10-09T21:00:00+00:00"
     assert end == "2026-10-10T21:00:00+00:00"
+
+
+def test_daily_success_guard_checks_nesine_quotes_within_istanbul_day():
+    class FakeDb:
+        def __init__(self, rows):
+            self.rows = rows
+            self.call = None
+
+        def select(self, table, **kwargs):
+            self.call = (table, kwargs)
+            return self.rows
+
+    now = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
+    db = FakeDb([{"id": 1}])
+
+    assert _has_successful_nesine_capture_today(db, now=now)
+    table, kwargs = db.call
+    assert table == "odds_quote_history"
+    assert kwargs["filters"] == {
+        "bookmaker": "eq.Nesine",
+        "captured_at": "gte.2026-10-09T21:00:00+00:00",
+        "and": "(captured_at.lt.2026-10-10T21:00:00+00:00)",
+    }
+    db.rows = []
+    assert not _has_successful_nesine_capture_today(db, now=now)
 
 
 class _RenderedPage:

@@ -1,10 +1,10 @@
 name: Nesine daily odds collection
 
 on:
-  # Daily update collects Nesine fixtures/odds first at 06:17 Istanbul time.
-  # Retry later for prices published during the day: 08:17, 10:17, ... 22:17.
+  # Try once in the morning. If the collector has not stored today's quotes,
+  # retry every two hours; the collector exits early after the first success.
   schedule:
-    - cron: "17 5-19/2 * * *"
+    - cron: "17 3-21/2 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -50,7 +50,7 @@ jobs:
         run: python -m playwright install chromium
       - name: Collect today's visible Nesine odds
         id: nesine
-        run: set -o pipefail; python -m data_pipeline.nesine_odds | tee -a "$GITHUB_STEP_SUMMARY"
+        run: set -o pipefail; python -m data_pipeline.nesine_odds --once-daily | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Alert failed Nesine collector
         if: failure()
         env:

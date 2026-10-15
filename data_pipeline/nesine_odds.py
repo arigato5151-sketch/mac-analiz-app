@@ -105,6 +105,24 @@ def istanbul_day_bounds(now: datetime | None = None) -> tuple[str, str]:
     return start.astimezone(timezone.utc).isoformat(), end.astimezone(timezone.utc).isoformat()
 
 
+def _has_successful_nesine_capture_today(
+    db: SupabaseRestClient, *, now: datetime | None = None
+) -> bool:
+    """Whether at least one Nesine quote was stored during today's Istanbul day."""
+    start, end = istanbul_day_bounds(now)
+    rows = db.select(
+        "odds_quote_history",
+        columns="id",
+        filters={
+            "bookmaker": f"eq.{NESINE_BOOKMAKER}",
+            "captured_at": f"gte.{start}",
+            "and": f"(captured_at.lt.{end})",
+        },
+        limit=1,
+    )
+    return bool(rows)
+
+
 def _is_nesine_today_label(value: Any, today: Any = None) -> bool:
     """Accept only the bulletin section explicitly labeled for Istanbul today."""
     label = unicodedata.normalize("NFKD", str(value or "").strip().casefold().replace("ı", "i"))
@@ -978,10 +996,21 @@ def main() -> None:
     parser.add_argument("--url", default=DEFAULT_NESINE_URL)
     parser.add_argument("--headed", action="store_true", help="Show Chromium while collecting")
     parser.add_argument("--threshold", type=float, default=.82)
+    parser.add_argument(
+        "--once-daily", action="store_true",
+        help="Skip collection when a Nesine quote was already stored today (Istanbul time)",
+    )
     args = parser.parse_args()
     settings = get_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     local_today = datetime.now(ISTANBUL).date()
+    if args.once_daily and _has_successful_nesine_capture_today(db):
+        print(json.dumps({
+            "status": "already_collected_today",
+            "date": local_today.isoformat(),
+            "message": "Today's Nesine odds have already been stored; skipping collection.",
+        }))
+        return
     api = ApiFootballClient(settings.api_football_key)
     # Read the Nesine bulletin first. Its league headings limit browser-side
     # extraction to competitions configured in this app; API-Football is used
