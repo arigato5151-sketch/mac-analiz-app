@@ -494,6 +494,44 @@ def match_quotes(quotes: Iterable[NesineMatchQuote], matches: Iterable[Mapping[s
     return output
 
 
+def _partition_quotes_to_api_slate(
+    quotes: Iterable[NesineMatchQuote],
+    matches: Iterable[Mapping[str, Any]],
+    *,
+    unrelated_name_score: float = .75,
+) -> tuple[list[NesineMatchQuote], list[NesineMatchQuote]]:
+    """Separate unrelated bulletin rows mislabelled under a tracked league.
+
+    Keep uncertain rows for the strict ID matcher to diagnose. Only discard a
+    row when its recognized league has no same-kickoff API fixture and even its
+    closest same-league team-pair name score is low.
+    """
+    match_list = list(matches)
+    kept: list[NesineMatchQuote] = []
+    out_of_slate: list[NesineMatchQuote] = []
+    for quote in quotes:
+        league_ids = _tracked_league_ids_for_nesine_name(quote.league_name)
+        if len(league_ids) != 1 or not quote.kickoff_text:
+            kept.append(quote)
+            continue
+        league_id = next(iter(league_ids))
+        same_league = [
+            match for match in match_list
+            if int(match.get("league_id", -1)) == league_id
+        ]
+        has_same_kickoff = any(
+            _quote_kickoff_matches(quote, match) for match in same_league
+        )
+        best_name_score = max(
+            (match_score(quote, match) for match in same_league), default=0.0
+        )
+        if not has_same_kickoff and best_name_score < unrelated_name_score:
+            out_of_slate.append(quote)
+        else:
+            kept.append(quote)
+    return kept, out_of_slate
+
+
 def store_nesine_quotes(db: SupabaseRestClient, matched: Iterable[tuple[int, NesineMatchQuote, float]], captured_at: str | None = None) -> int:
     captured_at = captured_at or datetime.now(timezone.utc).isoformat()
     inserted = 0
@@ -987,6 +1025,8 @@ def main() -> None:
          "kickoff": str(item["fixture"]["date"])}
         for item in api_fixtures
     ]
+    bulletin_quote_count = len(quotes)
+    quotes, out_of_slate_quotes = _partition_quotes_to_api_slate(quotes, api_matches)
     # Nesine is authoritative for which fixtures are offered today. API-Football
     # supplies stable fixture/team/league IDs and the match data used by the app.
     matched = match_quotes(quotes, api_matches, args.threshold)
@@ -1022,21 +1062,42 @@ def main() -> None:
         candidates = sorted(((match_score(quote, match), match) for match in league_candidates),
                             key=lambda item: item[0], reverse=True)
         best = candidates[0] if candidates else None
+        best_league_matches = [
+            match for match in league_candidates
+            if best and int(match.get("league_id", -1)) == int(best[1].get("league_id", -2))
+            and match_score(quote, match) >= 0.75
+        ]
+        kickoff_candidates = [
+            match for match in best_league_matches
+            if _quote_kickoff_matches(quote, match)
+        ]
         unmatched_samples.append({
             "nesine_league": quote.league_name,
             "api_league_id": next(iter(quote_leagues)) if len(quote_leagues) == 1 else None,
             "nesine": f"{quote.home_team} - {quote.away_team}",
             "best_candidate": (f"{best[1].get('home_team')} - {best[1].get('away_team')}" if best else None),
+            "candidate_kickoff": best[1].get("kickoff") if best else None,
+            "nesine_kickoff": quote.kickoff_text,
+            "close_candidate_count_same_league": len(best_league_matches),
+            "close_candidate_count_same_kickoff": len(kickoff_candidates),
             "best_candidate_team_ids": (
                 [best[1].get("home_team_id"), best[1].get("away_team_id")] if best else None
             ),
             "score": round(best[0], 3) if best else None,
         })
     report = {"nesine_tracked_league_fixtures": len(quotes),
+              "nesine_bulletin_rows": bulletin_quote_count,
+              "out_of_slate_rows_ignored": len(out_of_slate_quotes),
+              "out_of_slate_samples": [
+                  f"{quote.home_team} - {quote.away_team} ({quote.kickoff_text})"
+                  for quote in out_of_slate_quotes[:10]
+              ],
               "api_football_daily_fixtures": len(api_fixtures),
               "matched": len(matched), "fixtures_synced": len(selected_fixtures), "stored": stored,
               "market_selections": market_count, "unmatched_samples": unmatched_samples}
-    print(json.dumps(report, ensure_ascii=False))
+    # Scheduled tasks use Windows PowerShell's legacy cp1254 console encoding;
+    # escaped JSON keeps team names such as Žalgiris from crashing after DB writes.
+    print(json.dumps(report, ensure_ascii=True))
     if not quotes:
         raise SystemExit(
             "Nesine collector extracted zero rendered fixtures; page layout, consent overlay, "

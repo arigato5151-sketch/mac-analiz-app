@@ -1,5 +1,6 @@
 from data_pipeline.nesine_odds import (
     _extract_rows_from_page,
+    _partition_quotes_to_api_slate,
     istanbul_day_bounds,
     match_quotes,
     parse_rendered_text_rows,
@@ -231,3 +232,73 @@ def test_matches_live_nesine_names_to_daily_app_fixtures():
     ]
 
     assert [item[0] for item in match_quotes(quotes, matches)] == list(range(200, 207))
+
+
+def test_matches_verified_uefa_nesine_labels_by_league_team_ids_and_kickoff():
+    cases = [
+        (3, "UEFA AVRUPA LİGİ", "Salzburg", "AC Milan", 571, 489, "Red Bull Salzburg", "AC Milan"),
+        (3, "UEFA AVRUPA LİGİ", "AZ Alkmaar", "HB Sheva", 201, 563, "AZ Alkmaar", "Hapoel Beer Sheva"),
+        (3, "UEFA AVRUPA LİGİ", "Lech Poznan", "B. Leverkusen", 347, 168, "Lech Poznan", "Bayer Leverkusen"),
+        (3, "UEFA AVRUPA LİGİ", "Sparta Prag", "Lillestrom", 628, 321, "Sparta Praha", "Lillestrom"),
+        (3, "UEFA AVRUPA LİGİ", "NK Celje", "Omonia", 4360, 3402, "Celje", "Omonia Nicosia"),
+        (3, "UEFA AVRUPA LİGİ", "U. S. Gilloise", "R. Sociedad", 1393, 548, "Union St. Gilloise", "Real Sociedad"),
+        (3, "UEFA AVRUPA LİGİ", "D. Zagreb", "Anderlecht", 620, 554, "Dinamo Zagreb", "Anderlecht"),
+        (3, "UEFA AVRUPA LİGİ", "NEC Nijmegen", "Levski Sofya", 413, 646, "NEC Nijmegen", "Levski Sofia"),
+        (3, "UEFA AVRUPA LİGİ", "Ferencvaros", "Viktoria Plzen", 651, 567, "Ferencvarosi TC", "Plzen"),
+        (3, "UEFA AVRUPA LİGİ", "Hoffenheim", "Beşiktaş", 167, 549, "1899 Hoffenheim", "Beşiktaş"),
+        (3, "UEFA AVRUPA LİGİ", "Rennes", "Ofi Crete", 94, 1124, "Rennes", "OFI"),
+        (848, "UEFA KONFERANS LİGİ", "Kuopion", "Trabzonspor", 1165, 998, "KuPS", "Trabzonspor"),
+        (848, "UEFA KONFERANS LİGİ", "Riga", "K. Almaty", 10124, 664, "Riga", "Kairat Almaty"),
+        (848, "UEFA KONFERANS LİGİ", "Panathinaikos", "Banja Luka", 617, 3364, "Panathinaikos", "Borac Banja Luka"),
+        (848, "UEFA KONFERANS LİGİ", "Lugano", "Kızıl Yıldız", 606, 598, "FC Lugano", "FK Crvena Zvezda"),
+        (848, "UEFA KONFERANS LİGİ", "KF Egnatia R.", "Midtjylland", 3327, 397, "Egnatia Rrogozhinë", "FC Midtjylland"),
+        (848, "UEFA KONFERANS LİGİ", "Un. Craiova", "Getafe", 632, 546, "Universitatea Craiova", "Getafe"),
+        (848, "UEFA KONFERANS LİGİ", "KAA Gent", "AGF Aarhus", 631, 406, "Gent", "Aarhus"),
+        (848, "UEFA KONFERANS LİGİ", "Hajduk Split", "Ajax", 608, 194, "HNK Hajduk Split", "Ajax"),
+        (848, "UEFA KONFERANS LİGİ", "Mjallby", "Inter Escaldes", 2240, 3342, "Mjallby AIF", "Inter Club d'Escaldes"),
+        (848, "UEFA KONFERANS LİGİ", "St. Truidense", "Iberia 1999", 735, 3502, "St. Truiden", "FC Iberia 1999"),
+        (848, "UEFA KONFERANS LİGİ", "Brann", "Lincoln Red", 319, 667, "Brann", "Lincoln Red Imps FC"),
+        (848, "UEFA KONFERANS LİGİ", "Brighton", "Zalgiris Kaunas", 51, 3872, "Brighton", "Kauno Žalgiris"),
+        (848, "UEFA KONFERANS LİGİ", "Hearts", "Nordsjælland", 254, 398, "Heart Of Midlothian", "FC Nordsjaelland"),
+        (848, "UEFA KONFERANS LİGİ", "Kopenhag", "Braga", 400, 217, "FC Copenhagen", "SC Braga"),
+    ]
+    quotes = parse_rendered_text_rows([
+        {"home_team": home, "away_team": away, "league_name": league,
+         "kickoff_text": "19:45", "markets": {"1": "2.00", "X": "3.00", "2": "3.50"}}
+        for _league_id, league, home, away, *_ in cases
+    ])
+    matches = [
+        {"id": index, "league_id": league_id, "home_team_id": home_id, "away_team_id": away_id,
+         "home_team": api_home, "away_team": api_away,
+         "kickoff": "2026-10-15T19:45:00+03:00"}
+        for index, (league_id, _league, _home, _away, home_id, away_id, api_home, api_away)
+        in enumerate(cases, start=1)
+    ]
+
+    assert [item[0] for item in match_quotes(quotes, matches)] == list(range(1, len(cases) + 1))
+
+
+def test_unrelated_bulletin_rows_are_excluded_but_uncertain_slate_rows_remain():
+    quotes = parse_rendered_text_rows([
+        {"home_team": "BG Pathum Utd", "away_team": "Adelaide Utd",
+         "league_name": "UEFA KONFERANS LİGİ", "kickoff_text": "15:15",
+         "markets": {"1": "2.00", "X": "3.00", "2": "3.50"}},
+        {"home_team": "Kopenhag", "away_team": "Braga",
+         "league_name": "UEFA KONFERANS LİGİ", "kickoff_text": "22:00",
+         "markets": {"1": "2.00", "X": "3.00", "2": "3.50"}},
+    ])
+    api_matches = [
+        {"id": 1, "league_id": 848, "home_team": "Egnatia Rrogozhinë",
+         "away_team": "FC Midtjylland", "home_team_id": 3327, "away_team_id": 397,
+         "kickoff": "2026-10-15T19:45:00+03:00"},
+        {"id": 2, "league_id": 848, "home_team": "FC Copenhagen",
+         "away_team": "SC Braga", "home_team_id": 400, "away_team_id": 217,
+         "kickoff": "2026-10-15T22:00:00+03:00"},
+    ]
+
+    kept, out_of_slate = _partition_quotes_to_api_slate(quotes, api_matches)
+
+    assert [(quote.home_team, quote.away_team) for quote in out_of_slate] == [
+        ("BG Pathum Utd", "Adelaide Utd")
+    ]
+    assert [(quote.home_team, quote.away_team) for quote in kept] == [("Kopenhag", "Braga")]
