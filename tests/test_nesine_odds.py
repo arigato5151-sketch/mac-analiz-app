@@ -1,5 +1,6 @@
 from data_pipeline.nesine_odds import (
     _extract_rows_from_page,
+    _has_complete_result_odds,
     _has_successful_nesine_capture_today,
     _partition_quotes_to_api_slate,
     istanbul_day_bounds,
@@ -17,27 +18,44 @@ def test_nesine_fixture_query_bounds_are_istanbul_calendar_day():
 
 def test_daily_success_guard_checks_nesine_quotes_within_istanbul_day():
     class FakeDb:
-        def __init__(self, rows):
-            self.rows = rows
-            self.call = None
+        def __init__(self, fixtures, quotes):
+            self.fixtures = fixtures
+            self.quotes = quotes
+            self.calls = []
 
         def select(self, table, **kwargs):
-            self.call = (table, kwargs)
-            return self.rows
+            self.calls.append((table, kwargs))
+            return self.fixtures
+
+        def select_all(self, table, **kwargs):
+            self.calls.append((table, kwargs))
+            return self.quotes
 
     now = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
-    db = FakeDb([{"id": 1}])
+    db = FakeDb([{"id": 1, "league_id": 1}], [
+        {"match_id": 1, "odds": {"home_win": "2.00", "draw": "3.00", "away_win": "4.00"}},
+    ])
 
     assert _has_successful_nesine_capture_today(db, now=now)
-    table, kwargs = db.call
+    assert db.calls[0][0] == "matches"
+    table, kwargs = db.calls[1]
     assert table == "odds_quote_history"
     assert kwargs["filters"] == {
         "bookmaker": "eq.Nesine",
         "captured_at": "gte.2026-10-09T21:00:00+00:00",
         "and": "(captured_at.lt.2026-10-10T21:00:00+00:00)",
     }
-    db.rows = []
+    db.fixtures.append({"id": 2, "league_id": 1})
     assert not _has_successful_nesine_capture_today(db, now=now)
+    db.quotes.append({"match_id": 2, "odds": {"home_win": None, "draw": None, "away_win": None}})
+    assert not _has_successful_nesine_capture_today(db, now=now)
+    db.quotes[-1]["odds"] = {"home_win": "2.10", "draw": "3.10", "away_win": "3.80"}
+    assert _has_successful_nesine_capture_today(db, now=now)
+
+
+def test_complete_result_odds_requires_all_valid_prices():
+    assert _has_complete_result_odds({"home_win": "2.00", "draw": "3.00", "away_win": "4.00"})
+    assert not _has_complete_result_odds({"home_win": "2.00", "draw": None, "away_win": "4.00"})
 
 
 class _RenderedPage:
@@ -299,6 +317,56 @@ def test_matches_verified_uefa_nesine_labels_by_league_team_ids_and_kickoff():
          "kickoff": "2026-10-15T19:45:00+03:00"}
         for index, (league_id, _league, _home, _away, home_id, away_id, api_home, api_away)
         in enumerate(cases, start=1)
+    ]
+
+    assert [item[0] for item in match_quotes(quotes, matches)] == list(range(1, len(cases) + 1))
+
+
+def test_matches_verified_october_17_abbreviated_bulletin_team_names():
+    cases = [
+        (140, "Espanyol", "Atl Madrid", 540, 530, "Espanyol", "Atletico Madrid", "15:00"),
+        (136, "Carrarese C.", "Modena", 1581, 899, "Carrarese", "Modena", "16:00"),
+        (136, "Padova", "V. Entella", 870, 527, "Padova", "Virtus Entella", "16:00"),
+        (136, "Benevento", "LR Vicenza V.", 506, 1584, "Benevento", "Vicenza Virtus", "16:00"),
+        (78, "Elversberg", "Augsburg", 1660, 170, "SV Elversberg", "FC Augsburg", "16:30"),
+        (78, "Werder Bremen", "Paderborn", 162, 185, "Werder Bremen", "SC Paderborn 07", "16:30"),
+        (78, "Hamburg", "Stuttgart", 175, 172, "Hamburger SV", "VfB Stuttgart", "16:30"),
+        (78, "Union Berlin", "B. Dortmund", 182, 165, "Union Berlin", "Borussia Dortmund", "16:30"),
+        (78, "Schalke 04", "Mainz", 174, 164, "FC Schalke 04", "FSV Mainz 05", "16:30"),
+        (39, "Man. City", "Ipswich Town", 50, 57, "Manchester City", "Ipswich", "17:00"),
+        (218, "Aus. Lustenau", "LASK", 1399, 1026, "Austria Lustenau", "Lask Linz", "18:00"),
+        (61, "Strasbourg", "PSG", 95, 85, "Strasbourg", "Paris Saint Germain", "18:15"),
+        (136, "Mantova 1911", "US Palermo", 1693, 522, "Mantova", "Palermo", "18:15"),
+        (218, "SV Ried", "Austria Wien", 1028, 601, "Ried", "Austria Vienna", "20:30"),
+        (136, "AC Pisa", "Cremonese", 801, 520, "Pisa", "Cremonese", "20:30"),
+        (62, "Red Star", "St Etienne", 104, 1063, "RED Star FC 93", "Saint Etienne", "21:00"),
+        (61, "Lille", "Brest", 79, 106, "Lille", "Stade Brestois 29", "21:45"),
+        (140, "Valencia", "Ath Bilbao", 532, 531, "Valencia", "Athletic Club", "22:00"),
+        (88, "S. Rotterdam", "Willem II", 426, 195, "Sparta Rotterdam", "Willem II", "22:00"),
+    ]
+    quotes = parse_rendered_text_rows([
+        {"home_team": q_home, "away_team": q_away, "league_name": "unused",
+         "kickoff_text": kickoff, "markets": {"1": "2.00", "X": "3.00", "2": "4.00"}}
+        for _league, q_home, q_away, *_rest, kickoff in cases
+    ])
+    # Use competition labels rather than the placeholder so production takes
+    # the same league-scoped identity path as the Nesine bulletin.
+    league_names = {
+        39: "INGILTERE PREMIER LIG", 61: "FRANSA LIGUE 1", 62: "FRANSA LIGUE 2",
+        78: "ALMANYA BUNDESLIGA", 88: "HOLLANDA EREDIVISIE", 136: "ITALYA SERIE B",
+        140: "ISPANYA LA LIGA", 218: "AVUSTURYA BUNDESLIGA",
+    }
+    quotes = [
+        quote.__class__(quote.home_team, quote.away_team, quote.kickoff_text,
+                        quote.home_win, quote.draw, quote.away_win,
+                        league_name=league_names[cases[i][0]])
+        for i, quote in enumerate(quotes)
+    ]
+    matches = [
+        {"id": i + 1, "league_id": league, "home_team_id": home_id, "away_team_id": away_id,
+         "home_team": api_home, "away_team": api_away,
+         "kickoff": f"2026-10-17T{kickoff}:00+03:00"}
+        for i, (league, _qh, _qa, home_id, away_id, api_home, api_away, kickoff) in enumerate(cases)
     ]
 
     assert [item[0] for item in match_quotes(quotes, matches)] == list(range(1, len(cases) + 1))

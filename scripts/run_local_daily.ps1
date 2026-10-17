@@ -55,21 +55,22 @@ try {
     $HasMutex = $Mutex.WaitOne(0)
     if (-not $HasMutex) {
         Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] Another local pipeline is already running; skipping this launch."
-        return
+        $PipelineFailureMessage = 'Another local pipeline is already running; retry this scheduled launch.'
+        $PipelineExitCode = 1
     }
-    if (-not (Test-Path -LiteralPath $Python)) {
+    if ($HasMutex -and -not (Test-Path -LiteralPath $Python)) {
         throw "Project virtual environment is missing: $Python"
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot '.env'))) {
+    if ($HasMutex -and -not (Test-Path -LiteralPath (Join-Path $ProjectRoot '.env'))) {
         throw "Project .env file is missing: $ProjectRoot\.env"
     }
 
-    if ($OddsRefreshOnly) {
+    if ($HasMutex -and $OddsRefreshOnly) {
         Invoke-PythonStep 'Nesine daily fixtures and odds' @('-m', 'data_pipeline.nesine_odds', '--once-daily')
         Invoke-PythonStep 'Refresh predictions using latest odds' @('-m', 'models.predict', '--days', '1')
         Invoke-PythonStep 'Send eligible daily coupon' @('-m', 'notifications.daily_coupon')
     }
-    else {
+    elseif ($HasMutex) {
         Invoke-PythonStep 'Nesine daily fixtures and odds' @('-m', 'data_pipeline.nesine_odds')
         Invoke-PythonStep 'Sync API-Football fixtures' @('-m', 'data_pipeline.fetch_fixtures', '--days', '1')
         Invoke-PythonStep 'Sync daily bookmaker odds' @('-m', 'data_pipeline.sync_odds', '--days', '1', '--max-matches', '120')
@@ -79,8 +80,10 @@ try {
         Invoke-PythonStep 'Validate daily data quality' @('-m', 'data_pipeline.data_quality', '--days', '1')
     }
 
-    Write-Host "`n[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] PIPELINE SUCCESS"
-    Send-CompletionStatus 'success'
+    if ($HasMutex) {
+        Write-Host "`n[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] PIPELINE SUCCESS"
+        Send-CompletionStatus 'success'
+    }
 }
 catch {
     $PipelineFailureMessage = $_.Exception.Message

@@ -108,19 +108,45 @@ def istanbul_day_bounds(now: datetime | None = None) -> tuple[str, str]:
 def _has_successful_nesine_capture_today(
     db: SupabaseRestClient, *, now: datetime | None = None
 ) -> bool:
-    """Whether at least one Nesine quote was stored during today's Istanbul day."""
+    """Whether all scheduled fixtures in today's Nesine-covered leagues have odds."""
     start, end = istanbul_day_bounds(now)
-    rows = db.select(
+    fixtures = db.select(
+        "matches",
+        columns="id,league_id",
+        filters={"status": "eq.scheduled", "match_date": f"gte.{start}",
+                 "and": f"(match_date.lt.{end})"},
+    )
+    fixture_leagues = {int(row["id"]): int(row["league_id"]) for row in fixtures}
+    match_ids = set(fixture_leagues)
+    if not match_ids:
+        return False
+    rows = db.select_all(
         "odds_quote_history",
-        columns="id",
+        columns="match_id,odds,captured_at",
         filters={
             "bookmaker": f"eq.{NESINE_BOOKMAKER}",
             "captured_at": f"gte.{start}",
             "and": f"(captured_at.lt.{end})",
         },
-        limit=1,
     )
-    return bool(rows)
+    covered = {
+        int(row["match_id"])
+        for row in rows
+        if int(row.get("match_id", -1)) in match_ids
+        and _has_complete_result_odds(row.get("odds"))
+    }
+    covered_leagues = {fixture_leagues[match_id] for match_id in covered}
+    expected_ids = {
+        match_id for match_id, league_id in fixture_leagues.items()
+        if league_id in covered_leagues
+    }
+    return bool(expected_ids) and expected_ids.issubset(covered)
+
+
+def _has_complete_result_odds(odds: Any) -> bool:
+    return isinstance(odds, Mapping) and all(
+        _odd(str(odds.get(key) or "")) for key in ("home_win", "draw", "away_win")
+    )
 
 
 def _is_nesine_today_label(value: Any, today: Any = None) -> bool:
@@ -998,7 +1024,11 @@ def main() -> None:
     parser.add_argument("--threshold", type=float, default=.82)
     parser.add_argument(
         "--once-daily", action="store_true",
-        help="Skip collection when a Nesine quote was already stored today (Istanbul time)",
+        help="Skip collection after current odds cover every scheduled match for today (Istanbul time)",
+    )
+    parser.add_argument(
+        "--include-detailed-markets", action="store_true",
+        help="Also open each event to collect additional market selections",
     )
     args = parser.parse_args()
     settings = get_settings()
@@ -1029,11 +1059,10 @@ def main() -> None:
             )
         ]
     quotes = parse_rendered_text_rows(payload)
-    # Complete Nesine's fixture/odds phase before querying API-Football.
-    # The bulletin's first pass already contains the common result markets;
-    # this pass loads the selected detailed markets for every today's fixture.
-    detailed = {}
-    if not args.rows_json:
+    # Main bulletin prices are persisted first. Detailed market retrieval is
+    # optional because opening every event can take many minutes and must not
+    # prevent the more important 1X2 prices from being saved.
+    if args.include_detailed_markets and not args.rows_json:
         event_ids = [quote.event_id for quote in quotes if quote.event_id]
         detailed = collect_requested_markets_from_nesine(args.url, event_ids)
         quotes = [replace(quote, markets=detailed.get(quote.event_id or "", quote.all_markets()))
@@ -1054,6 +1083,8 @@ def main() -> None:
          "kickoff": str(item["fixture"]["date"])}
         for item in api_fixtures
     ]
+    if args.once_daily and not api_matches:
+        raise SystemExit("No API-Football fixtures found for today's tracked slate; retry is required.")
     bulletin_quote_count = len(quotes)
     quotes, out_of_slate_quotes = _partition_quotes_to_api_slate(quotes, api_matches)
     # Nesine is authoritative for which fixtures are offered today. API-Football
@@ -1079,6 +1110,10 @@ def main() -> None:
         db.upsert("teams", teams, on_conflict="id")
         db.upsert("matches", matches, on_conflict="id")
     stored = store_nesine_quotes(db, matched)
+    result_market_match_ids = {
+        match_id for match_id, quote, _score in matched if quote.has_result_market
+    }
+    complete_slate_coverage = bool(matched) and len(result_market_match_ids) == len(matched)
     market_count = sum(len(quote.all_markets()) for _match_id, quote, _score in matched)
     matched_quotes = {id(quote) for _match_id, quote, _score in matched}
     unmatched_samples = []
@@ -1123,6 +1158,18 @@ def main() -> None:
               ],
               "api_football_daily_fixtures": len(api_fixtures),
               "matched": len(matched), "fixtures_synced": len(selected_fixtures), "stored": stored,
+              "result_odds_matches": len(result_market_match_ids),
+              "matched_without_complete_1x2": len(matched) - len(result_market_match_ids),
+              "matches_without_complete_1x2": [
+                  {"match_id": match_id, "nesine": f"{quote.home_team} - {quote.away_team}",
+                   "kickoff": quote.kickoff_text}
+                  for match_id, quote, _score in matched if not quote.has_result_market
+              ],
+              "api_slate_fixtures_without_complete_1x2": len(api_matches) - len(result_market_match_ids),
+              "matched_fixture_coverage_percent": round(
+                  100 * len(result_market_match_ids) / len(matched), 1
+              ) if matched else 0.0,
+              "complete_slate_coverage": complete_slate_coverage,
               "market_selections": market_count, "unmatched_samples": unmatched_samples}
     # Scheduled tasks use Windows PowerShell's legacy cp1254 console encoding;
     # escaped JSON keeps team names such as Žalgiris from crashing after DB writes.
@@ -1137,8 +1184,18 @@ def main() -> None:
             f"Nesine collector extracted {len(quotes)} fixtures but none matched the "
             f"{len(api_matches)} API-Football fixtures for {local_today}; see unmatched_samples"
         )
-    if not stored:
+    if not stored or not result_market_match_ids:
         raise SystemExit("Nesine collector matched fixtures but stored zero quotes")
+    if len(result_market_match_ids) != len(matched):
+        raise SystemExit(
+            f"Nesine result odds coverage is incomplete: {len(result_market_match_ids)}/{len(matched)} "
+            "matched fixtures have complete 1X2 odds; a later retry is required."
+        )
+    if args.once_daily and not complete_slate_coverage:
+        raise SystemExit(
+            f"Today's odds collection is incomplete: {len(result_market_match_ids)}/{len(matched)} "
+            "matched bulletin fixtures have complete 1X2 prices; retry is required."
+        )
     if len(matched) != len(quotes):
         raise SystemExit(
             f"Nesine fixture identity coverage is incomplete: {len(matched)}/{len(quotes)} "

@@ -52,6 +52,54 @@ NESINE_TEAM_IDS_BY_LEAGUE: dict[int, dict[str, int]] = {
         "sheffield utd": 62,
         "sheffield united": 62,
     },
+    # Verified against the same-day API-Football fixture IDs and kickoffs
+    # reported by the local Nesine run on 2026-10-17.
+    39: {
+        "man. city": 50,
+        "ipswich town": 57,
+    },
+    61: {
+        "psg": 85,
+        "lille": 79,
+        "brest": 106,
+    },
+    62: {
+        "red star": 104,
+        "st etienne": 1063,
+    },
+    78: {
+        "elversberg": 1660,
+        "augsburg": 170,
+        "werder bremen": 162,
+        "paderborn": 185,
+        "hamburg": 175,
+        "stuttgart": 172,
+        "b. dortmund": 165,
+        "schalke 04": 174,
+        "mainz": 164,
+    },
+    88: {
+        "s. rotterdam": 426,
+    },
+    136: {
+        "carrarese c.": 1581,
+        "v. entella": 527,
+        "lr vicenza v.": 1584,
+        "mantova 1911": 1693,
+        "us palermo": 522,
+        "ac pisa": 801,
+        "cremonese": 520,
+    },
+    140: {
+        "atl madrid": 530,
+        "ath bilbao": 531,
+    },
+    218: {
+        "aus. lustenau": 1399,
+        "lask": 1026,
+        "sv ried": 1028,
+        "austria wien": 601,
+    },
     # Verified against the same-day API-Football fixtures and kickoff times
     # reported by the local Nesine run on 2026-10-15.
     3: {
