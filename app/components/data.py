@@ -104,6 +104,7 @@ def load_iddaa_market_labels() -> dict[str, str]:
 
     groups = payload.get("data", {}).get("dmsg", {})
     labels: dict[str, str] = {}
+    labels_by_code: dict[int, set[str]] = {}
     if not isinstance(groups, dict):
         return labels
     for group in groups.values():
@@ -115,4 +116,10 @@ def load_iddaa_market_labels() -> dict[str, str]:
             except (TypeError, ValueError):
                 continue
             labels[f"{sport_type}:{market_code}"] = str(group["n"])
+            labels_by_code.setdefault(market_code, set()).add(str(group["n"]))
+    # Older stored quotes do not include sport_type. Use a code-only label only
+    # when IdDaa assigns that code the same category across sport types.
+    for market_code, names in labels_by_code.items():
+        if len(names) == 1:
+            labels[str(market_code)] = next(iter(names))
     return labels

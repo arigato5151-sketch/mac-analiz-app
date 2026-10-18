@@ -75,6 +75,7 @@ def market_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[st
         name = str(
             market.get("market_name")
             or labels.get(market_key)
+            or labels.get(str(market.get("market_id", "")))
             or f"Market {market.get('market_id', '')}"
         )
         if line not in (None, "", 0, "0"):
