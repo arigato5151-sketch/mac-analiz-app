@@ -71,12 +71,15 @@ def market_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[st
         implied = [1 / odd for _, odd in selections]
         total = sum(implied)
         line = market.get("line")
-        market_key = f"{market.get('sport_type', '')}:{market.get('market_id', '')}"
+        market_code = market.get("market_id")
+        sport_type = market.get("sport_type")
+        market_key = f"{sport_type if sport_type is not None else ''}:{market_code if market_code is not None else ''}"
         name = str(
             market.get("market_name")
             or labels.get(market_key)
-            or labels.get(str(market.get("market_id", "")))
-            or f"Market {market.get('market_id', '')}"
+            or labels.get(str(market_code if market_code is not None else ""))
+            or _infer_legacy_market_name(selections)
+            or (f"Market {market_code}" if market_code is not None else "Diğer market")
         )
         if line not in (None, "", 0, "0"):
             name = f"{name} · {line}"
@@ -89,6 +92,23 @@ def market_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[st
             "overround": total - 1,
         })
     return rows
+
+
+def _infer_legacy_market_name(selections: list[tuple[str, float]]) -> str | None:
+    """Give old code-less market rows a useful label from their outcomes."""
+    names = [name.strip().casefold() for name, _ in selections]
+    normalized = {" ".join(name.replace("-", " ").split()) for name in names}
+    if normalized.issubset({"1", "x", "2"}) and len(normalized) >= 2:
+        return "Maç Sonucu"
+    if normalized.issubset({"ev sahibi", "beraberlik", "deplasman"}) and len(normalized) >= 2:
+        return "Maç Sonucu"
+    if any("üst" in name or "alt" in name or "over" in name or "under" in name for name in names):
+        return "Alt/Üst"
+    if any("karşılıklı" in name or "both teams" in name or name in {"kg var", "kg yok"} for name in names):
+        return "Karşılıklı Gol"
+    if normalized.issubset({"evet", "hayır", "yes", "no"}):
+        return "Evet / Hayır"
+    return None
 
 
 def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[str, Any]], teams: pd.DataFrame, leagues: pd.DataFrame, match_day: date, market_labels: dict[str, str]) -> None:
