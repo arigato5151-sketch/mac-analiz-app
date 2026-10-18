@@ -7,6 +7,19 @@ the same competition. Unknown labels deliberately remain unmapped.
 from config.leagues import TRACKED_LEAGUE_IDS
 
 NESINE_TEAM_IDS_BY_LEAGUE: dict[int, dict[str, int]] = {
+    # Verified against the app's API-Football fixtures on 2026-10-18.
+    71: {
+        "gremio p.": 130,
+        "cruzeiro mg": 135,
+    },
+    135: {
+        "fiorentina": 502,
+        "como 1907": 895,
+    },
+    179: {
+        "celtic": 247,
+        "hearts": 254,
+    },
     # Verified against the app's API-Football fixtures on 2026-10-14.
     2: {
         "feyenoord": 209,
@@ -57,6 +70,10 @@ NESINE_TEAM_IDS_BY_LEAGUE: dict[int, dict[str, int]] = {
     39: {
         "man. city": 50,
         "ipswich town": 57,
+        "leeds utd": 63,
+        "man. utd": 33,
+        "nottingham f.": 65,
+        "arsenal": 42,
     },
     61: {
         "psg": 85,
@@ -77,9 +94,17 @@ NESINE_TEAM_IDS_BY_LEAGUE: dict[int, dict[str, int]] = {
         "b. dortmund": 165,
         "schalke 04": 174,
         "mainz": 164,
+        "b. leverkusen": 168,
+        "freiburg": 160,
+        "m'gladbach": 163,
+        "hoffenheim": 167,
     },
     88: {
         "s. rotterdam": 426,
+        "zwolle": 193,
+        "go ahead eagles": 410,
+        "nec nijmegen": 413,
+        "f. sittard": 205,
     },
     136: {
         "carrarese c.": 1581,
@@ -89,16 +114,26 @@ NESINE_TEAM_IDS_BY_LEAGUE: dict[int, dict[str, int]] = {
         "us palermo": 522,
         "ac pisa": 801,
         "cremonese": 520,
+        "ac cesena": 509,
+        "as avellino 1912": 528,
+        "sampdoria": 498,
+        "ss arezzo": 876,
     },
     140: {
         "atl madrid": 530,
         "ath bilbao": 531,
+        "malaga": 535,
+        "r. sociedad": 548,
     },
     218: {
         "aus. lustenau": 1399,
         "lask": 1026,
         "sv ried": 1028,
         "austria wien": 601,
+        "salzburg": 571,
+        "altach": 618,
+        "wolfsberger": 1025,
+        "wsg tirol": 1398,
     },
     # Verified against the same-day API-Football fixtures and kickoff times
     # reported by the local Nesine run on 2026-10-15.
