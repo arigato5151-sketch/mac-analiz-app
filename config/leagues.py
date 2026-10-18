@@ -32,6 +32,8 @@ TRACKED_LEAGUES: tuple[LeagueConfig, ...] = (
     LeagueConfig(307, "Pro League", "Saudi-Arabia", 2026),
     LeagueConfig(253, "Major League Soccer", "USA", 2026),
     LeagueConfig(71, "Serie A", "Brazil", 2026),
+    LeagueConfig(235, "Premier Liga", "Russia", 2026),
+    LeagueConfig(128, "Liga Profesional", "Argentina", 2026),
     LeagueConfig(262, "Liga MX", "Mexico", 2026),
     LeagueConfig(179, "Premiership", "Scotland", 2026),
     LeagueConfig(218, "Bundesliga", "Austria", 2026),
@@ -78,8 +80,8 @@ TRACKED_LEAGUE_IDS: tuple[int, ...] = tuple(LEAGUES_BY_ID)
 
 def validate_league_config() -> None:
     """Fail fast when an edit introduces duplicate or invalid entries."""
-    if len(TRACKED_LEAGUES) != 32:
-        raise ValueError("Exactly 32 tracked leagues are required")
+    if len(TRACKED_LEAGUES) != 34:
+        raise ValueError("Exactly 34 tracked leagues are required")
     if len(LEAGUES_BY_ID) != len(TRACKED_LEAGUES):
         raise ValueError("Tracked API-Football league IDs must be unique")
     if any(league.id <= 0 or league.season < 2000 for league in TRACKED_LEAGUES):
