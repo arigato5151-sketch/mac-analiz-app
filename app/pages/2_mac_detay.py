@@ -192,6 +192,43 @@ try:
 except Exception:
     requested_market_rows = []
 
+# The daily scraper stores full time 1-X-2 prices in odds_quote_history;
+# detailed Nesine markets live in nesine_market_quotes. Read both sources so
+# the result market remains visible when the bulletin exposes no extra markets.
+try:
+    result_rows = get_db().select_all(
+        "odds_quote_history",
+        columns="odds,captured_at",
+        filters={"match_id": f"eq.{int(selected_id)}", "bookmaker": "eq.Nesine"},
+        order="captured_at.desc",
+    )
+    latest_result = next(
+        (
+            row for row in result_rows
+            if isinstance(row.get("odds"), dict)
+            and all(row["odds"].get(key) for key in ("home_win", "draw", "away_win"))
+        ),
+        None,
+    )
+    if latest_result:
+        for key, selection_name, selection_code in (
+            ("home_win", "MS 1", "1"),
+            ("draw", "MS X", "X"),
+            ("away_win", "MS 2", "2"),
+        ):
+            requested_market_rows.append(
+                {
+                    "market_code": "MATCH_RESULT",
+                    "market_name": "Maç Sonucu",
+                    "selection_code": selection_code,
+                    "selection_name": selection_name,
+                    "odd": latest_result["odds"][key],
+                    "captured_at": latest_result.get("captured_at"),
+                }
+            )
+except Exception:
+    pass
+
 st.subheader("Pazar tahminleri")
 st.caption(
     "Model tahminleri ve yakalanan Nesine oranları. Oran olmayan pazarlarda —, "
