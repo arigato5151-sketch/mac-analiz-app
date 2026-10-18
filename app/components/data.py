@@ -7,6 +7,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import requests
 import streamlit as st
 
 from config.settings import get_public_supabase_settings
@@ -83,3 +84,32 @@ def load_match_day(match_day: date) -> tuple[list[dict[str, Any]], list[dict[str
             )
         )
     return matches, quotes
+
+
+@st.cache_data(ttl=86_400, show_spinner=False)
+def load_iddaa_market_labels() -> dict[str, str]:
+    """Read IdDaa's current names for stored sport-type/market-code pairs."""
+    response = requests.get(
+        "https://sportsbookv2.iddaa.com/sportsbook/get_market_config",
+        headers={"Accept": "application/json", "User-Agent": "mac-analiz-app/1.0"},
+        timeout=15,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not payload.get("isSuccess"):
+        return {}
+
+    groups = payload.get("data", {}).get("dmsg", {})
+    labels: dict[str, str] = {}
+    if not isinstance(groups, dict):
+        return labels
+    for group in groups.values():
+        if not isinstance(group, dict) or not group.get("n"):
+            continue
+        for key in group.get("m", []):
+            try:
+                sport_type, market_code = (int(part) for part in str(key).split("_", 1))
+            except (TypeError, ValueError):
+                continue
+            labels[f"{sport_type}:{market_code}"] = str(group["n"])
+    return labels

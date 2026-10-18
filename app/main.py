@@ -16,7 +16,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.components.data import load_completed_match_history, load_match_day, load_reference_catalog
+from app.components.data import (
+    load_completed_match_history,
+    load_iddaa_market_labels,
+    load_match_day,
+    load_reference_catalog,
+)
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 
@@ -50,7 +55,7 @@ def unpack_payload(value: Any) -> dict[str, Any]:
     return {}
 
 
-def market_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+def market_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[str, Any]]:
     rows = []
     for market in payload.get("markets", []):
         selections = []
@@ -66,7 +71,12 @@ def market_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
         implied = [1 / odd for _, odd in selections]
         total = sum(implied)
         line = market.get("line")
-        name = str(market.get("market_name") or f"Market {market.get('market_id', '')}")
+        market_key = f"{market.get('sport_type', '')}:{market.get('market_id', '')}"
+        name = str(
+            market.get("market_name")
+            or labels.get(market_key)
+            or f"Market {market.get('market_id', '')}"
+        )
         if line not in (None, "", 0, "0"):
             name = f"{name} · {line}"
         rows.append({
@@ -80,7 +90,7 @@ def market_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[str, Any]], teams: pd.DataFrame, leagues: pd.DataFrame, match_day: date) -> None:
+def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[str, Any]], teams: pd.DataFrame, leagues: pd.DataFrame, match_day: date, market_labels: dict[str, str]) -> None:
     matches = pd.DataFrame(matches_data)
     if matches.empty:
         st.info(f"{match_day:%d.%m.%Y} için kayıtlı maç bulunamadı.")
@@ -143,7 +153,7 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
                 st.warning("Bu maç için seçilen günde iddaa oran kaydı bulunamadı.")
                 continue
             payload = unpack_payload(quote.get("odds"))
-            markets = market_rows(payload)
+            markets = market_rows(payload, market_labels)
             if not markets:
                 st.warning("Oran kaydı var ancak gösterilebilir tam market bulunamadı.")
                 continue
@@ -205,7 +215,11 @@ except Exception as exc:
 with tab_analysis:
     try:
         match_records, quote_records = load_match_day(selected_day)
-        render_analysis(match_records, quote_records, teams, leagues, selected_day)
+        try:
+            market_labels = load_iddaa_market_labels()
+        except Exception:
+            market_labels = {}
+        render_analysis(match_records, quote_records, teams, leagues, selected_day, market_labels)
     except Exception as exc:
         st.error(f"Maç ve oran verileri yüklenemedi: {exc}")
 with tab_archive:
