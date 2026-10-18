@@ -135,12 +135,29 @@ def _has_successful_nesine_capture_today(
         if int(row.get("match_id", -1)) in match_ids
         and _has_complete_result_odds(row.get("odds"))
     }
+    market_rows = db.select_all(
+        "nesine_market_quotes",
+        columns="match_id",
+        filters={
+            "captured_at": f"gte.{start}",
+            "and": f"(captured_at.lt.{end})",
+        },
+    )
+    detailed_market_ids = {
+        int(row["match_id"])
+        for row in market_rows
+        if row.get("match_id") is not None and int(row["match_id"]) in match_ids
+    }
     covered_leagues = {fixture_leagues[match_id] for match_id in covered}
     expected_ids = {
         match_id for match_id, league_id in fixture_leagues.items()
         if league_id in covered_leagues
     }
-    return bool(expected_ids) and expected_ids.issubset(covered)
+    return (
+        bool(expected_ids)
+        and expected_ids.issubset(covered)
+        and expected_ids.issubset(detailed_market_ids)
+    )
 
 
 def _has_complete_result_odds(odds: Any) -> bool:
@@ -893,29 +910,28 @@ def collect_requested_markets_from_nesine(url: str, event_ids: Iterable[str]) ->
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         try:
-            page = browser.new_page(locale="tr-TR")
-            page.goto(url, wait_until="domcontentloaded", timeout=45_000)
-            page.wait_for_timeout(3_000)
-            page.evaluate("""() => {
-              document.body.classList.remove('stop-scrolling');
-              document.body.style.overflow = 'auto';
-              document.documentElement.style.overflow = 'auto';
-            }""")
             for index, event_id in enumerate(wanted_ids):
+                page = browser.new_page(locale="tr-TR")
                 try:
+                    page.goto(url, wait_until="domcontentloaded", timeout=45_000)
+                    page.wait_for_timeout(3_000)
+                    page.evaluate("""() => {
+                      document.body.classList.remove('stop-scrolling');
+                      document.body.style.overflow = 'auto';
+                      document.documentElement.style.overflow = 'auto';
+                    }""")
                     row_selector = f'[data-test-id="r_{event_id}"]'
                     count_selector = f'[data-test-id="{event_id}_m"]'
-                    # The home page may initially select another sport. Click
-                    # its visible football tab first, just as a user would.
-                    football = page.get_by_text("Futbol", exact=True).first
-                    if football.count():
-                        football.evaluate("element => element.click()")
-                        page.wait_for_timeout(800)
+                    # Keep the bulletin view selected: switching to the live
+                    # football tab replaces its event rows and loses these IDs.
                     for _ in range(120):
                         if page.locator(row_selector).count() and page.locator(count_selector).count():
                             break
+                        previous_y = page.evaluate("window.scrollY")
                         page.evaluate("window.scrollBy(0, Math.max(400, window.innerHeight * 0.75))")
                         page.wait_for_timeout(200)
+                        if page.evaluate("window.scrollY") <= previous_y:
+                            break
                     if not page.locator(count_selector).count():
                         LOGGER.warning("Nesine detailed markets unavailable for event %s", event_id)
                         continue
@@ -933,6 +949,8 @@ def collect_requested_markets_from_nesine(url: str, event_ids: Iterable[str]) ->
                     LOGGER.info("Nesine detail event %s: %s selected-market odds", event_id, len(markets))
                 except Exception as exc:
                     LOGGER.warning("Nesine detail skipped for event %s: %s", event_id, type(exc).__name__)
+                finally:
+                    page.close()
         finally:
             browser.close()
     return collected

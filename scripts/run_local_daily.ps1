@@ -66,7 +66,7 @@ try {
     }
 
     if ($HasMutex -and $OddsRefreshOnly) {
-        Invoke-PythonStep 'Nesine daily fixtures and odds' @('-m', 'data_pipeline.nesine_odds', '--once-daily')
+        Invoke-PythonStep 'Nesine daily fixtures and odds' @('-m', 'data_pipeline.nesine_odds', '--once-daily', '--include-detailed-markets')
         Invoke-PythonStep 'Refresh predictions using latest odds' @('-m', 'models.predict', '--days', '1')
         Invoke-PythonStep 'Send eligible daily coupon' @('-m', 'notifications.daily_coupon')
     }

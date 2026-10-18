@@ -50,7 +50,7 @@ jobs:
         run: python -m playwright install chromium
       - name: Collect today's visible Nesine odds
         id: nesine
-        run: set -o pipefail; python -m data_pipeline.nesine_odds --once-daily | tee -a "$GITHUB_STEP_SUMMARY"
+        run: set -o pipefail; python -m data_pipeline.nesine_odds --once-daily --include-detailed-markets | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Alert failed Nesine collector
         if: failure()
         env:

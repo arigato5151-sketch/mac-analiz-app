@@ -458,7 +458,7 @@ def _nesine_market_key(row: dict[str, Any]) -> str | None:
                     return pair
         return None
     if "korner" in market:
-        line = re.search(r"(\d+) (\d)", selection)
+        line = re.search(r"(\d+) (\d)", market) or re.search(r"(\d+) (\d)", selection)
         if line:
             suffix = f"{line.group(1)}_{line.group(2)}"
             return f"corners_{'over' if 'ust' in selection else 'under'}_{suffix}"
