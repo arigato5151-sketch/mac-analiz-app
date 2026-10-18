@@ -40,6 +40,12 @@ IDDAA_COMPETITION_REFS: dict[int, int] = {
     307: 3708,
     235: 53,
     128: 170677,
+    # Lower divisions and Mexico are present in TRACKED_LEAGUES and in the
+    # daily match screen. Include their IdDaa competitions so eligible events
+    # are not silently skipped by the odds importer.
+    262: 28,  # Liga MX: IdDaa Meksika Primera Ligi
+    141: 37,  # Segunda División: IdDaa İspanya La Liga 2
+    62: 19,  # Ligue 2: IdDaa Fransa Ligue 2
 }
 REQUIRED_IDDAA_LEAGUES = set(IDDAA_COMPETITION_REFS)
 
@@ -66,6 +72,7 @@ def normalize_team(value: str) -> str:
 
 
 TEAM_ALIASES: dict[str, tuple[str, ...]] = {
+    "rodez": ("rodez af", "rodez aveyron football"),
     "gremio": ("gremio fbpa", "gremio foot ball porto alegrense"),
     "fluminense": ("fluminense fc",),
     "santos": ("santos fc",),
