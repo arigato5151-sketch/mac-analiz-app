@@ -15,9 +15,3 @@ auto_loop.ps1
 venv/
 dist/
 build/
-models/saved_models/*.joblib
-models/saved_models/*.parquet
-models/saved_models/*.json
-models/saved_models/candidates/
-models/saved_models/recovery/model_v*/
-!models/saved_models/.gitkeep

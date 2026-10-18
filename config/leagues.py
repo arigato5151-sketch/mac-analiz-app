@@ -43,7 +43,7 @@ TRACKED_LEAGUES: tuple[LeagueConfig, ...] = (
     LeagueConfig(13, "CONMEBOL Libertadores", "World", 2026),
     # National-team competitions. API-Football exposes these through the
     # same fixtures endpoint as club competitions, so they can share the
-    # existing sync, prediction, and dashboard pipeline.
+    # match fixture and results synchronization.
     LeagueConfig(1, "FIFA World Cup", "World", 2026),
     LeagueConfig(4, "Euro Championship", "World", 2026),
     LeagueConfig(5, "UEFA Nations League", "World", 2026),

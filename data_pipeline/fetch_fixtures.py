@@ -12,11 +12,6 @@ from config.leagues import LEAGUES_BY_ID, TRACKED_LEAGUE_IDS
 from config.settings import UPCOMING_HORIZON_DAYS, get_settings
 from data_pipeline.api_client import ApiFootballClient
 from db.db_client import SupabaseRestClient
-from monitoring.operational_events import (
-    record_api_diagnostics,
-    record_event,
-    record_exception,
-)
 
 FINISHED_STATUSES = {"FT", "AET", "PEN"}
 LIVE_STATUSES = {"1H", "HT", "2H", "ET", "BT", "P", "SUSP", "INT", "LIVE"}
@@ -150,27 +145,10 @@ def main() -> None:
         settings.supabase_url, settings.supabase_service_role_key
     )
     today = datetime.now(ZoneInfo("Europe/Istanbul")).date()
-    try:
-        summary = sync_fixtures(
-            api, db, start_date=today, end_date=today + timedelta(days=args.days - 1)
-        )
-    except Exception as error:
-        record_exception(db, component="fetch_fixtures", operation="fixture sync", error=error)
-        raise
-    diagnostics = api.diagnostics()
-    record_api_diagnostics(db, component="fetch_fixtures", diagnostics=diagnostics)
-    record_event(
-        db,
-        severity="info",
-        component="fetch_fixtures",
-        event_type="sync_succeeded",
-        message="Fixture sync completed",
-        context={
-            "start_date": today.isoformat(),
-            "end_date": (today + timedelta(days=args.days - 1)).isoformat(),
-            **asdict(summary),
-        },
+    summary = sync_fixtures(
+        api, db, start_date=today, end_date=today + timedelta(days=args.days - 1)
     )
+    diagnostics = api.diagnostics()
     print({"sync": asdict(summary), "api": diagnostics})
 
 

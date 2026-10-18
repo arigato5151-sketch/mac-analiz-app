@@ -12,7 +12,6 @@ from config.settings import get_settings
 from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_fixtures import SyncSummary, sync_fixtures, transform_fixtures
 from db.db_client import SupabaseRestClient
-from monitoring.operational_events import record_api_diagnostics, record_exception
 
 EXPECTED_GOALS_STAT_TYPES = frozenset({"expected_goals", "xg"})
 EXPECTED_ASSISTS_STAT_TYPES = frozenset(
@@ -143,13 +142,7 @@ def reconcile_stale_active_fixtures(
             reconciled += 1
         except Exception as error:
             # A single provider anomaly must not block the normal date-based sweep.
-            record_exception(
-                db,
-                component="fetch_results",
-                operation="stale fixture reconciliation",
-                error=error,
-                context={"fixture_id": fixture_id},
-            )
+            print(f"Stale fixture {fixture_id} skipped: {type(error).__name__}")
     return reconciled
 
 
@@ -270,14 +263,7 @@ def sync_recent_expected_metrics(
         try:
             statistics = api.get("fixtures/statistics", {"fixture": int(match["id"])})
         except Exception as error:
-            # Final scores remain critical; optional xG/xA must not stop evaluation.
-            record_exception(
-                db,
-                component="fetch_results",
-                operation="expected-metric fetch",
-                error=error,
-                context={"fixture_id": int(match["id"])},
-            )
+            # Keep final scores even when optional xG/xA is unavailable.
             print(
                 f"Expected-metric fetch skipped for fixture {int(match['id'])}: {type(error).__name__}"
             )
@@ -340,23 +326,16 @@ def main() -> None:
     settings = get_settings()
     api = ApiFootballClient(settings.api_football_key)
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
-    try:
-        if args.date:
-            summary = sync_results(api, db, match_date=args.date)
-        else:
-            summary = sync_recent_results(
-                api,
-                db,
-                today=datetime.now(ZoneInfo("Europe/Istanbul")).date(),
-                lookback_days=args.lookback_days,
-            )
-    except Exception as error:
-        record_exception(
-            db, component="fetch_results", operation="result sync", error=error
+    if args.date:
+        summary = sync_results(api, db, match_date=args.date)
+    else:
+        summary = sync_recent_results(
+            api,
+            db,
+            today=datetime.now(ZoneInfo("Europe/Istanbul")).date(),
+            lookback_days=args.lookback_days,
         )
-        raise
     diagnostics = api.diagnostics()
-    record_api_diagnostics(db, component="fetch_results", diagnostics=diagnostics)
     print({"sync": asdict(summary), "api": diagnostics})
 
 
