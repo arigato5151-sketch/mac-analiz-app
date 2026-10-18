@@ -89,7 +89,10 @@ def load_match_day(match_day: date) -> tuple[list[dict[str, Any]], list[dict[str
 @st.cache_data(ttl=86_400, show_spinner=False)
 def load_iddaa_market_labels() -> dict[str, str]:
     """Read IdDaa's current names for stored sport-type/market-code pairs."""
-    response = requests.get(
+    session = requests.Session()
+    # Match the odds collector: local/host proxy settings can block this source.
+    session.trust_env = False
+    response = session.get(
         "https://sportsbookv2.iddaa.com/sportsbook/get_market_config",
         headers={"Accept": "application/json", "User-Agent": "mac-analiz-app/1.0"},
         timeout=15,
