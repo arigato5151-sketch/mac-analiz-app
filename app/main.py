@@ -100,10 +100,14 @@ def market_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[st
             labels.get(market_key)
             or labels.get(str(market_code if market_code is not None else ""))
         )
-        # The event feed stores a generic market_name for these two football
-        # team-goal codes; use their market-code meaning when config is absent.
-        if str(sport_type) == "4":
-            team_goal_name = {203: "Ev Sahibi Gol Alt/Üst", 207: "Deplasman Gol Alt/Üst"}.get(market_code)
+        # The event feed stores a generic market_name for team-goal codes.
+        # Preserve the code meaning across the sport-type variants in stored quotes.
+        if str(sport_type) in {"2", "4"}:
+            team_goal_name = (
+                {(2, 603): "Ev Sahibi Gol Alt/Üst", (2, 604): "Deplasman Gol Alt/Üst",
+                 (4, 203): "Ev Sahibi Gol Alt/Üst", (4, 207): "Deplasman Gol Alt/Üst"}
+                .get((int(sport_type), int(market_code))) if market_code is not None else None
+            )
             if team_goal_name and str(configured_name or "").casefold() in {"", "maç sonucu alt/üst", "mac sonucu alt/ust"}:
                 configured_name = team_goal_name
         name = str(
@@ -483,9 +487,9 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
             market_context = f"{market_name} {label}"
             sport_type = str(market.get("sport_type") or "")
             market_id = str(market.get("market_id") or "")
-            if sport_type == "4" and market_id == "203":
+            if (sport_type, market_id) in {("4", "203"), ("2", "603")}:
                 category = "home_goals"
-            elif sport_type == "4" and market_id == "207":
+            elif (sport_type, market_id) in {("4", "207"), ("2", "604")}:
                 category = "away_goals"
             elif any(term in market_context for term in ("korner", "corner")):
                 category = "home_corners" if any(term in market_context for term in ("ev sahibi", "ev korner", "home team", "home corner")) else "away_corners" if any(term in market_context for term in ("deplasman", "dep korner", "away team", "away corner")) else "corners"
@@ -561,6 +565,18 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
     st.markdown("**Kornerler**")
     if corners is None:
         st.info("Bu ligde en az 20 tamamlanmış maçın korner istatistiği bulununca korner tahmini açılır.")
+        corner_odds_rows = []
+        for (category, line, outcome), quote in quote_index.items():
+            if category not in {"corners", "home_corners", "away_corners"}:
+                continue
+            corner_odds_rows.append({
+                "Pazar": quote["market"], "Çizgi": line,
+                "Seçim": "Üst" if outcome == "over" else "Alt" if outcome == "under" else outcome,
+                "Model tahmini": "—", "Oran": f"{quote['odds']:.2f}",
+                "Piyasa %": f"%{quote['market_probability'] * 100:.1f}",
+            })
+        if corner_odds_rows:
+            st.dataframe(pd.DataFrame(corner_odds_rows), use_container_width=True, hide_index=True)
     else:
         corner_lines = []
         for line in (6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5):
