@@ -460,19 +460,19 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
         st.info("Bu maçta model tahminiyle eşleştirilebilen oran bulunamadı.")
 
     total_table, team_table, outcome_table = market_probability_tables(forecast)
-    with st.expander("Tüm hesaplanabilir model marketleri"):
-        goal_tab, team_tab, corner_tab, score_tab, data_tab = st.tabs(["Gol & sonuç", "Takım golleri", "Korner", "Doğru skor", "Veri kapsamı"])
-        with goal_tab:
-            st.dataframe(total_table, use_container_width=True, hide_index=True)
-            st.dataframe(outcome_table, use_container_width=True, hide_index=True)
-        with team_tab:
-            if team_goal_quote_rows:
-                st.markdown("**Takım gol tahminleri ve karşılık gelen oranlar**")
-                st.dataframe(pd.DataFrame(team_goal_quote_rows), use_container_width=True, hide_index=True)
-                st.caption("Piyasa olasılığı, ilgili marketin oranlarından marjı arındırarak hesaplanır.")
-            else:
-                st.dataframe(team_table, use_container_width=True, hide_index=True)
-        with corner_tab:
+    st.markdown("#### Tüm hesaplanabilir model marketleri")
+    goal_tab, team_tab, corner_tab, score_tab, data_tab = st.tabs(["Gol & sonuç", "Takım golleri", "Korner", "Doğru skor", "Veri kapsamı"])
+    with goal_tab:
+        st.dataframe(total_table, use_container_width=True, hide_index=True)
+        st.dataframe(outcome_table, use_container_width=True, hide_index=True)
+    with team_tab:
+        if team_goal_quote_rows:
+            st.markdown("**Takım gol tahminleri ve karşılık gelen oranlar**")
+            st.dataframe(pd.DataFrame(team_goal_quote_rows), use_container_width=True, hide_index=True)
+            st.caption("Piyasa olasılığı, ilgili marketin oranlarından marjı arındırarak hesaplanır.")
+        else:
+            st.dataframe(team_table, use_container_width=True, hide_index=True)
+    with corner_tab:
             if corners is None:
                 st.info("Bu ligde en az 20 tamamlanmış maçın korner istatistiği bulununca korner tahmini açılır.")
             else:
@@ -492,23 +492,23 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
                     f"takımlar için korner örneklemi {corners['home_sample']} / {corners['away_sample']}. "
                     f"Beklenen korner: {corners['home_expected']:.2f}–{corners['away_expected']:.2f}."
                 )
-        with score_tab:
-            matrix = forecast["score_matrix"]
-            scores = sorted(
-                ((matrix[h][a], h, a) for h in range(len(matrix)) for a in range(len(matrix[h]))),
-                reverse=True,
-            )[:5]
-            st.dataframe(
-                pd.DataFrame([{"Skor": f"{home}–{away}", "Olasılık": f"%{probability * 100:.1f}"} for probability, home, away in scores]),
-                use_container_width=True,
-                hide_index=True,
-            )
-        with data_tab:
-            st.info("Gol, sonuç, takım golü ve doğru skor olasılıkları geçmiş tam maç skorlarından hesaplanır. Devre sonuçları ile sarı/kırmızı kart verileri arşivde tutulmadığı için bu pazarlara tahmin üretilemez.")
-            if corners is None:
-                st.info("Korner tahmini için bu ligde en az 20 maçın tamamlanmış korner istatistiği gerekir.")
-            else:
-                st.success(f"Korner modeli kullanılabilir: maç öncesi {corners['history_count']} lig korner kaydı.")
+    with score_tab:
+        matrix = forecast["score_matrix"]
+        scores = sorted(
+            ((matrix[h][a], h, a) for h in range(len(matrix)) for a in range(len(matrix[h]))),
+            reverse=True,
+        )[:5]
+        st.dataframe(
+            pd.DataFrame([{"Skor": f"{home}–{away}", "Olasılık": f"%{probability * 100:.1f}"} for probability, home, away in scores]),
+            use_container_width=True,
+            hide_index=True,
+        )
+    with data_tab:
+        st.info("Gol, sonuç, takım golü ve doğru skor olasılıkları geçmiş tam maç skorlarından hesaplanır. Devre sonuçları ile sarı/kırmızı kart verileri arşivde tutulmadığı için bu pazarlara tahmin üretilemez.")
+        if corners is None:
+            st.info("Korner tahmini için bu ligde en az 20 maçın tamamlanmış korner istatistiği gerekir.")
+        else:
+            st.success(f"Korner modeli kullanılabilir: maç öncesi {corners['history_count']} lig korner kaydı.")
     return forecast, corners
 
 
