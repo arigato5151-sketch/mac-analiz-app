@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.data import (
+    load_analysis_history,
     load_completed_match_history,
     load_iddaa_market_labels,
     load_match_day,
@@ -111,7 +112,110 @@ def _infer_legacy_market_name(selections: list[tuple[str, float]]) -> str | None
     return None
 
 
-def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[str, Any]], teams: pd.DataFrame, leagues: pd.DataFrame, match_day: date, market_labels: dict[str, str]) -> None:
+def team_recent_matches(history: pd.DataFrame, team_id: Any, before: pd.Timestamp, limit: int = 5) -> pd.DataFrame:
+    """Return a team's latest finished matches strictly before kickoff."""
+    if history.empty or pd.isna(before):
+        return pd.DataFrame()
+    team = pd.to_numeric(pd.Series([team_id]), errors="coerce").iloc[0]
+    if pd.isna(team):
+        return pd.DataFrame()
+    prior = history[
+        (history["match_date"] < before)
+        & ((history["home_team_id"] == int(team)) | (history["away_team_id"] == int(team)))
+    ].copy()
+    return prior.sort_values(["match_date", "id"], ascending=False).head(limit)
+
+
+def summarize_team_form(recent: pd.DataFrame, team_id: Any) -> dict[str, Any]:
+    """Summarize recent results from the team's point of view."""
+    summary: dict[str, Any] = {"form": "—", "points": None, "goals_for": None, "goals_against": None, "xg_for": None, "xg_against": None}
+    if recent.empty:
+        return summary
+    team = int(team_id)
+    form, points, goals_for, goals_against = [], 0, [], []
+    xg_for, xg_against = [], []
+    for match in recent.to_dict("records"):
+        home = int(match["home_team_id"]) == team
+        scored = match["home_score"] if home else match["away_score"]
+        conceded = match["away_score"] if home else match["home_score"]
+        scored, conceded = int(scored), int(conceded)
+        goals_for.append(scored)
+        goals_against.append(conceded)
+        if scored > conceded:
+            form.append("G")
+            points += 3
+        elif scored == conceded:
+            form.append("B")
+            points += 1
+        else:
+            form.append("M")
+        for target, key in ((xg_for, "home_xg" if home else "away_xg"), (xg_against, "away_xg" if home else "home_xg")):
+            try:
+                value = float(match[key])
+                if pd.notna(value):
+                    target.append(value)
+            except (TypeError, ValueError):
+                pass
+    summary.update({
+        "form": " · ".join(form),
+        "points": points / len(recent),
+        "goals_for": sum(goals_for) / len(goals_for),
+        "goals_against": sum(goals_against) / len(goals_against),
+        "xg_for": sum(xg_for) / len(xg_for) if xg_for else None,
+        "xg_against": sum(xg_against) / len(xg_against) if xg_against else None,
+    })
+    return summary
+
+
+def render_recent_form(
+    row: dict[str, Any], history: pd.DataFrame, team_names: dict[Any, str]
+) -> None:
+    """Show recent form and match logs for both teams without implying a forecast."""
+    kickoff = row["kickoff"]
+    home_id, away_id = row["home_team_id"], row["away_team_id"]
+    home_recent = team_recent_matches(history, home_id, kickoff)
+    away_recent = team_recent_matches(history, away_id, kickoff)
+    home_stats, away_stats = summarize_team_form(home_recent, home_id), summarize_team_form(away_recent, away_id)
+    st.markdown("#### Maç öncesi form · son 5 tamamlanmış maç")
+    st.caption("Özet yalnızca başlama saatinden önce tamamlanmış maçları kullanır. Bu bölüm geçmiş performansı gösterir, tahmin değildir.")
+    home_col, away_col = st.columns(2)
+    for col, name, stats, recent, team_id in (
+        (home_col, row["home_name"], home_stats, home_recent, home_id),
+        (away_col, row["away_name"], away_stats, away_recent, away_id),
+    ):
+        with col:
+            st.markdown(f"**{name}**")
+            if recent.empty:
+                st.info("Bu takım için maç öncesi tamamlanmış geçmiş maç kaydı yok.")
+                continue
+            st.metric("Form (yeniden eskiye)", stats["form"], f"{len(recent)} maç")
+            a, b = st.columns(2)
+            a.metric("Maç başı gol", f"{stats['goals_for']:.2f} attı · {stats['goals_against']:.2f} yedi")
+            b.metric("Maç başı puan", f"{stats['points']:.2f} / 3")
+            if stats["xg_for"] is not None:
+                c, d = st.columns(2)
+                c.metric("Ortalama xG", f"{stats['xg_for']:.2f}")
+                d.metric("Rakibe verilen xG", f"{stats['xg_against']:.2f}" if stats["xg_against"] is not None else "Veri yok")
+            log = []
+            for match in recent.to_dict("records"):
+                is_home = int(match["home_team_id"]) == int(team_id)
+                opponent_id = match["away_team_id"] if is_home else match["home_team_id"]
+                scored = match["home_score"] if is_home else match["away_score"]
+                conceded = match["away_score"] if is_home else match["home_score"]
+                result = "G" if scored > conceded else "B" if scored == conceded else "M"
+                match_date = pd.to_datetime(match["match_date"], utc=True, errors="coerce")
+                log.append({
+                    "Tarih": match_date.tz_convert(ISTANBUL).strftime("%d.%m.%Y") if pd.notna(match_date) else "—",
+                    "Saha": "Ev" if is_home else "Dep",
+                    "Rakip": team_names.get(opponent_id, "Rakip"),
+                    "Skor": f"{scored}–{conceded}",
+                    "Sonuç": result,
+                })
+            with st.expander(f"{name}: son maçların dökümü"):
+                st.dataframe(pd.DataFrame(log), use_container_width=True, hide_index=True)
+
+
+def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[str, Any]], history_data: list[dict[str, Any]], teams: pd.DataFrame, leagues: pd.DataFrame, match_day: date, market_labels: dict[str, str]) -> None:
     matches = pd.DataFrame(matches_data)
     if matches.empty:
         st.info(f"{match_day:%d.%m.%Y} için kayıtlı maç bulunamadı.")
@@ -129,6 +233,11 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
     matches["away_name"] = matches["away_team_id"].map(team_names).fillna("Deplasman")
     matches["league_name"] = matches["league_id"].map(league_names).fillna("Lig bilgisi yok")
     matches["kickoff"] = pd.to_datetime(matches["match_date"], utc=True, errors="coerce").dt.tz_convert(ISTANBUL)
+    history = pd.DataFrame(history_data)
+    if not history.empty:
+        history["match_date"] = pd.to_datetime(history["match_date"], utc=True, errors="coerce")
+        for column in ("id", "home_team_id", "away_team_id", "home_score", "away_score"):
+            history[column] = pd.to_numeric(history[column], errors="coerce")
 
     left, right, third = st.columns([1, 1, 2])
     with left:
@@ -170,6 +279,8 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
             meta.caption(f"{row['league_name']}  ·  {time_text}")
             status_col.caption(str(row.get("status", "")).replace("_", " ").title())
             st.markdown(f"<div class='match-title'>{row['home_name']} <span style='color:#91a2b4'>—</span> {row['away_name']}</div>", unsafe_allow_html=True)
+            render_recent_form(row, history, team_names)
+            st.divider()
             if not quote:
                 st.warning("Bu maç için seçilen günde iddaa oran kaydı bulunamadı.")
                 continue
@@ -236,11 +347,12 @@ except Exception as exc:
 with tab_analysis:
     try:
         match_records, quote_records = load_match_day(selected_day)
+        analysis_records = load_analysis_history()
         try:
             market_labels = load_iddaa_market_labels()
         except Exception:
             market_labels = {}
-        render_analysis(match_records, quote_records, teams, leagues, selected_day, market_labels)
+        render_analysis(match_records, quote_records, analysis_records, teams, leagues, selected_day, market_labels)
     except Exception as exc:
         st.error(f"Maç ve oran verileri yüklenemedi: {exc}")
 with tab_archive:
