@@ -350,9 +350,10 @@ def quote_selection_model_probability(
     label = selection_name.casefold().strip().replace("ı", "i").replace("ş", "s").replace("ü", "u").replace("ö", "o").replace("ç", "c").replace("ğ", "g")
     market_name = str(market.get("source_name") or market.get("name") or "").casefold()
     market_name = market_name.replace("ı", "i").replace("ş", "s").replace("ü", "u").replace("ö", "o").replace("ç", "c").replace("ğ", "g")
+    market_context = f"{market_name} {label}"
     if any(word in market_name or word in label for word in ("kart", "card", "sari", "kirmizi", "yari", "half time", "ilk yari")):
         return None
-    if any(word in market_name for word in ("korner", "corner")):
+    if any(word in market_context for word in ("korner", "corner")):
         matrix = corners["score_matrix"] if corners else None
     else:
         matrix = forecast["score_matrix"]
@@ -390,8 +391,8 @@ def quote_selection_model_probability(
     is_under = any(word in label for word in ("alt", "under"))
     if line is not None and (is_over or is_under):
         is_corner_market = any(word in market_name for word in ("korner", "corner"))
-        team_side = "home" if any(word in market_name for word in ("ev sahibi", "home team", "ev gol", "ev korner", "home corner")) else "away" if any(word in market_name for word in ("deplasman", "away team", "dep gol", "dep korner", "away corner")) else None
-        has_goal_context = any(word in market_name for word in ("gol", "goal", "alt/ust", "over/under", "toplam"))
+        team_side = "home" if any(word in market_context for word in ("ev sahibi", "home team", "ev gol", "ev korner", "home corner")) else "away" if any(word in market_context for word in ("deplasman", "away team", "dep gol", "dep korner", "away corner")) else None
+        has_goal_context = any(word in market_context for word in ("gol", "goal", "alt/ust", "over/under", "toplam", "takim", "team"))
         if not is_corner_market and team_side is None and not has_goal_context:
             return None
         over = sum(
@@ -438,16 +439,17 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
                 label = label.replace(source, target)
             line_value = market.get("line")
             if line_value in (None, "", 0, "0"):
-                match = re.search(r"\d+(?:[.,]\d+)?", str(market.get("name") or ""))
+                match = re.search(r"\d+(?:[.,]\d+)?", f"{market.get('name') or ''} {label}")
                 line_value = match.group(0) if match else ""
             line_key = str(line_value).replace(",", ".")
-            if any(term in market_name for term in ("ev sahibi", "home team", "ev gol")):
+            market_context = f"{market_name} {label}"
+            if any(term in market_context for term in ("korner", "corner")):
+                category = "home_corners" if any(term in market_context for term in ("ev sahibi", "ev korner", "home team", "home corner")) else "away_corners" if any(term in market_context for term in ("deplasman", "dep korner", "away team", "away corner")) else "corners"
+            elif any(term in market_context for term in ("ev sahibi", "home team", "ev gol")):
                 category = "home_goals"
-            elif any(term in market_name for term in ("deplasman", "away team", "dep gol")):
+            elif any(term in market_context for term in ("deplasman", "away team", "dep gol")):
                 category = "away_goals"
-            elif any(term in market_name for term in ("korner", "corner")):
-                category = "home_corners" if any(term in market_name for term in ("ev sahibi", "ev korner", "home team", "home corner")) else "away_corners" if any(term in market_name for term in ("deplasman", "dep korner", "away team", "away corner")) else "corners"
-            elif any(term in market_name for term in ("karsilikli", "both teams", "kg")):
+            elif any(term in market_context for term in ("karsilikli", "both teams", "kg")):
                 category = "btts"
             elif re.search(r"\d+\s*[-–:]\s*\d+", label):
                 category, line_key = "score", ""
@@ -463,7 +465,7 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
                 category, line_key = "double_chance", label.replace(" ", "")
             elif label in {"1", "x", "2"}:
                 category, line_key = "result", label
-            elif any(term in market_name for term in ("gol", "goal", "alt/ust", "over/under", "toplam")):
+            elif any(term in market_context for term in ("gol", "goal", "alt/ust", "over/under", "toplam")):
                 category = "total_goals"
             else:
                 continue
