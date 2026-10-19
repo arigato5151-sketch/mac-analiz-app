@@ -656,7 +656,7 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
             total_rows.append({"Pazar": "Çifte Şans", "Seçim": key.upper(), "Model tahmini": f"%{probability * 100:.1f}", **quote_columns("double_chance", key, key)})
         for outcome, probability in (("yes", forecast["btts"]), ("no", 1 - forecast["btts"])):
             total_rows.append({"Pazar": "Karşılıklı Gol", "Seçim": "Var" if outcome == "yes" else "Yok", "Model tahmini": f"%{probability * 100:.1f}", **quote_columns("btts", "", outcome)})
-            st.dataframe(pd.DataFrame(total_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(total_rows), use_container_width=True, hide_index=True)
 
         def render_half_table(half: int, half_label: str) -> None:
             st.markdown(f"**{half_label}**")
