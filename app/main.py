@@ -573,10 +573,19 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
                 else None
             )
             if half_number and half_category:
-                half_outcome = "x" if label == "0" else label
-                if any(term in label for term in ("ust", "over")):
+                if half_category == "result":
+                    half_outcome = (
+                        "1" if label in {"1", "1.", "ev sahibi", "ev sahibi kazanir", "home"}
+                        else "x" if label in {"0", "x", "eşit", "esit", "beraberlik", "draw"}
+                        else "2" if label in {"2", "2.", "deplasman", "deplasman kazanir", "away"}
+                        else label
+                    )
+                    line_key = ""
+                else:
+                    half_outcome = "x" if label == "0" else label
+                if half_category != "result" and any(term in label for term in ("ust", "over")):
                     half_outcome = "over"
-                elif any(term in label for term in ("alt", "under")):
+                elif half_category != "result" and any(term in label for term in ("alt", "under")):
                     half_outcome = "under"
                 half_quote_index[(half_number, half_category, line_key, half_outcome)] = {
                     "odds": selection["odds"],
