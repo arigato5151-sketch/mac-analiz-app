@@ -406,7 +406,7 @@ def quote_selection_model_probability(
     return None
 
 
-def render_model_forecast(row: dict[str, Any], history: pd.DataFrame) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     forecast = model_match_forecast(row, history)
     st.markdown("#### 🤖 Model tahmini · Form Poisson")
     if forecast is None:
@@ -430,11 +430,35 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame) -> tuple[d
         f"Beklenen gol: {forecast['expected_home']:.2f}–{forecast['expected_away']:.2f}. "
         "Oranlardan türetilmemiştir; olasılıklar istatistiksel tahmindir."
     )
-    total_table, team_table, outcome_table = market_probability_tables(forecast)
     corners = model_corner_forecast(row, history)
+    # Put each quote beside its corresponding model outcome. Markets for which
+    # the model has no supported outcome are omitted from this forecast view.
+    quoted_rows = []
+    for market in markets:
+        for selection in market["selections"]:
+            probability = quote_selection_model_probability(
+                market, selection["name"], forecast, corners
+            )
+            if probability is None:
+                continue
+            quoted_rows.append({
+                "Pazar": market["name"],
+                "Seçim": selection["name"],
+                "Model tahmini": f"%{probability * 100:.1f}",
+                "Oran": f"{selection['odds']:.2f}",
+                "Piyasa olasılığı": f"%{selection['probability'] * 100:.1f}",
+            })
+    if quoted_rows:
+        st.markdown("**Tahminler ve karşılık gelen oranlar**")
+        st.dataframe(pd.DataFrame(quoted_rows), use_container_width=True, hide_index=True)
+        st.caption("Piyasa olasılığı, ilgili marketin oranlarından marjı arındırarak hesaplanır.")
+    else:
+        st.info("Bu maçta model tahminiyle eşleştirilebilen oran bulunamadı.")
+
+    total_table, team_table, outcome_table = market_probability_tables(forecast)
     with st.expander("Tüm hesaplanabilir model marketleri"):
-        odds_tab, team_tab, corner_tab, score_tab, data_tab = st.tabs(["Gol & sonuç", "Takım golleri", "Korner", "Doğru skor", "Veri kapsamı"])
-        with odds_tab:
+        goal_tab, team_tab, corner_tab, score_tab, data_tab = st.tabs(["Gol & sonuç", "Takım golleri", "Korner", "Doğru skor", "Veri kapsamı"])
+        with goal_tab:
             st.dataframe(total_table, use_container_width=True, hide_index=True)
             st.dataframe(outcome_table, use_container_width=True, hide_index=True)
         with team_tab:
@@ -591,35 +615,19 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
             meta.caption(f"{row['league_name']}  ·  {time_text}")
             status_col.caption(str(row.get("status", "")).replace("_", " ").title())
             st.markdown(f"<div class='match-title'>{row['home_name']} <span style='color:#91a2b4'>—</span> {row['away_name']}</div>", unsafe_allow_html=True)
-            model_forecast, corner_forecast = render_model_forecast(row, history)
+            payload = unpack_payload(quote.get("odds")) if quote else {}
+            markets = market_rows(payload, market_labels) if quote else []
+            model_forecast, corner_forecast = render_model_forecast(row, history, markets)
             st.divider()
             render_recent_form(row, history, team_names)
             st.divider()
             if not quote:
                 st.warning("Bu maç için seçilen günde iddaa oran kaydı bulunamadı.")
                 continue
-            payload = unpack_payload(quote.get("odds"))
-            markets = market_rows(payload, market_labels)
             if not markets:
                 st.warning("Oran kaydı var ancak gösterilebilir tam market bulunamadı.")
                 continue
             st.caption(f"Son oran kaydı: {quote.get('captured_at', 'bilinmiyor')}")
-            tabs = st.tabs([m["name"] for m in markets])
-            for tab, market in zip(tabs, markets):
-                with tab:
-                    cols = st.columns(min(3, len(market["selections"])))
-                    for idx, selection in enumerate(market["selections"]):
-                        with cols[idx % len(cols)]:
-                            st.markdown(f"**{selection['name']}**")
-                            st.metric("Oran", f"{selection['odds']:.2f}")
-                            model_probability = quote_selection_model_probability(
-                                market, selection["name"], model_forecast, corner_forecast
-                            )
-                            model_text = f"Model %{model_probability * 100:.1f}" if model_probability is not None else "Model tahmini yok"
-                            st.caption(f"Piyasa %{selection['probability'] * 100:.1f} · {model_text}")
-                            st.progress(min(1.0, max(0.0, model_probability if model_probability is not None else selection["probability"])))
-                    st.caption(f"Ham market marjı: %{market['overround'] * 100:.1f}")
-            st.caption("Model olasılığı, etiketi ve tarihsel sonucu modele uygun market seçimlerinde gösterilir. Desteklenmeyen marketlerde oran yanında ‘Model tahmini yok’ görünür.")
 
 
 def render_archive() -> None:
