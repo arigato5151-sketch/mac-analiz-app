@@ -735,23 +735,6 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
 
         st.dataframe(pd.DataFrame(total_rows), use_container_width=True, hide_index=True)
 
-        # Keep every IdDaa selection visible, including markets that do not yet
-        # have a corresponding statistical model (for example corners/halftime).
-        source_rows = []
-        for market in markets:
-            for selection in market["selections"]:
-                source_rows.append({
-                    "Pazar": market.get("source_name") or market.get("name") or "Diğer market",
-                    "Kod": market.get("market_id") if market.get("market_id") is not None else "—",
-                    "Çizgi": market.get("line") if market.get("line") not in (None, "", 0, "0") else "—",
-                    "Seçim": selection["name"],
-                    "Oran": f"{selection['odds']:.2f}",
-                    "Piyasa olasılığı": f"%{selection['probability'] * 100:.1f}",
-                })
-        if source_rows:
-            st.markdown("**İddaa bültenindeki tüm oranlar**")
-            st.dataframe(pd.DataFrame(source_rows), use_container_width=True, hide_index=True)
-
         st.markdown("**Veri kapsamı**")
         st.info("Maç sonu ve yarı tahminleri geçmiş skor dağılımlarından hesaplanır. Yarı modelleri, ilgili ligde en az 20 devre skoru kaydı oluşunca devreye girer; kart istatistikleri arşivde bulunmadığı için kart tahmini üretilmez.")
     return forecast, corners
