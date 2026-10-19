@@ -40,24 +40,6 @@ def load_completed_match_history() -> list[dict[str, Any]]:
     )
 
 
-@st.cache_data(ttl=3600, show_spinner="Takımların son maç performansı yükleniyor…")
-def load_analysis_history() -> list[dict[str, Any]]:
-    """Read completed results and available stats for pre-match form analysis."""
-    return get_db().select_all(
-        "matches",
-        columns=(
-            "id,league_id,home_team_id,away_team_id,match_date,status,"
-            "home_score,away_score,home_xg,away_xg,home_corners,away_corners"
-        ),
-        filters={
-            "status": "eq.finished",
-            "home_score": "not.is.null",
-            "away_score": "not.is.null",
-        },
-        order="match_date.desc,id.desc",
-    )
-
-
 @st.cache_data(ttl=900, show_spinner=False)
 def load_reference_catalog() -> tuple[pd.DataFrame, pd.DataFrame]:
     """Read team and league names used to label stored match statistics."""

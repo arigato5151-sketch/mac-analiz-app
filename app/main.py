@@ -17,7 +17,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.components.data import (
-    load_analysis_history,
     load_completed_match_history,
     load_iddaa_market_labels,
     load_match_day,
@@ -347,7 +346,7 @@ except Exception as exc:
 with tab_analysis:
     try:
         match_records, quote_records = load_match_day(selected_day)
-        analysis_records = load_analysis_history()
+        analysis_records = load_completed_match_history()
         try:
             market_labels = load_iddaa_market_labels()
         except Exception:
