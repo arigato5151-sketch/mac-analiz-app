@@ -582,6 +582,23 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
         score_rows.append({"Skor": score_key.replace("-", "–"), "Model tahmini": f"%{probability * 100:.1f}", "Oran": f"{score_quote['odds']:.2f}" if score_quote else "—", "Piyasa %": f"%{score_quote['market_probability'] * 100:.1f}" if score_quote else "—"})
     st.dataframe(pd.DataFrame(score_rows), use_container_width=True, hide_index=True)
 
+    # Keep every IdDaa selection visible, including markets that do not yet
+    # have a corresponding statistical model (for example corners/halftime).
+    source_rows = []
+    for market in markets:
+        for selection in market["selections"]:
+            source_rows.append({
+                "Pazar": market.get("source_name") or market.get("name") or "Diğer market",
+                "Kod": market.get("market_id") if market.get("market_id") is not None else "—",
+                "Çizgi": market.get("line") if market.get("line") not in (None, "", 0, "0") else "—",
+                "Seçim": selection["name"],
+                "Oran": f"{selection['odds']:.2f}",
+                "Piyasa olasılığı": f"%{selection['probability'] * 100:.1f}",
+            })
+    if source_rows:
+        st.markdown("**İddaa bültenindeki tüm oranlar**")
+        st.dataframe(pd.DataFrame(source_rows), use_container_width=True, hide_index=True)
+
     st.markdown("**Veri kapsamı**")
     st.info("Gol, sonuç, takım golü ve doğru skor olasılıkları geçmiş tam maç skorlarından hesaplanır. Devre sonuçları ile sarı/kırmızı kart verileri arşivde tutulmadığı için bu pazarlara tahmin üretilemez.")
     return forecast, corners
@@ -685,8 +702,13 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
     elif coverage == "Oranı olmayanlar":
         filtered = filtered[~filtered["id"].map(lambda x: int(x) in latest)]
 
-    quoted_ids = {int(row["match_id"]) for row in quotes_data if row.get("match_id") is not None}
-    market_count = sum(len(unpack_payload(row.get("odds")).get("markets", [])) for row in latest.values())
+    daily_match_ids = {int(match_id) for match_id in matches["id"]}
+    quoted_ids = {int(row["match_id"]) for row in quotes_data if row.get("match_id") is not None} & daily_match_ids
+    market_count = sum(
+        len(unpack_payload(quote.get("odds")).get("markets", []))
+        for match_id, quote in latest.items()
+        if match_id in daily_match_ids
+    )
     a, b, c = st.columns(3)
     a.metric("Listelenen maç", f"{len(filtered)}")
     b.metric("Oranı bulunan maç", f"{len(quoted_ids)} / {len(matches)}")
