@@ -525,18 +525,9 @@ def quote_selection_model_probability(
 
 def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     forecast = model_match_forecast(row, history)
-    st.markdown("#### 🤖 Model tahmini · Form Poisson")
     if forecast is None:
         st.info("Bu ligde model tahmini üretmek için yeterli maç geçmişi yok.")
         return None, None
-    st.metric("En olası skor", forecast["most_likely_score"])
-    st.caption(
-        f"Bağımsız Poisson modeli · lig ortalaması ve takımların aynı ligdeki son maçları. "
-        f"Lig örneklemi: {forecast['history_count']} maç; takım örneklemi: "
-        f"{forecast['home_sample']} / {forecast['away_sample']} maç. "
-        f"Beklenen gol: {forecast['expected_home']:.2f}–{forecast['expected_away']:.2f}. "
-        "Oranlardan türetilmemiştir; olasılıklar istatistiksel tahmindir."
-    )
     corners = model_corner_forecast(row, history)
     # Index quoted selections by market category and line for inline display
     # within the corresponding model tables below.
@@ -641,136 +632,146 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
         }
 
     total_table, team_table, outcome_table = market_probability_tables(forecast)
-    st.markdown("#### Tahminler ve karşılık gelen oranlar")
-    st.markdown("**Maç sonucu ve gol çizgileri**")
-    total_rows = []
-    for line in (0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5):
-        over = sum(forecast["score_matrix"][h][a] for h in range(len(forecast["score_matrix"])) for a in range(len(forecast["score_matrix"][h])) if h + a > line)
-        for outcome, probability in (("over", over), ("under", 1 - over)):
-            total_rows.append({"Pazar": f"Maç Sonucu Alt/Üst · {line}", "Seçim": "Üst" if outcome == "over" else "Alt", "Model tahmini": f"%{probability * 100:.1f}", **quote_columns("total_goals", line, outcome)})
-    for key, label in (("1", "1 · Ev sahibi"), ("x", "X · Beraberlik"), ("2", "2 · Deplasman")):
-        probability = {"1": forecast["home_win"], "x": forecast["draw"], "2": forecast["away_win"]}[key]
-        total_rows.append({"Pazar": "Maç Sonucu", "Seçim": label, "Model tahmini": f"%{probability * 100:.1f}", **quote_columns("result", key, key)})
-    for key, probability in (("1x", forecast["home_win"] + forecast["draw"]), ("x2", forecast["draw"] + forecast["away_win"]), ("12", forecast["home_win"] + forecast["away_win"])):
-        total_rows.append({"Pazar": "Çifte Şans", "Seçim": key.upper(), "Model tahmini": f"%{probability * 100:.1f}", **quote_columns("double_chance", key, key)})
-    for outcome, probability in (("yes", forecast["btts"]), ("no", 1 - forecast["btts"])):
-        total_rows.append({"Pazar": "Karşılıklı Gol", "Seçim": "Var" if outcome == "yes" else "Yok", "Model tahmini": f"%{probability * 100:.1f}", **quote_columns("btts", "", outcome)})
-    st.dataframe(pd.DataFrame(total_rows), use_container_width=True, hide_index=True)
-
-    def render_half_table(half: int, half_label: str) -> None:
-        st.markdown(f"**{half_label}**")
-        half_forecast = model_half_forecast(row, history, half=half)
-        if half_forecast is None:
-            st.info(f"{half_label} tahmini için bu ligde en az 20 geçmiş maçın devre skoru gerekiyor.")
-            return
+    with st.expander("🤖 Tüm maç tahminleri ve karşılık gelen oranlar", expanded=True):
+        st.markdown("#### Model tahmini · Form Poisson")
+        st.metric("En olası skor", forecast["most_likely_score"])
         st.caption(
-            f"Yarıya özel Poisson modeli · {half_forecast['history_count']} lig maçı; "
-            f"beklenen gol {half_forecast['expected_home']:.2f}–{half_forecast['expected_away']:.2f}."
+            f"Bağımsız Poisson modeli · lig ortalaması ve takımların aynı ligdeki son maçları. "
+            f"Lig örneklemi: {forecast['history_count']} maç; takım örneklemi: "
+            f"{forecast['home_sample']} / {forecast['away_sample']} maç. "
+            f"Beklenen gol: {forecast['expected_home']:.2f}–{forecast['expected_away']:.2f}. "
+            "Oranlardan türetilmemiştir; olasılıklar istatistiksel tahmindir."
         )
-        rows = []
-
-        def add_row(category: str, line: str, outcome: str, label: str, probability: float) -> None:
-            quote = half_quote_index.get((half, category, line, outcome))
-            rows.append({
-                "Pazar": label,
-                "Seçim": "Üst" if outcome == "over" else "Alt" if outcome == "under" else {"1": "1 · Ev sahibi", "x": "X · Beraberlik", "2": "2 · Deplasman"}.get(outcome, outcome),
-                "Model tahmini": f"%{probability * 100:.1f}",
-                "Oran": f"{quote['odds']:.2f}" if quote else "—",
-                "Piyasa %": f"%{quote['market_probability'] * 100:.1f}" if quote else "—",
-            })
-
-        matrix = half_forecast["score_matrix"]
-        for key, label, probability in (
-            ("1", "Yarı sonucu", half_forecast["home_win"]),
-            ("x", "Yarı sonucu", half_forecast["draw"]),
-            ("2", "Yarı sonucu", half_forecast["away_win"]),
-        ):
-            add_row("result", "", key, label, probability)
-        for line in (0.5, 1.5, 2.5):
-            over = sum(matrix[h][a] for h in range(len(matrix)) for a in range(len(matrix[h])) if h + a > line)
+        st.markdown("#### Tahminler ve karşılık gelen oranlar")
+        st.markdown("**Maç sonucu ve gol çizgileri**")
+        total_rows = []
+        for line in (0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5):
+            over = sum(forecast["score_matrix"][h][a] for h in range(len(forecast["score_matrix"])) for a in range(len(forecast["score_matrix"][h])) if h + a > line)
             for outcome, probability in (("over", over), ("under", 1 - over)):
-                add_row("total", str(line), outcome, f"Yarı toplam gol · {line}", probability)
-        for line in (0.5, 1.5):
-            for side, category, prefix in (("home", "home_goals", "Ev"), ("away", "away_goals", "Dep")):
-                over = sum(matrix[h][a] for h in range(len(matrix)) for a in range(len(matrix[h])) if (h if side == "home" else a) > line)
+                total_rows.append({"Pazar": f"Maç Sonucu Alt/Üst · {line}", "Seçim": "Üst" if outcome == "over" else "Alt", "Model tahmini": f"%{probability * 100:.1f}", **quote_columns("total_goals", line, outcome)})
+        for key, label in (("1", "1 · Ev sahibi"), ("x", "X · Beraberlik"), ("2", "2 · Deplasman")):
+            probability = {"1": forecast["home_win"], "x": forecast["draw"], "2": forecast["away_win"]}[key]
+            total_rows.append({"Pazar": "Maç Sonucu", "Seçim": label, "Model tahmini": f"%{probability * 100:.1f}", **quote_columns("result", key, key)})
+        for key, probability in (("1x", forecast["home_win"] + forecast["draw"]), ("x2", forecast["draw"] + forecast["away_win"]), ("12", forecast["home_win"] + forecast["away_win"])):
+            total_rows.append({"Pazar": "Çifte Şans", "Seçim": key.upper(), "Model tahmini": f"%{probability * 100:.1f}", **quote_columns("double_chance", key, key)})
+        for outcome, probability in (("yes", forecast["btts"]), ("no", 1 - forecast["btts"])):
+            total_rows.append({"Pazar": "Karşılıklı Gol", "Seçim": "Var" if outcome == "yes" else "Yok", "Model tahmini": f"%{probability * 100:.1f}", **quote_columns("btts", "", outcome)})
+            st.dataframe(pd.DataFrame(total_rows), use_container_width=True, hide_index=True)
+
+        def render_half_table(half: int, half_label: str) -> None:
+            st.markdown(f"**{half_label}**")
+            half_forecast = model_half_forecast(row, history, half=half)
+            if half_forecast is None:
+                st.info(f"{half_label} tahmini için bu ligde en az 20 geçmiş maçın devre skoru gerekiyor.")
+                return
+            st.caption(
+                f"Yarıya özel Poisson modeli · {half_forecast['history_count']} lig maçı; "
+                f"beklenen gol {half_forecast['expected_home']:.2f}–{half_forecast['expected_away']:.2f}."
+            )
+            rows = []
+
+            def add_row(category: str, line: str, outcome: str, label: str, probability: float) -> None:
+                quote = half_quote_index.get((half, category, line, outcome))
+                rows.append({
+                    "Pazar": label,
+                    "Seçim": "Üst" if outcome == "over" else "Alt" if outcome == "under" else {"1": "1 · Ev sahibi", "x": "X · Beraberlik", "2": "2 · Deplasman"}.get(outcome, outcome),
+                    "Model tahmini": f"%{probability * 100:.1f}",
+                    "Oran": f"{quote['odds']:.2f}" if quote else "—",
+                    "Piyasa %": f"%{quote['market_probability'] * 100:.1f}" if quote else "—",
+                })
+
+            matrix = half_forecast["score_matrix"]
+            for key, label, probability in (
+                ("1", "Yarı sonucu", half_forecast["home_win"]),
+                ("x", "Yarı sonucu", half_forecast["draw"]),
+                ("2", "Yarı sonucu", half_forecast["away_win"]),
+            ):
+                add_row("result", "", key, label, probability)
+            for line in (0.5, 1.5, 2.5):
+                over = sum(matrix[h][a] for h in range(len(matrix)) for a in range(len(matrix[h])) if h + a > line)
                 for outcome, probability in (("over", over), ("under", 1 - over)):
-                    add_row(category, str(line), outcome, f"Takım golü · {line} · {prefix}", probability)
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                    add_row("total", str(line), outcome, f"Yarı toplam gol · {line}", probability)
+            for line in (0.5, 1.5):
+                for side, category, prefix in (("home", "home_goals", "Ev"), ("away", "away_goals", "Dep")):
+                    over = sum(matrix[h][a] for h in range(len(matrix)) for a in range(len(matrix[h])) if (h if side == "home" else a) > line)
+                    for outcome, probability in (("over", over), ("under", 1 - over)):
+                        add_row(category, str(line), outcome, f"Takım golü · {line} · {prefix}", probability)
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-    render_half_table(1, "1. Yarı")
-    render_half_table(2, "2. Yarı")
+        render_half_table(1, "1. Yarı")
+        render_half_table(2, "2. Yarı")
 
-    st.markdown("**Takım golleri**")
-    team_rows = []
-    matrix = forecast["score_matrix"]
-    for line in (0.5, 1.5, 2.5, 3.5):
-        for side, prefix in (("home", "Ev"), ("away", "Dep")):
-            over = sum(matrix[h][a] for h in range(len(matrix)) for a in range(len(matrix[h])) if (h if side == "home" else a) > line)
-            category = "home_goals" if side == "home" else "away_goals"
-            for outcome, probability in (("over", over), ("under", 1 - over)):
-                team_rows.append({"Gol çizgisi": line, "Takım": prefix, "Seçim": "Üst" if outcome == "over" else "Alt", "Model tahmini": f"%{probability * 100:.1f}", **quote_columns(category, line, outcome)})
-    st.dataframe(pd.DataFrame(team_rows), use_container_width=True, hide_index=True)
-
-    st.markdown("**Kornerler**")
-    if corners is None:
-        st.info("Bu ligde en az 20 tamamlanmış maçın korner istatistiği bulununca korner tahmini açılır.")
-        corner_odds_rows = []
-        for (category, line, outcome), quote in quote_index.items():
-            if category not in {"corners", "home_corners", "away_corners"}:
-                continue
-            corner_odds_rows.append({
-                "Pazar": quote["market"], "Çizgi": line,
-                "Seçim": "Üst" if outcome == "over" else "Alt" if outcome == "under" else outcome,
-                "Model tahmini": "—", "Oran": f"{quote['odds']:.2f}",
-                "Piyasa %": f"%{quote['market_probability'] * 100:.1f}",
-            })
-        if corner_odds_rows:
-            st.dataframe(pd.DataFrame(corner_odds_rows), use_container_width=True, hide_index=True)
-    else:
-        corner_lines = []
-        for line in (6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5):
-            over = sum(corners["score_matrix"][h][a] for h in range(len(corners["score_matrix"])) for a in range(len(corners["score_matrix"][h])) if h + a > line)
-            for outcome, probability in (("over", over), ("under", 1 - over)):
-                corner_lines.append({"Toplam korner çizgisi": line, "Seçim": "Üst" if outcome == "over" else "Alt", "Model tahmini": f"%{probability * 100:.1f}", **quote_columns("corners", line, outcome)})
-        st.dataframe(pd.DataFrame(corner_lines), use_container_width=True, hide_index=True)
-        team_corner_lines = []
-        for line in (2.5, 3.5, 4.5, 5.5, 6.5):
+        st.markdown("**Takım golleri**")
+        team_rows = []
+        matrix = forecast["score_matrix"]
+        for line in (0.5, 1.5, 2.5, 3.5):
             for side, prefix in (("home", "Ev"), ("away", "Dep")):
-                over = sum(corners["score_matrix"][h][a] for h in range(len(corners["score_matrix"])) for a in range(len(corners["score_matrix"][h])) if (h if side == "home" else a) > line)
+                over = sum(matrix[h][a] for h in range(len(matrix)) for a in range(len(matrix[h])) if (h if side == "home" else a) > line)
+                category = "home_goals" if side == "home" else "away_goals"
                 for outcome, probability in (("over", over), ("under", 1 - over)):
-                    team_corner_lines.append({"Korner çizgisi": line, "Takım": prefix, "Seçim": "Üst" if outcome == "over" else "Alt", "Model tahmini": f"%{probability * 100:.1f}", **quote_columns(f"{side}_corners", line, outcome)})
-        st.dataframe(pd.DataFrame(team_corner_lines), use_container_width=True, hide_index=True)
-        st.caption(f"Korner Poisson modeli · {corners['history_count']} lig maçı; beklenen korner: {corners['home_expected']:.2f}–{corners['away_expected']:.2f}.")
+                    team_rows.append({"Gol çizgisi": line, "Takım": prefix, "Seçim": "Üst" if outcome == "over" else "Alt", "Model tahmini": f"%{probability * 100:.1f}", **quote_columns(category, line, outcome)})
+        st.dataframe(pd.DataFrame(team_rows), use_container_width=True, hide_index=True)
 
-    st.markdown("**Doğru skor**")
-    matrix = forecast["score_matrix"]
-    scores = sorted(((matrix[h][a], h, a) for h in range(len(matrix)) for a in range(len(matrix[h]))), reverse=True)[:5]
-    score_rows = []
-    for probability, home, away in scores:
-        score_key = f"{home}-{away}"
-        score_quote = quote_index.get(("score", "", score_key), {})
-        score_rows.append({"Skor": score_key.replace("-", "–"), "Model tahmini": f"%{probability * 100:.1f}", "Oran": f"{score_quote['odds']:.2f}" if score_quote else "—", "Piyasa %": f"%{score_quote['market_probability'] * 100:.1f}" if score_quote else "—"})
-    st.dataframe(pd.DataFrame(score_rows), use_container_width=True, hide_index=True)
+        st.markdown("**Kornerler**")
+        if corners is None:
+            st.info("Bu ligde en az 20 tamamlanmış maçın korner istatistiği bulununca korner tahmini açılır.")
+            corner_odds_rows = []
+            for (category, line, outcome), quote in quote_index.items():
+                if category not in {"corners", "home_corners", "away_corners"}:
+                    continue
+                corner_odds_rows.append({
+                    "Pazar": quote["market"], "Çizgi": line,
+                    "Seçim": "Üst" if outcome == "over" else "Alt" if outcome == "under" else outcome,
+                    "Model tahmini": "—", "Oran": f"{quote['odds']:.2f}",
+                    "Piyasa %": f"%{quote['market_probability'] * 100:.1f}",
+                })
+            if corner_odds_rows:
+                st.dataframe(pd.DataFrame(corner_odds_rows), use_container_width=True, hide_index=True)
+        else:
+            corner_lines = []
+            for line in (6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5):
+                over = sum(corners["score_matrix"][h][a] for h in range(len(corners["score_matrix"])) for a in range(len(corners["score_matrix"][h])) if h + a > line)
+                for outcome, probability in (("over", over), ("under", 1 - over)):
+                    corner_lines.append({"Toplam korner çizgisi": line, "Seçim": "Üst" if outcome == "over" else "Alt", "Model tahmini": f"%{probability * 100:.1f}", **quote_columns("corners", line, outcome)})
+            st.dataframe(pd.DataFrame(corner_lines), use_container_width=True, hide_index=True)
+            team_corner_lines = []
+            for line in (2.5, 3.5, 4.5, 5.5, 6.5):
+                for side, prefix in (("home", "Ev"), ("away", "Dep")):
+                    over = sum(corners["score_matrix"][h][a] for h in range(len(corners["score_matrix"])) for a in range(len(corners["score_matrix"][h])) if (h if side == "home" else a) > line)
+                    for outcome, probability in (("over", over), ("under", 1 - over)):
+                        team_corner_lines.append({"Korner çizgisi": line, "Takım": prefix, "Seçim": "Üst" if outcome == "over" else "Alt", "Model tahmini": f"%{probability * 100:.1f}", **quote_columns(f"{side}_corners", line, outcome)})
+            st.dataframe(pd.DataFrame(team_corner_lines), use_container_width=True, hide_index=True)
+            st.caption(f"Korner Poisson modeli · {corners['history_count']} lig maçı; beklenen korner: {corners['home_expected']:.2f}–{corners['away_expected']:.2f}.")
 
-    # Keep every IdDaa selection visible, including markets that do not yet
-    # have a corresponding statistical model (for example corners/halftime).
-    source_rows = []
-    for market in markets:
-        for selection in market["selections"]:
-            source_rows.append({
-                "Pazar": market.get("source_name") or market.get("name") or "Diğer market",
-                "Kod": market.get("market_id") if market.get("market_id") is not None else "—",
-                "Çizgi": market.get("line") if market.get("line") not in (None, "", 0, "0") else "—",
-                "Seçim": selection["name"],
-                "Oran": f"{selection['odds']:.2f}",
-                "Piyasa olasılığı": f"%{selection['probability'] * 100:.1f}",
-            })
-    if source_rows:
-        st.markdown("**İddaa bültenindeki tüm oranlar**")
-        st.dataframe(pd.DataFrame(source_rows), use_container_width=True, hide_index=True)
+        st.markdown("**Doğru skor**")
+        matrix = forecast["score_matrix"]
+        scores = sorted(((matrix[h][a], h, a) for h in range(len(matrix)) for a in range(len(matrix[h]))), reverse=True)[:5]
+        score_rows = []
+        for probability, home, away in scores:
+            score_key = f"{home}-{away}"
+            score_quote = quote_index.get(("score", "", score_key), {})
+            score_rows.append({"Skor": score_key.replace("-", "–"), "Model tahmini": f"%{probability * 100:.1f}", "Oran": f"{score_quote['odds']:.2f}" if score_quote else "—", "Piyasa %": f"%{score_quote['market_probability'] * 100:.1f}" if score_quote else "—"})
+        st.dataframe(pd.DataFrame(score_rows), use_container_width=True, hide_index=True)
 
-    st.markdown("**Veri kapsamı**")
-    st.info("Maç sonu ve yarı tahminleri geçmiş skor dağılımlarından hesaplanır. Yarı modelleri, ilgili ligde en az 20 devre skoru kaydı oluşunca devreye girer; kart istatistikleri arşivde bulunmadığı için kart tahmini üretilmez.")
+        # Keep every IdDaa selection visible, including markets that do not yet
+        # have a corresponding statistical model (for example corners/halftime).
+        source_rows = []
+        for market in markets:
+            for selection in market["selections"]:
+                source_rows.append({
+                    "Pazar": market.get("source_name") or market.get("name") or "Diğer market",
+                    "Kod": market.get("market_id") if market.get("market_id") is not None else "—",
+                    "Çizgi": market.get("line") if market.get("line") not in (None, "", 0, "0") else "—",
+                    "Seçim": selection["name"],
+                    "Oran": f"{selection['odds']:.2f}",
+                    "Piyasa olasılığı": f"%{selection['probability'] * 100:.1f}",
+                })
+        if source_rows:
+            st.markdown("**İddaa bültenindeki tüm oranlar**")
+            st.dataframe(pd.DataFrame(source_rows), use_container_width=True, hide_index=True)
+
+        st.markdown("**Veri kapsamı**")
+        st.info("Maç sonu ve yarı tahminleri geçmiş skor dağılımlarından hesaplanır. Yarı modelleri, ilgili ligde en az 20 devre skoru kaydı oluşunca devreye girer; kart istatistikleri arşivde bulunmadığı için kart tahmini üretilmez.")
     return forecast, corners
 
 
