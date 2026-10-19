@@ -82,8 +82,10 @@ def market_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[st
         )
         # The event feed stores a generic market_name for these two football
         # team-goal codes; use their market-code meaning when config is absent.
-        if configured_name is None and str(sport_type) == "4":
-            configured_name = {203: "Ev Sahibi Gol Alt/Üst", 207: "Deplasman Gol Alt/Üst"}.get(market_code)
+        if str(sport_type) == "4":
+            team_goal_name = {203: "Ev Sahibi Gol Alt/Üst", 207: "Deplasman Gol Alt/Üst"}.get(market_code)
+            if team_goal_name and str(configured_name or "").casefold() in {"", "maç sonucu alt/üst", "mac sonucu alt/ust"}:
+                configured_name = team_goal_name
         name = str(
             configured_name
             or market.get("market_name")
