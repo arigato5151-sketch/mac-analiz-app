@@ -80,6 +80,10 @@ def market_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[st
             labels.get(market_key)
             or labels.get(str(market_code if market_code is not None else ""))
         )
+        # The event feed stores a generic market_name for these two football
+        # team-goal codes; use their market-code meaning when config is absent.
+        if configured_name is None and str(sport_type) == "4":
+            configured_name = {203: "Ev Sahibi Gol Alt/Üst", 207: "Deplasman Gol Alt/Üst"}.get(market_code)
         name = str(
             configured_name
             or market.get("market_name")
