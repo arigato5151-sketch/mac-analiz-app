@@ -27,6 +27,26 @@ from app.components.data import (
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 
+COUNTRY_NAMES_TR = {
+    "Argentina": "Arjantin", "Austria": "Avusturya", "Belgium": "Belçika",
+    "Brazil": "Brezilya", "England": "İngiltere", "France": "Fransa",
+    "Germany": "Almanya", "Italy": "İtalya", "Netherlands": "Hollanda",
+    "Portugal": "Portekiz", "Russia": "Rusya", "Saudi-Arabia": "Suudi Arabistan",
+    "Spain": "İspanya", "Turkey": "Türkiye", "USA": "ABD", "World": "Uluslararası",
+}
+LEAGUE_NAMES_TR = {
+    "Premier League": "Premier Lig", "La Liga": "LaLiga", "Serie A": "Serie A",
+    "Bundesliga": "Bundesliga", "Ligue 1": "Ligue 1", "UEFA Champions League": "UEFA Şampiyonlar Ligi",
+    "UEFA Europa League": "UEFA Avrupa Ligi", "UEFA Europa Conference League": "UEFA Konferans Ligi",
+    "Süper Lig": "Süper Lig", "Primeira Liga": "Portekiz Ligi", "Eredivisie": "Hollanda Ligi",
+    "Jupiler Pro League": "Belçika Pro Ligi", "Championship": "İngiltere Championship",
+    "Pro League": "Suudi Arabistan Pro Ligi", "Major League Soccer": "MLS",
+    "Premier Liga": "Rusya Premier Ligi", "Liga Profesional": "Arjantin Profesyonel Ligi",
+    "FIFA World Cup": "FIFA Dünya Kupası", "Euro Championship": "Avrupa Şampiyonası",
+    "UEFA Nations League": "UEFA Uluslar Ligi", "Africa Cup of Nations": "Afrika Uluslar Kupası",
+    "Asian Cup": "Asya Kupası", "Copa America": "Copa América", "CONCACAF Gold Cup": "CONCACAF Altın Kupa",
+}
+
 st.set_page_config(page_title="Maç Merkezi", page_icon="⚽", layout="wide")
 st.markdown(
     """
@@ -622,6 +642,7 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
         return
     team_names = dict(zip(teams.get("id", []), teams.get("name", []))) if not teams.empty else {}
     league_names = dict(zip(leagues.get("id", []), leagues.get("name", []))) if not leagues.empty else {}
+    league_countries = dict(zip(leagues.get("id", []), leagues.get("country", []))) if not leagues.empty else {}
     latest: dict[int, dict[str, Any]] = {}
     for quote in sorted(quotes_data, key=lambda q: str(q.get("captured_at", ""))):
         try:
@@ -632,6 +653,9 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
     matches["home_name"] = matches["home_team_id"].map(team_names).fillna("Ev sahibi")
     matches["away_name"] = matches["away_team_id"].map(team_names).fillna("Deplasman")
     matches["league_name"] = matches["league_id"].map(league_names).fillna("Lig bilgisi yok")
+    matches["league_name"] = matches["league_name"].map(lambda name: LEAGUE_NAMES_TR.get(name, name))
+    matches["country_name"] = matches["league_id"].map(league_countries).fillna("").map(lambda country: COUNTRY_NAMES_TR.get(country, country))
+    matches["league_label"] = matches.apply(lambda row: f"{row['country_name']} · {row['league_name']}" if row["country_name"] else row["league_name"], axis=1)
     matches["kickoff"] = pd.to_datetime(matches["match_date"], utc=True, errors="coerce").dt.tz_convert(ISTANBUL)
     now = pd.Timestamp.now(tz=ISTANBUL)
     live_or_finished = matches["status"].fillna("").astype(str).str.casefold().isin({"live", "finished"})
@@ -645,14 +669,14 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
 
     left, right, third = st.columns([1, 1, 2])
     with left:
-        league_filter = st.selectbox("Lig", ["Tüm ligler", *sorted(matches["league_name"].unique())])
+        league_filter = st.selectbox("Lig", ["Tüm ligler", *sorted(matches["league_label"].unique())])
     with right:
         coverage = st.selectbox("Oran durumu", ["Tüm maçlar", "Oranı olanlar", "Oranı olmayanlar"])
     with third:
         search = st.text_input("Takım ara", placeholder="Takım adı yazın")
     filtered = matches.copy()
     if league_filter != "Tüm ligler":
-        filtered = filtered[filtered["league_name"] == league_filter]
+        filtered = filtered[filtered["league_label"] == league_filter]
     if search.strip():
         q = search.strip().casefold()
         filtered = filtered[filtered["home_name"].str.casefold().str.contains(q) | filtered["away_name"].str.casefold().str.contains(q)]
@@ -678,7 +702,7 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
         quote = latest.get(match_id)
         kickoff = row["kickoff"]
         time_text = kickoff.strftime("%H:%M") if pd.notna(kickoff) else "Saat bilgisi yok"
-        with st.expander(f"{time_text}  ·  {row['home_name']} — {row['away_name']}  ·  {row['league_name']}", expanded=False):
+        with st.expander(f"{time_text}  ·  {row['home_name']} — {row['away_name']}  ·  {row['league_label']}", expanded=False):
             meta, status_col = st.columns([4, 1])
             meta.caption(row["league_name"])
             status_col.caption(str(row.get("status", "")).replace("_", " ").title())
