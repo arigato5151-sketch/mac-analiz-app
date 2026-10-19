@@ -633,6 +633,10 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
     matches["away_name"] = matches["away_team_id"].map(team_names).fillna("Deplasman")
     matches["league_name"] = matches["league_id"].map(league_names).fillna("Lig bilgisi yok")
     matches["kickoff"] = pd.to_datetime(matches["match_date"], utc=True, errors="coerce").dt.tz_convert(ISTANBUL)
+    now = pd.Timestamp.now(tz=ISTANBUL)
+    live_or_finished = matches["status"].fillna("").astype(str).str.casefold().isin({"live", "finished"})
+    kickoff_reached = matches["kickoff"].notna() & (matches["kickoff"] <= now)
+    matches = matches[~(live_or_finished | kickoff_reached)].copy()
     history = pd.DataFrame(history_data)
     if not history.empty:
         history["match_date"] = pd.to_datetime(history["match_date"], utc=True, errors="coerce")
