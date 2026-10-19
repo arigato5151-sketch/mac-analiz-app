@@ -288,6 +288,80 @@ def model_match_forecast(row: dict[str, Any], history: pd.DataFrame) -> dict[str
     }
 
 
+def model_half_forecast(
+    row: dict[str, Any], history: pd.DataFrame, *, half: int
+) -> dict[str, Any] | None:
+    """Fit a period-specific Poisson model from historical halftime scores."""
+    kickoff = row["kickoff"]
+    if history.empty or pd.isna(kickoff) or half not in {1, 2}:
+        return None
+    league_id = pd.to_numeric(pd.Series([row.get("league_id")]), errors="coerce").iloc[0]
+    if pd.isna(league_id):
+        return None
+    sample = history[
+        (history["league_id"] == int(league_id)) & (history["match_date"] < kickoff)
+    ].copy()
+    if half == 1:
+        sample["period_home"] = sample["home_halftime_score"]
+        sample["period_away"] = sample["away_halftime_score"]
+    else:
+        sample["period_home"] = sample["home_score"] - sample["home_halftime_score"]
+        sample["period_away"] = sample["away_score"] - sample["away_halftime_score"]
+    sample = sample.dropna(subset=["period_home", "period_away"])
+    sample = sample[(sample["period_home"] >= 0) & (sample["period_away"] >= 0)]
+    if len(sample) < 20:
+        return None
+
+    league_home = float(sample["period_home"].mean())
+    league_away = float(sample["period_away"].mean())
+    if league_home + league_away <= 0:
+        return None
+
+    def recent_strength(team_id: Any, is_home: bool) -> tuple[float, float, int]:
+        team = int(team_id)
+        recent = sample[
+            (sample["home_team_id"] == team) | (sample["away_team_id"] == team)
+        ].sort_values(["match_date", "id"], ascending=False).head(5)
+        if recent.empty:
+            return 1.0, 1.0, 0
+        scored, conceded = [], []
+        for match in recent.to_dict("records"):
+            team_home = int(match["home_team_id"]) == team
+            scored.append(float(match["period_home"] if team_home else match["period_away"]))
+            conceded.append(float(match["period_away"] if team_home else match["period_home"]))
+        baseline_for = league_home if is_home else league_away
+        baseline_against = league_away if is_home else league_home
+        shrink = len(recent) / (len(recent) + 5)
+        attack = 1 + shrink * (sum(scored) / len(scored) / max(0.05, baseline_for) - 1)
+        weakness = 1 + shrink * (sum(conceded) / len(conceded) / max(0.05, baseline_against) - 1)
+        return max(0.25, attack), max(0.25, weakness), len(recent)
+
+    home_attack, away_defense, home_n = recent_strength(row["home_team_id"], True)
+    away_attack, home_defense, away_n = recent_strength(row["away_team_id"], False)
+    expected_home = league_home * math.sqrt(home_attack * home_defense)
+    expected_away = league_away * math.sqrt(away_attack * away_defense)
+    home_goals = poisson_probabilities(expected_home)
+    away_goals = poisson_probabilities(expected_away)
+    matrix = [[home_goals[h] * away_goals[a] for a in range(len(away_goals))] for h in range(len(home_goals))]
+    total = sum(sum(values) for values in matrix)
+    home_win = sum(matrix[h][a] for h in range(len(matrix)) for a in range(len(matrix[h])) if h > a) / total
+    draw = sum(matrix[h][a] for h in range(len(matrix)) for a in range(len(matrix[h])) if h == a) / total
+    away_win = max(0.0, 1 - home_win - draw)
+    btts = sum(matrix[h][a] for h in range(1, len(matrix)) for a in range(1, len(matrix[h]))) / total
+    return {
+        "score_matrix": matrix,
+        "home_win": home_win,
+        "draw": draw,
+        "away_win": away_win,
+        "btts": btts,
+        "history_count": len(sample),
+        "home_sample": home_n,
+        "away_sample": away_n,
+        "expected_home": expected_home,
+        "expected_away": expected_away,
+    }
+
+
 def model_corner_forecast(row: dict[str, Any], history: pd.DataFrame) -> dict[str, Any] | None:
     """Estimate full-time corners from historical corner counts in this league."""
     kickoff = row["kickoff"]
@@ -467,6 +541,7 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
     # Index quoted selections by market category and line for inline display
     # within the corresponding model tables below.
     quote_index: dict[tuple[str, str, str], dict[str, Any]] = {}
+    half_quote_index: dict[tuple[int, str, str, str], dict[str, Any]] = {}
     for market in markets:
         for selection in market["selections"]:
             probability = quote_selection_model_probability(
@@ -487,6 +562,28 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
             market_context = f"{market_name} {label}"
             sport_type = str(market.get("sport_type") or "")
             market_id = str(market.get("market_id") or "")
+            second_half = any(term in market_context for term in ("2. yari", "2 yari", "ikinci yari", "second half")) or (sport_type == "4" and market_id == "321")
+            first_half = any(term in market_context for term in ("1. yari", "1 yari", "ilk yari", "first half", "yari"))
+            half_number = 2 if second_half else 1 if first_half or (sport_type == "2" and market_id in {"36", "60", "722", "723"}) else None
+            half_category = (
+                "result" if market_id in {"36", "321"} or (half_number == 2 and "sonuc" in market_context)
+                else "total" if market_id == "60" or (half_number == 2 and any(term in market_context for term in ("alt/ust", "over/under", "toplam")))
+                else "home_goals" if market_id == "722"
+                else "away_goals" if market_id == "723"
+                else None
+            )
+            if half_number and half_category:
+                half_outcome = "x" if label == "0" else label
+                if any(term in label for term in ("ust", "over")):
+                    half_outcome = "over"
+                elif any(term in label for term in ("alt", "under")):
+                    half_outcome = "under"
+                half_quote_index[(half_number, half_category, line_key, half_outcome)] = {
+                    "odds": selection["odds"],
+                    "market_probability": selection["probability"],
+                    "market": market["name"],
+                }
+                continue
             if (sport_type, market_id) in {("4", "203"), ("2", "603")}:
                 category = "home_goals"
             elif (sport_type, market_id) in {("4", "207"), ("2", "604")}:
@@ -550,6 +647,49 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
     for outcome, probability in (("yes", forecast["btts"]), ("no", 1 - forecast["btts"])):
         total_rows.append({"Pazar": "Karşılıklı Gol", "Seçim": "Var" if outcome == "yes" else "Yok", "Model tahmini": f"%{probability * 100:.1f}", **quote_columns("btts", "", outcome)})
     st.dataframe(pd.DataFrame(total_rows), use_container_width=True, hide_index=True)
+
+    def render_half_table(half: int, half_label: str) -> None:
+        st.markdown(f"**{half_label}**")
+        half_forecast = model_half_forecast(row, history, half=half)
+        if half_forecast is None:
+            st.info(f"{half_label} tahmini için bu ligde en az 20 geçmiş maçın devre skoru gerekiyor.")
+            return
+        st.caption(
+            f"Yarıya özel Poisson modeli · {half_forecast['history_count']} lig maçı; "
+            f"beklenen gol {half_forecast['expected_home']:.2f}–{half_forecast['expected_away']:.2f}."
+        )
+        rows = []
+
+        def add_row(category: str, line: str, outcome: str, label: str, probability: float) -> None:
+            quote = half_quote_index.get((half, category, line, outcome))
+            rows.append({
+                "Pazar": label,
+                "Seçim": "Üst" if outcome == "over" else "Alt" if outcome == "under" else {"1": "1 · Ev sahibi", "x": "X · Beraberlik", "2": "2 · Deplasman"}.get(outcome, outcome),
+                "Model tahmini": f"%{probability * 100:.1f}",
+                "Oran": f"{quote['odds']:.2f}" if quote else "—",
+                "Piyasa %": f"%{quote['market_probability'] * 100:.1f}" if quote else "—",
+            })
+
+        matrix = half_forecast["score_matrix"]
+        for key, label, probability in (
+            ("1", "Yarı sonucu", half_forecast["home_win"]),
+            ("x", "Yarı sonucu", half_forecast["draw"]),
+            ("2", "Yarı sonucu", half_forecast["away_win"]),
+        ):
+            add_row("result", "", key, label, probability)
+        for line in (0.5, 1.5, 2.5):
+            over = sum(matrix[h][a] for h in range(len(matrix)) for a in range(len(matrix[h])) if h + a > line)
+            for outcome, probability in (("over", over), ("under", 1 - over)):
+                add_row("total", str(line), outcome, f"Yarı toplam gol · {line}", probability)
+        for line in (0.5, 1.5):
+            for side, category, prefix in (("home", "home_goals", "Ev"), ("away", "away_goals", "Dep")):
+                over = sum(matrix[h][a] for h in range(len(matrix)) for a in range(len(matrix[h])) if (h if side == "home" else a) > line)
+                for outcome, probability in (("over", over), ("under", 1 - over)):
+                    add_row(category, str(line), outcome, f"Takım golü · {line} · {prefix}", probability)
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    render_half_table(1, "1. Yarı")
+    render_half_table(2, "2. Yarı")
 
     st.markdown("**Takım golleri**")
     team_rows = []
@@ -621,7 +761,7 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
         st.dataframe(pd.DataFrame(source_rows), use_container_width=True, hide_index=True)
 
     st.markdown("**Veri kapsamı**")
-    st.info("Gol, sonuç, takım golü ve doğru skor olasılıkları geçmiş tam maç skorlarından hesaplanır. Devre sonuçları ile sarı/kırmızı kart verileri arşivde tutulmadığı için bu pazarlara tahmin üretilemez.")
+    st.info("Maç sonu ve yarı tahminleri geçmiş skor dağılımlarından hesaplanır. Yarı modelleri, ilgili ligde en az 20 devre skoru kaydı oluşunca devreye girer; kart istatistikleri arşivde bulunmadığı için kart tahmini üretilmez.")
     return forecast, corners
 
 
@@ -702,7 +842,7 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
     history = pd.DataFrame(history_data)
     if not history.empty:
         history["match_date"] = pd.to_datetime(history["match_date"], utc=True, errors="coerce")
-        for column in ("id", "league_id", "home_team_id", "away_team_id", "home_score", "away_score", "home_corners", "away_corners"):
+        for column in ("id", "league_id", "home_team_id", "away_team_id", "home_score", "away_score", "home_halftime_score", "away_halftime_score", "home_corners", "away_corners"):
             history[column] = pd.to_numeric(history[column], errors="coerce")
 
     left, right, third = st.columns([1, 1, 2])

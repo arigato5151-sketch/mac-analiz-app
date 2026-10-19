@@ -28,7 +28,7 @@ def load_completed_match_history() -> list[dict[str, Any]]:
         "matches",
         columns=(
             "id,league_id,home_team_id,away_team_id,match_date,status,"
-            "home_score,away_score,home_xg,away_xg,home_xa,away_xa,"
+            "home_score,away_score,home_halftime_score,away_halftime_score,home_xg,away_xg,home_xa,away_xa,"
             "home_corners,away_corners"
         ),
         filters={

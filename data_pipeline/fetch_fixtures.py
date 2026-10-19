@@ -69,6 +69,7 @@ def transform_fixtures(
             }
 
         status = item["fixture"]["status"]["short"]
+        halftime_score = (item.get("score") or {}).get("halftime") or {}
         matches_by_id[int(item["fixture"]["id"])] = {
             "id": int(item["fixture"]["id"]),
             "league_id": league_id,
@@ -78,6 +79,8 @@ def transform_fixtures(
             "status": normalize_status(status),
             "home_score": item.get("goals", {}).get("home"),
             "away_score": item.get("goals", {}).get("away"),
+            "home_halftime_score": halftime_score.get("home"),
+            "away_halftime_score": halftime_score.get("away"),
         }
 
     return list(teams_by_id.values()), list(matches_by_id.values())

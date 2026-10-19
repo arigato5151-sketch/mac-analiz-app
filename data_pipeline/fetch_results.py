@@ -136,6 +136,8 @@ def reconcile_stale_active_fixtures(
                     "status": current["status"],
                     "home_score": current["home_score"],
                     "away_score": current["away_score"],
+                    "home_halftime_score": current.get("home_halftime_score"),
+                    "away_halftime_score": current.get("away_halftime_score"),
                 },
                 filters={"id": f"eq.{fixture_id}"},
             )
