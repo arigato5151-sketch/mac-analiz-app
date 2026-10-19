@@ -119,6 +119,7 @@ def market_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[st
             "source_name": str(configured_name or market.get("market_name") or name),
             "line": line,
             "market_id": market_code,
+            "sport_type": sport_type,
             "selections": [
                 {"name": item[0], "odds": item[1], "probability": prob / total}
                 for item, prob in zip(selections, implied)
@@ -480,7 +481,13 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
                 line_value = match.group(0) if match else ""
             line_key = str(line_value).replace(",", ".")
             market_context = f"{market_name} {label}"
-            if any(term in market_context for term in ("korner", "corner")):
+            sport_type = str(market.get("sport_type") or "")
+            market_id = str(market.get("market_id") or "")
+            if sport_type == "4" and market_id == "203":
+                category = "home_goals"
+            elif sport_type == "4" and market_id == "207":
+                category = "away_goals"
+            elif any(term in market_context for term in ("korner", "corner")):
                 category = "home_corners" if any(term in market_context for term in ("ev sahibi", "ev korner", "home team", "home corner")) else "away_corners" if any(term in market_context for term in ("deplasman", "dep korner", "away team", "away corner")) else "corners"
             elif any(term in market_context for term in ("ev sahibi", "home team", "ev gol")):
                 category = "home_goals"
