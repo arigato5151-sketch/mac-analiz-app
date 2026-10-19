@@ -467,8 +467,6 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
             probability = quote_selection_model_probability(
                 market, selection["name"], forecast, corners
             )
-            if probability is None:
-                continue
             market_name = str(market.get("source_name") or market.get("name") or "").casefold()
             label = selection["name"].casefold().strip()
             for source, target in (("ı", "i"), ("ş", "s"), ("ü", "u"), ("ö", "o"), ("ç", "c"), ("ğ", "g")):
