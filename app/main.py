@@ -434,6 +434,7 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
     # Put each quote beside its corresponding model outcome. Markets for which
     # the model has no supported outcome are omitted from this forecast view.
     quoted_rows = []
+    team_goal_quote_rows = []
     for market in markets:
         for selection in market["selections"]:
             probability = quote_selection_model_probability(
@@ -441,7 +442,10 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
             )
             if probability is None:
                 continue
-            quoted_rows.append({
+            market_name = str(market.get("source_name") or market.get("name") or "").casefold()
+            is_team_goal = any(term in market_name for term in ("ev sahibi", "deplasman", "home team", "away team", "ev gol", "dep gol"))
+            target_rows = team_goal_quote_rows if is_team_goal else quoted_rows
+            target_rows.append({
                 "Pazar": market["name"],
                 "Seçim": selection["name"],
                 "Model tahmini": f"%{probability * 100:.1f}",
@@ -452,7 +456,7 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
         st.markdown("**Tahminler ve karşılık gelen oranlar**")
         st.dataframe(pd.DataFrame(quoted_rows), use_container_width=True, hide_index=True)
         st.caption("Piyasa olasılığı, ilgili marketin oranlarından marjı arındırarak hesaplanır.")
-    else:
+    elif not team_goal_quote_rows:
         st.info("Bu maçta model tahminiyle eşleştirilebilen oran bulunamadı.")
 
     total_table, team_table, outcome_table = market_probability_tables(forecast)
@@ -462,7 +466,12 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
             st.dataframe(total_table, use_container_width=True, hide_index=True)
             st.dataframe(outcome_table, use_container_width=True, hide_index=True)
         with team_tab:
-            st.dataframe(team_table, use_container_width=True, hide_index=True)
+            if team_goal_quote_rows:
+                st.markdown("**Takım gol tahminleri ve karşılık gelen oranlar**")
+                st.dataframe(pd.DataFrame(team_goal_quote_rows), use_container_width=True, hide_index=True)
+                st.caption("Piyasa olasılığı, ilgili marketin oranlarından marjı arındırarak hesaplanır.")
+            else:
+                st.dataframe(team_table, use_container_width=True, hide_index=True)
         with corner_tab:
             if corners is None:
                 st.info("Bu ligde en az 20 tamamlanmış maçın korner istatistiği bulununca korner tahmini açılır.")
