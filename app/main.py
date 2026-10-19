@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -111,15 +112,17 @@ def _infer_legacy_market_name(selections: list[tuple[str, float]]) -> str | None
     return None
 
 
-def team_recent_matches(history: pd.DataFrame, team_id: Any, before: pd.Timestamp, limit: int = 5) -> pd.DataFrame:
+def team_recent_matches(history: pd.DataFrame, team_id: Any, before: pd.Timestamp, league_id: Any, limit: int = 5) -> pd.DataFrame:
     """Return a team's latest finished matches strictly before kickoff."""
     if history.empty or pd.isna(before):
         return pd.DataFrame()
     team = pd.to_numeric(pd.Series([team_id]), errors="coerce").iloc[0]
-    if pd.isna(team):
+    league = pd.to_numeric(pd.Series([league_id]), errors="coerce").iloc[0]
+    if pd.isna(team) or pd.isna(league):
         return pd.DataFrame()
     prior = history[
         (history["match_date"] < before)
+        & (history["league_id"] == int(league))
         & ((history["home_team_id"] == int(team)) | (history["away_team_id"] == int(team)))
     ].copy()
     return prior.sort_values(["match_date", "id"], ascending=False).head(limit)
@@ -166,14 +169,116 @@ def summarize_team_form(recent: pd.DataFrame, team_id: Any) -> dict[str, Any]:
     return summary
 
 
+def poisson_probabilities(mean: float, max_goals: int = 12) -> list[float]:
+    """Return a normalized Poisson goal distribution, including its tail."""
+    mean = max(0.05, float(mean))
+    probabilities = [math.exp(-mean) * mean**goals / math.factorial(goals) for goals in range(max_goals)]
+    probabilities.append(max(0.0, 1.0 - sum(probabilities)))
+    total = sum(probabilities)
+    return [probability / total for probability in probabilities]
+
+
+def model_match_forecast(row: dict[str, Any], history: pd.DataFrame) -> dict[str, Any] | None:
+    """Fit a simple independent Poisson goals model from pre-match league history."""
+    kickoff = row["kickoff"]
+    if history.empty or pd.isna(kickoff):
+        return None
+    league_id = pd.to_numeric(pd.Series([row.get("league_id")]), errors="coerce").iloc[0]
+    if pd.isna(league_id):
+        return None
+    league_matches = history[
+        (history["league_id"] == int(league_id))
+        & (history["match_date"] < kickoff)
+    ]
+    if len(league_matches) < 10:
+        return None
+    home_mean = float(league_matches["home_score"].mean())
+    away_mean = float(league_matches["away_score"].mean())
+    baseline = (home_mean + away_mean) / 2
+    if baseline <= 0:
+        return None
+
+    home_recent = team_recent_matches(history, row["home_team_id"], kickoff, league_id)
+    away_recent = team_recent_matches(history, row["away_team_id"], kickoff, league_id)
+
+    def strengths(recent: pd.DataFrame, team_id: Any) -> tuple[float, float]:
+        if recent.empty:
+            return 1.0, 1.0
+        team = int(team_id)
+        home_mask = recent["home_team_id"] == team
+        goals_for = [int(match["home_score"] if home else match["away_score"]) for match, home in zip(recent.to_dict("records"), home_mask)]
+        goals_against = [int(match["away_score"] if home else match["home_score"]) for match, home in zip(recent.to_dict("records"), home_mask)]
+        shrink = len(recent) / (len(recent) + 5)
+        attack = 1 + shrink * (sum(goals_for) / len(goals_for) / baseline - 1)
+        defense_weakness = 1 + shrink * (sum(goals_against) / len(goals_against) / baseline - 1)
+        return max(0.25, attack), max(0.25, defense_weakness)
+
+    home_attack, home_defense = strengths(home_recent, row["home_team_id"])
+    away_attack, away_defense = strengths(away_recent, row["away_team_id"])
+    expected_home = home_mean * math.sqrt(home_attack * away_defense)
+    expected_away = away_mean * math.sqrt(away_attack * home_defense)
+    home_goals, away_goals = poisson_probabilities(expected_home), poisson_probabilities(expected_away)
+    score_probabilities = [
+        (home_count, away_count, home_probability * away_probability)
+        for home_count, home_probability in enumerate(home_goals)
+        for away_count, away_probability in enumerate(away_goals)
+    ]
+    total = sum(probability for _, _, probability in score_probabilities)
+    home_win = sum(probability for home_count, away_count, probability in score_probabilities if home_count > away_count) / total
+    draw = sum(probability for home_count, away_count, probability in score_probabilities if home_count == away_count) / total
+    away_win = sum(probability for home_count, away_count, probability in score_probabilities if home_count < away_count) / total
+    over_2_5 = sum(probability for home_count, away_count, probability in score_probabilities if home_count + away_count >= 3) / total
+    btts = sum(probability for home_count, away_count, probability in score_probabilities if home_count > 0 and away_count > 0) / total
+    most_likely = max(score_probabilities, key=lambda item: item[2])
+    return {
+        "home_win": home_win,
+        "draw": draw,
+        "away_win": away_win,
+        "over_2_5": over_2_5,
+        "btts": btts,
+        "expected_home": expected_home,
+        "expected_away": expected_away,
+        "most_likely_score": f"{most_likely[0]}–{most_likely[1]}",
+        "history_count": len(league_matches),
+        "home_sample": len(home_recent),
+        "away_sample": len(away_recent),
+    }
+
+
+def render_model_forecast(row: dict[str, Any], history: pd.DataFrame) -> None:
+    forecast = model_match_forecast(row, history)
+    st.markdown("#### 🤖 Model tahmini · Form Poisson")
+    if forecast is None:
+        st.info("Bu ligde model tahmini üretmek için yeterli maç geçmişi yok.")
+        return
+    top, details = st.columns([1, 3])
+    with top:
+        st.metric("En olası skor", forecast["most_likely_score"])
+    with details:
+        st.markdown("**1X2 olasılıkları**")
+        cols = st.columns(3)
+        for col, label, key in zip(cols, ("1 · Ev sahibi", "X · Beraberlik", "2 · Deplasman"), ("home_win", "draw", "away_win")):
+            col.metric(label, f"%{forecast[key] * 100:.1f}")
+        more = st.columns(2)
+        more[0].metric("2.5 Üst", f"%{forecast['over_2_5'] * 100:.1f}")
+        more[1].metric("Karşılıklı gol", f"%{forecast['btts'] * 100:.1f}")
+    st.caption(
+        f"Bağımsız Poisson modeli · lig ortalaması ve takımların aynı ligdeki son maçları. "
+        f"Lig örneklemi: {forecast['history_count']} maç; takım örneklemi: "
+        f"{forecast['home_sample']} / {forecast['away_sample']} maç. "
+        f"Beklenen gol: {forecast['expected_home']:.2f}–{forecast['expected_away']:.2f}. "
+        "Oranlardan türetilmemiştir; olasılıklar istatistiksel tahmindir."
+    )
+
+
 def render_recent_form(
     row: dict[str, Any], history: pd.DataFrame, team_names: dict[Any, str]
 ) -> None:
     """Show recent form and match logs for both teams without implying a forecast."""
     kickoff = row["kickoff"]
     home_id, away_id = row["home_team_id"], row["away_team_id"]
-    home_recent = team_recent_matches(history, home_id, kickoff)
-    away_recent = team_recent_matches(history, away_id, kickoff)
+    home_recent = team_recent_matches(history, home_id, kickoff, row["league_id"])
+    away_recent = team_recent_matches(history, away_id, kickoff, row["league_id"])
     home_stats, away_stats = summarize_team_form(home_recent, home_id), summarize_team_form(away_recent, away_id)
     st.markdown("#### Maç öncesi form · son 5 tamamlanmış maç")
     st.caption("Özet yalnızca başlama saatinden önce tamamlanmış maçları kullanır. Bu bölüm geçmiş performansı gösterir, tahmin değildir.")
@@ -278,6 +383,8 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
             meta.caption(f"{row['league_name']}  ·  {time_text}")
             status_col.caption(str(row.get("status", "")).replace("_", " ").title())
             st.markdown(f"<div class='match-title'>{row['home_name']} <span style='color:#91a2b4'>—</span> {row['away_name']}</div>", unsafe_allow_html=True)
+            render_model_forecast(row, history)
+            st.divider()
             render_recent_form(row, history, team_names)
             st.divider()
             if not quote:
@@ -346,7 +453,11 @@ except Exception as exc:
 with tab_analysis:
     try:
         match_records, quote_records = load_match_day(selected_day)
-        analysis_records = load_completed_match_history()
+        try:
+            analysis_records = load_completed_match_history()
+        except Exception as exc:
+            analysis_records = []
+            st.warning(f"Geçmiş maçlar yüklenemedi; model tahmini ve form analizi gösterilemiyor: {exc}")
         try:
             market_labels = load_iddaa_market_labels()
         except Exception:
