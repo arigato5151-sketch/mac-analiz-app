@@ -678,11 +678,10 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
         quote = latest.get(match_id)
         kickoff = row["kickoff"]
         time_text = kickoff.strftime("%H:%M") if pd.notna(kickoff) else "Saat bilgisi yok"
-        with st.container(border=True):
+        with st.expander(f"{time_text}  ·  {row['home_name']} — {row['away_name']}  ·  {row['league_name']}", expanded=False):
             meta, status_col = st.columns([4, 1])
-            meta.caption(f"{row['league_name']}  ·  {time_text}")
+            meta.caption(row["league_name"])
             status_col.caption(str(row.get("status", "")).replace("_", " ").title())
-            st.markdown(f"<div class='match-title'>{row['home_name']} <span style='color:#91a2b4'>—</span> {row['away_name']}</div>", unsafe_allow_html=True)
             payload = unpack_payload(quote.get("odds")) if quote else {}
             markets = market_rows(payload, market_labels) if quote else []
             model_forecast, corner_forecast = render_model_forecast(row, history, markets)
