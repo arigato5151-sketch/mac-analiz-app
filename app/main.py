@@ -76,10 +76,13 @@ def market_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[st
         market_code = market.get("market_id")
         sport_type = market.get("sport_type")
         market_key = f"{sport_type if sport_type is not None else ''}:{market_code if market_code is not None else ''}"
-        name = str(
-            market.get("market_name")
-            or labels.get(market_key)
+        configured_name = (
+            labels.get(market_key)
             or labels.get(str(market_code if market_code is not None else ""))
+        )
+        name = str(
+            configured_name
+            or market.get("market_name")
             or _infer_legacy_market_name(selections)
             or (f"Market {market_code}" if market_code is not None else "Diğer market")
         )
@@ -87,7 +90,7 @@ def market_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[st
             name = f"{name} · {line}"
         rows.append({
             "name": name,
-            "source_name": str(market.get("market_name") or name),
+            "source_name": str(configured_name or market.get("market_name") or name),
             "line": line,
             "market_id": market_code,
             "selections": [
@@ -348,6 +351,14 @@ def quote_selection_model_probability(
     if forecast is None:
         return None
     label = selection_name.casefold().strip().replace("ı", "i").replace("ş", "s").replace("ü", "u").replace("ö", "o").replace("ç", "c").replace("ğ", "g")
+    if label == "0":
+        label = "x"
+    if label.replace(" ", "") in {"1ve0", "0ve1"}:
+        label = "1x"
+    elif label.replace(" ", "") in {"0ve2", "2ve0"}:
+        label = "x2"
+    elif label.replace(" ", "") in {"1ve2", "2ve1"}:
+        label = "12"
     market_name = str(market.get("source_name") or market.get("name") or "").casefold()
     market_name = market_name.replace("ı", "i").replace("ş", "s").replace("ü", "u").replace("ö", "o").replace("ç", "c").replace("ğ", "g")
     market_context = f"{market_name} {label}"
@@ -376,7 +387,7 @@ def quote_selection_model_probability(
         code = label.replace(" ", "")
         return {"1x": forecast["home_win"] + forecast["draw"], "x2": forecast["draw"] + forecast["away_win"], "12": forecast["home_win"] + forecast["away_win"]}.get(code)
     outcomes = {
-        str(item.get("name", "")).casefold().strip().replace("ı", "i").replace("ş", "s").replace("ü", "u").replace("ö", "o").replace("ç", "c").replace("ğ", "g")
+        ("x" if str(item.get("name", "")).casefold().strip() == "0" else str(item.get("name", "")).casefold().strip().replace("ı", "i").replace("ş", "s").replace("ü", "u").replace("ö", "o").replace("ç", "c").replace("ğ", "g"))
         for item in market.get("selections", [])
     }
     if outcomes.issubset({"1", "x", "2"}) and len(outcomes) >= 2 and label in {"1", "x", "2"}:
@@ -437,6 +448,8 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
             for source, target in (("ı", "i"), ("ş", "s"), ("ü", "u"), ("ö", "o"), ("ç", "c"), ("ğ", "g")):
                 market_name = market_name.replace(source, target)
                 label = label.replace(source, target)
+            compact_label = label.replace(" ", "")
+            label = {"0": "x", "1ve0": "1x", "0ve1": "1x", "0ve2": "x2", "2ve0": "x2", "1ve2": "12", "2ve1": "12"}.get(compact_label, label)
             line_value = market.get("line")
             if line_value in (None, "", 0, "0"):
                 match = re.search(r"\d+(?:[.,]\d+)?", f"{market.get('name') or ''} {label}")
