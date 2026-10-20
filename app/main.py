@@ -216,8 +216,17 @@ def poisson_probabilities(mean: float, max_goals: int = 12) -> list[float]:
     return [probability / total for probability in probabilities]
 
 
-def model_match_forecast(row: dict[str, Any], history: pd.DataFrame) -> dict[str, Any] | None:
-    """Fit a simple independent Poisson goals model from pre-match league history."""
+RECENT_FORM_PRIORS = (2.5, 5.0, 8.0, 12.0, 20.0)
+DEFAULT_RECENT_FORM_PRIOR = 5.0
+MIN_TUNING_HISTORY = 160
+TUNING_VALIDATION_MATCHES = 100
+MIN_LOG_LOSS_IMPROVEMENT = 0.005
+
+
+def _expected_goal_means(
+    row: dict[str, Any], history: pd.DataFrame, recent_form_prior: float
+) -> tuple[float, float] | None:
+    """Estimate goal means using only matches completed before this kickoff."""
     kickoff = row["kickoff"]
     if history.empty or pd.isna(kickoff):
         return None
@@ -236,25 +245,152 @@ def model_match_forecast(row: dict[str, Any], history: pd.DataFrame) -> dict[str
     if baseline <= 0:
         return None
 
-    home_recent = team_recent_matches(history, row["home_team_id"], kickoff, league_id)
-    away_recent = team_recent_matches(history, row["away_team_id"], kickoff, league_id)
-
     def strengths(recent: pd.DataFrame, team_id: Any) -> tuple[float, float]:
         if recent.empty:
             return 1.0, 1.0
         team = int(team_id)
         home_mask = recent["home_team_id"] == team
-        goals_for = [int(match["home_score"] if home else match["away_score"]) for match, home in zip(recent.to_dict("records"), home_mask)]
-        goals_against = [int(match["away_score"] if home else match["home_score"]) for match, home in zip(recent.to_dict("records"), home_mask)]
-        shrink = len(recent) / (len(recent) + 5)
+        goals_for = [
+            int(match["home_score"] if home else match["away_score"])
+            for match, home in zip(recent.to_dict("records"), home_mask)
+        ]
+        goals_against = [
+            int(match["away_score"] if home else match["home_score"])
+            for match, home in zip(recent.to_dict("records"), home_mask)
+        ]
+        shrink = len(recent) / (len(recent) + recent_form_prior)
         attack = 1 + shrink * (sum(goals_for) / len(goals_for) / baseline - 1)
         defense_weakness = 1 + shrink * (sum(goals_against) / len(goals_against) / baseline - 1)
         return max(0.25, attack), max(0.25, defense_weakness)
 
+    home_recent = team_recent_matches(history, row["home_team_id"], kickoff, league_id)
+    away_recent = team_recent_matches(history, row["away_team_id"], kickoff, league_id)
     home_attack, home_defense = strengths(home_recent, row["home_team_id"])
     away_attack, away_defense = strengths(away_recent, row["away_team_id"])
-    expected_home = home_mean * math.sqrt(home_attack * away_defense)
-    expected_away = away_mean * math.sqrt(away_attack * home_defense)
+    return (
+        home_mean * math.sqrt(home_attack * away_defense),
+        away_mean * math.sqrt(away_attack * home_defense),
+    )
+
+
+def _match_outcome_probabilities(expected_home: float, expected_away: float) -> tuple[float, float, float]:
+    home_goals, away_goals = poisson_probabilities(expected_home), poisson_probabilities(expected_away)
+    probabilities = [
+        (home_count, away_count, home_probability * away_probability)
+        for home_count, home_probability in enumerate(home_goals)
+        for away_count, away_probability in enumerate(away_goals)
+    ]
+    total = sum(probability for _, _, probability in probabilities)
+    outcome_probabilities = []
+    for outcome in range(3):
+        if outcome == 0:
+            is_outcome = lambda home, away: home > away
+        elif outcome == 1:
+            is_outcome = lambda home, away: home == away
+        else:
+            is_outcome = lambda home, away: home < away
+        outcome_probabilities.append(
+            sum(
+                probability
+                for home_count, away_count, probability in probabilities
+                if is_outcome(home_count, away_count)
+            ) / total
+        )
+    return tuple(outcome_probabilities)
+
+
+@st.cache_data(ttl=86_400, max_entries=32, show_spinner=False)
+def tune_recent_form_prior(league_history: pd.DataFrame) -> dict[str, Any]:
+    """Choose a team-form shrinkage prior by chronological out-of-sample log loss."""
+    ordered = league_history.sort_values(["match_date", "id"], ascending=True).reset_index(drop=True)
+    if len(ordered) < MIN_TUNING_HISTORY:
+        return {
+            "prior": DEFAULT_RECENT_FORM_PRIOR,
+            "validation_matches": 0,
+            "log_loss": None,
+            "baseline_log_loss": None,
+        }
+
+    first_validation = max(60, len(ordered) - TUNING_VALIDATION_MATCHES)
+    predictions: dict[float, list[float]] = {prior: [] for prior in RECENT_FORM_PRIORS}
+    rows = ordered.to_dict("records")
+    for index in range(first_validation, len(rows)):
+        match = rows[index]
+        if match.get("home_score") is None or match.get("away_score") is None:
+            continue
+        home_score, away_score = int(match["home_score"]), int(match["away_score"])
+        outcome = 0 if home_score > away_score else 1 if home_score == away_score else 2
+        prior_history = ordered.iloc[:index]
+        row = {
+            "kickoff": match["match_date"],
+            "league_id": match["league_id"],
+            "home_team_id": match["home_team_id"],
+            "away_team_id": match["away_team_id"],
+        }
+        for prior in RECENT_FORM_PRIORS:
+            means = _expected_goal_means(row, prior_history, prior)
+            if means is None:
+                predictions[prior].append(float("nan"))
+            else:
+                predictions[prior].append(_match_outcome_probabilities(*means)[outcome])
+
+    baseline = predictions[DEFAULT_RECENT_FORM_PRIOR]
+    valid = [index for index, value in enumerate(baseline) if not math.isnan(value)]
+    if len(valid) < 60:
+        return {
+            "prior": DEFAULT_RECENT_FORM_PRIOR,
+            "validation_matches": len(valid),
+            "log_loss": None,
+            "baseline_log_loss": None,
+        }
+
+    scores = {
+        prior: sum(-math.log(max(1e-12, predictions[prior][index])) for index in valid) / len(valid)
+        for prior in RECENT_FORM_PRIORS
+        if all(not math.isnan(predictions[prior][index]) for index in valid)
+    }
+    baseline_loss = scores.get(DEFAULT_RECENT_FORM_PRIOR)
+    if baseline_loss is None:
+        return {
+            "prior": DEFAULT_RECENT_FORM_PRIOR,
+            "validation_matches": len(valid),
+            "log_loss": None,
+            "baseline_log_loss": None,
+        }
+    best_prior = min(scores, key=scores.get)
+    best_loss = scores[best_prior]
+    if baseline_loss - best_loss < MIN_LOG_LOSS_IMPROVEMENT:
+        best_prior, best_loss = DEFAULT_RECENT_FORM_PRIOR, baseline_loss
+    return {
+        "prior": best_prior,
+        "validation_matches": len(valid),
+        "log_loss": best_loss,
+        "baseline_log_loss": baseline_loss,
+    }
+
+
+def model_match_forecast(row: dict[str, Any], history: pd.DataFrame) -> dict[str, Any] | None:
+    """Fit a simple independent Poisson goals model from pre-match league history."""
+    kickoff = row["kickoff"]
+    if history.empty or pd.isna(kickoff):
+        return None
+    league_id = pd.to_numeric(pd.Series([row.get("league_id")]), errors="coerce").iloc[0]
+    if pd.isna(league_id):
+        return None
+    league_matches = history[
+        (history["league_id"] == int(league_id))
+        & (history["match_date"] < kickoff)
+    ]
+    if len(league_matches) < 10:
+        return None
+    tuning = tune_recent_form_prior(league_matches)
+    recent_form_prior = float(tuning["prior"])
+    means = _expected_goal_means(row, history, recent_form_prior)
+    if means is None:
+        return None
+    expected_home, expected_away = means
+    home_recent = team_recent_matches(history, row["home_team_id"], kickoff, league_id)
+    away_recent = team_recent_matches(history, row["away_team_id"], kickoff, league_id)
     home_goals, away_goals = poisson_probabilities(expected_home), poisson_probabilities(expected_away)
     score_probabilities = [
         (home_count, away_count, home_probability * away_probability)
@@ -285,6 +421,10 @@ def model_match_forecast(row: dict[str, Any], history: pd.DataFrame) -> dict[str
         "history_count": len(league_matches),
         "home_sample": len(home_recent),
         "away_sample": len(away_recent),
+        "recent_form_prior": recent_form_prior,
+        "tuning_matches": tuning["validation_matches"],
+        "tuning_log_loss": tuning["log_loss"],
+        "tuning_baseline_log_loss": tuning["baseline_log_loss"],
     }
 
 
@@ -635,11 +775,19 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
     with st.expander("🤖 Tüm maç tahminleri ve karşılık gelen oranlar", expanded=True):
         st.markdown("#### Model tahmini · Form Poisson")
         st.metric("En olası skor", forecast["most_likely_score"])
+        if forecast["tuning_matches"]:
+            tuning_note = (
+                f"Form ağırlığı, {forecast['tuning_matches']} geçmiş maça dayalı doğrulamada "
+                f"otomatik ayarlandı (önsel: {forecast['recent_form_prior']:g}). "
+            )
+        else:
+            tuning_note = "Doğrulama için yeterli geçmiş maç bulunmadığından varsayılan form ağırlığı kullanılıyor. "
         st.caption(
             f"Bağımsız Poisson modeli · lig ortalaması ve takımların aynı ligdeki son maçları. "
             f"Lig örneklemi: {forecast['history_count']} maç; takım örneklemi: "
             f"{forecast['home_sample']} / {forecast['away_sample']} maç. "
             f"Beklenen gol: {forecast['expected_home']:.2f}–{forecast['expected_away']:.2f}. "
+            f"{tuning_note}"
             "Oranlardan türetilmemiştir; olasılıklar istatistiksel tahmindir."
         )
         st.markdown("#### Tahminler ve karşılık gelen oranlar")
