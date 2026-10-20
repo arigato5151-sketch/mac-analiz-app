@@ -82,11 +82,16 @@ TEAM_ALIASES: dict[str, tuple[str, ...]] = {
     "al ahli jeddah": ("ahli saudi", "al ahli saudi", "al ahli", "al-ahli jeddah"),
     "al fayha": ("al fayha fc", "al-fayha"),
     "bayern munich": ("bayern munich k", "bayern munich women", "bayern munich (k)", "bayern munchen"),
-    "vfb stuttgart": ("vfb stuttgart k", "vfb stuttgart (k)"),
+    "vfb stuttgart": ("vfb stuttgart k", "vfb stuttgart (k)", "stuttgart"),
     "estudiantes plata": ("estudiantes de la plata", "estudiantes l p", "estudiantes lp"),
     "rodina moskva": ("rodina moscow",),
     "al diriyah": ("al draih", "al diraiyah", "al diriyah fc"),
     "wolves": ("wolverhampton", "wolverhampton wanderers", "wolverhampton wanderers fc"),
+    "porto": ("fc porto", "porto fc"),
+    "psv eindhoven": ("psv", "psv eindhoven fc"),
+    "slavia prague": ("slavia praha", "slavia prag"),
+    "borussia dortmund": ("b dortmund", "b dortmund u19", "borussia dortmund u19"),
+    "sabah fa": ("sabah",),
 }
 
 
@@ -189,6 +194,11 @@ def competition_league_ids(competitions: list[dict[str, Any]]) -> dict[int, int]
         league_id = league_by_competition_ref.get(competition_ref)
         if league_id is None and own_competition_id in {1220, 1219, 1221}:
             league_id = 144
+        # IdDaa's current Champions League catalogue no longer exposes the
+        # API-Football league ID as cref. Match its exact football competition
+        # name so the daily bulletin does not silently skip those fixtures.
+        if league_id is None and normalize(str(competition.get("n", ""))) == "uefa sampiyonlar ligi":
+            league_id = 2
         if league_id is not None:
             result[int(competition["i"])] = league_id
     return result
