@@ -85,7 +85,19 @@ TEAM_ALIASES: dict[str, tuple[str, ...]] = {
     "vfb stuttgart": ("vfb stuttgart k", "vfb stuttgart (k)"),
     "estudiantes plata": ("estudiantes de la plata", "estudiantes l p", "estudiantes lp"),
     "rodina moskva": ("rodina moscow",),
+    "al diriyah": ("al draih", "al diraiyah", "al diriyah fc"),
+    "wolves": ("wolverhampton", "wolverhampton wanderers", "wolverhampton wanderers fc"),
 }
+
+
+def _team_alias_groups() -> tuple[frozenset[str], ...]:
+    return tuple(
+        frozenset({normalize_team(canonical), *(normalize_team(alias) for alias in aliases)})
+        for canonical, aliases in TEAM_ALIASES.items()
+    )
+
+
+TEAM_ALIAS_GROUPS = _team_alias_groups()
 
 
 def team_names_match(left: str, right: str) -> bool:
@@ -94,33 +106,25 @@ def team_names_match(left: str, right: str) -> bool:
         return False
     if left_norm == right_norm:
         return True
-    for canonical, aliases in TEAM_ALIASES.items():
-        values = {normalize_team(canonical), *(normalize_team(alias) for alias in aliases)}
+    for values in TEAM_ALIAS_GROUPS:
         if left_norm in values and right_norm in values:
             return True
-    alias_groups = [
-        {normalize_team(canonical), *(normalize_team(alias) for alias in aliases)}
-        for canonical, aliases in TEAM_ALIASES.items()
-    ]
-    for values in alias_groups:
-        left_tokens, right_tokens = set(left_norm.split()), set(right_norm.split())
-        if left_norm in values or right_norm in values:
-            return left_norm in values and right_norm in values
-        # Regional suffixes and provider-specific club prefixes often leave
-        # the core club name intact after token normalization.
-        if (
-            left_tokens <= right_tokens
-            and len(left_norm) >= 8
-            or right_tokens <= left_tokens
-            and len(right_norm) >= 8
-        ):
-            return True
+    # Provider names can add a geographic/organizational suffix (e.g.
+    # "Bayern Munich" vs "Bayern Munich II"). Require the shorter name to
+    # have at least two meaningful tokens so common short names cannot match
+    # an unrelated club by accident.
+    left_tokens, right_tokens = set(left_norm.split()), set(right_norm.split())
+    if (
+        min(len(left_tokens), len(right_tokens)) >= 2
+        and (left_tokens <= right_tokens or right_tokens <= left_tokens)
+    ):
+        return True
     # Accept well-known abbreviations such as "S Martin SJ" against the full
     # app name, but require a high score and avoid matching a short token alone.
     if min(len(left_norm), len(right_norm)) < 6:
         return False
     score = SequenceMatcher(None, left_norm, right_norm).ratio()
-    return score >= 0.88 or left_norm in right_norm or right_norm in left_norm
+    return score >= 0.92
 
 
 def _request_json(session: requests.Session, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
