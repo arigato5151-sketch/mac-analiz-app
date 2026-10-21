@@ -83,7 +83,10 @@ def market_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[st
         selections = []
         for selection in market.get("selections", []):
             try:
-                odd = float(selection.get("odds"))
+                # IdDaa provides both the internal odd and the value shown to
+                # bettors. Display the latter so the app matches IdDaa's board.
+                display_odd = selection.get("display_odds")
+                odd = float(display_odd if display_odd is not None else selection.get("odds"))
             except (TypeError, ValueError):
                 continue
             if odd > 1:
