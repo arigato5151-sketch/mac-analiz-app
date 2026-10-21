@@ -81,7 +81,7 @@ TEAM_ALIASES: dict[str, tuple[str, ...]] = {
     "bahia": ("bahia ba", "ec bahia"),
     "al ahli jeddah": ("ahli saudi", "al ahli saudi", "al ahli", "al-ahli jeddah"),
     "al fayha": ("al fayha fc", "al-fayha"),
-    "bayern munich": ("bayern munich k", "bayern munich women", "bayern munich (k)", "bayern munchen"),
+    "bayern munich": ("bayern munich k", "bayern munich women", "bayern munich (k)", "bayern munchen", "bayern munih"),
     "vfb stuttgart": ("vfb stuttgart k", "vfb stuttgart (k)", "stuttgart"),
     "estudiantes plata": ("estudiantes de la plata", "estudiantes l p", "estudiantes lp"),
     "rodina moskva": ("rodina moscow",),
@@ -92,6 +92,12 @@ TEAM_ALIASES: dict[str, tuple[str, ...]] = {
     "slavia prague": ("slavia praha", "slavia prag"),
     "borussia dortmund": ("b dortmund", "b dortmund u19", "borussia dortmund u19"),
     "sabah fa": ("sabah",),
+    "lens": ("rc lens",),
+    "brugge": ("club brugge", "club brugge kv", "brugge kv"),
+    "sporting lisbon": ("sporting cp", "sporting lizbon"),
+    "lask": ("lask linz",),
+    "como": ("como 1907",),
+    "athletic club": ("athletic bilbao", "athletic club bilbao"),
 }
 
 
