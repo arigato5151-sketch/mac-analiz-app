@@ -14,6 +14,9 @@ API_FOOTBALL_KEY=...
 SUPABASE_URL=https://<project>.supabase.co
 SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
+TELEGRAM_BOT_TOKEN=...  # İsteğe bağlı hata bildirimi
+TELEGRAM_CHAT_ID=...    # İsteğe bağlı hata bildirimi
+ODDS_HISTORY_ALERT_ROWS=...  # İsteğe bağlı satır sayısı uyarı eşiği
 ```
 
 Ardından:

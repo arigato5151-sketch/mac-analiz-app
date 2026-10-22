@@ -45,14 +45,35 @@ try {
         & $Python -m data_pipeline.fetch_iddaa_odds --retries 3
         if ($LASTEXITCODE -ne 0) { throw "IdDaa odds import failed with exit code $LASTEXITCODE" }
         Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] DONE  Import IdDaa fixtures and markets"
-        Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] PIPELINE SUCCESS"
     }
 }
 catch {
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] PIPELINE FAILED: $($_.Exception.Message)" -ForegroundColor Red
     $ExitCode = 1
+    if (Test-Path -LiteralPath $Python) {
+        & $Python -m data_pipeline.notify_failure "Maç Analiz pipeline başarısız. Günlük: $LogPath"
+    }
 }
 finally {
+    if ($HasMutex -and (-not $OddsRefreshOnly) -and (Test-Path -LiteralPath $Python)) {
+        try {
+            & $Python -m data_pipeline.monitor_odds_history
+            if ($LASTEXITCODE -ne 0) {
+                throw "Odds history size report failed with exit code $LASTEXITCODE"
+            }
+        }
+        catch {
+            Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] HISTORY MONITOR FAILED: $($_.Exception.Message)" -ForegroundColor Red
+            $ExitCode = 1
+            & $Python -m data_pipeline.notify_failure "Oran geçmişi boyut raporu başarısız. Günlük: $LogPath"
+        }
+    }
+    if ($ExitCode -eq 0) {
+        Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] PIPELINE SUCCESS"
+    }
+    else {
+        Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] PIPELINE FAILED" -ForegroundColor Red
+    }
     if ($HasMutex) { $Mutex.ReleaseMutex() }
     $Mutex.Dispose()
     Stop-Transcript | Out-Null

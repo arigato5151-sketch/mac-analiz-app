@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import re
 import time
 import unicodedata
@@ -28,7 +29,8 @@ IDDAA_COMPETITION_REFS: dict[int, int] = {
     39: 1,
     140: 36,
     135: 33,
-    78: 8,
+    # IdDaa catalogue currently identifies Germany Bundesliga as cref 42.
+    78: 42,
     61: 4,
     40: 2,
     94: 52,
@@ -47,7 +49,7 @@ IDDAA_COMPETITION_REFS: dict[int, int] = {
     141: 37,  # Segunda División: IdDaa İspanya La Liga 2
     62: 19,  # Ligue 2: IdDaa Fransa Ligue 2
 }
-REQUIRED_IDDAA_LEAGUES = set(IDDAA_COMPETITION_REFS)
+REQUIRED_IDDAA_LEAGUES = set(IDDAA_COMPETITION_REFS) | {3, 848}
 
 
 def normalize(value: str) -> str:
@@ -251,6 +253,9 @@ def competition_league_ids(competitions: list[dict[str, Any]]) -> dict[int, int]
                 "uefa avrupa ligi": 3,
                 "uefa avrupa konferans ligi": 848,
                 "uefa konferans ligi": 848,
+                "almanya bundesliga": 78,
+                "arjantin primera lpf kapanis": 128,
+                "arjantin primera lpf acilis": 128,
             }
             league_id = european_competitions.get(competition_name)
         if league_id is not None:
@@ -333,7 +338,7 @@ def import_daily_odds(
     *,
     match_day: date,
     session: requests.Session | None = None,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     http = session or requests.Session()
     http.headers.update({"Accept": "application/json", "User-Agent": "mac-analiz-app/1.0"})
     competitions, events, labels = fetch_bulletin(http)
@@ -407,6 +412,7 @@ def import_daily_odds(
     seen_events: set[int] = set()
     matched_ids: set[int] = set()
     unmatched = 0
+    unmatched_details: list[dict[str, Any]] = []
     selected_events = 0
     selected_market_events: list[dict[str, Any]] = []
     for event in events:
@@ -451,6 +457,16 @@ def import_daily_odds(
                     team_mismatch_candidates.append(
                         {"match_id": row["id"], "home": db_home, "away": db_away}
                     )
+            detail = {
+                "competition_id": competition_id,
+                "league_id": league_id,
+                "home": home,
+                "away": away,
+                "kickoff": kickoff.isoformat(),
+                "reason": "no_unique_team_pair_match",
+                "candidate_fixtures": team_mismatch_candidates[:5],
+            }
+            unmatched_details.append(detail)
             LOG.warning(
                 "Unmatched IdDaa event: competition_id=%s league_id=%s home=%r away=%r kickoff=%s reason=%s same_day_league_fixtures=%s partial_team_candidates=%s",
                 competition_id,
@@ -472,6 +488,19 @@ def import_daily_odds(
         match_kickoff = datetime.fromisoformat(str(target["match_date"]).replace("Z", "+00:00"))
         if abs((match_kickoff - kickoff.astimezone(timezone.utc)).total_seconds()) > 6 * 3600:
             unmatched += 1
+            detail = {
+                "competition_id": competition_id,
+                "league_id": league_id,
+                "home": home,
+                "away": away,
+                "kickoff": kickoff.isoformat(),
+                "reason": "kickoff_diff_over_6h",
+                "candidate_match_id": target["id"],
+                "candidate_home": team_names.get(int(target["home_team_id"])),
+                "candidate_away": team_names.get(int(target["away_team_id"])),
+                "candidate_kickoff": match_kickoff.isoformat(),
+            }
+            unmatched_details.append(detail)
             LOG.warning(
                 "Unmatched IdDaa event: competition_id=%s league_id=%s home=%r away=%r kickoff=%s reason=kickoff_diff_over_6h candidate_match_id=%s candidate_home=%r candidate_away=%r candidate_kickoff=%s",
                 competition_id,
@@ -500,19 +529,77 @@ def import_daily_odds(
             }
         )
 
-    if selected_events and not records:
+    if selected_events and not records and not unmatched:
         raise RuntimeError(
-            f"IdDaa returned {selected_events} target-league events for {match_day}, but none matched app fixtures"
+            f"IdDaa returned {selected_events} target-league events for {match_day}, "
+            "but produced no unique fixture matches"
         )
     if records:
         db.insert("odds_quote_history", records)
     return {
         "competitions_matched": len(target_competitions),
+        "leagues_missing_from_iddaa_catalogue": sorted(missing_leagues),
         "events_for_day": selected_events,
+        "events_matched": len(records),
         "quotes_saved": len(records),
         "events_unmatched": unmatched,
+        "unmatched_details": unmatched_details,
         "markets": summarize_markets(selected_market_events, labels),
     }
+
+
+def write_github_summary(match_day: date, summary: dict[str, Any]) -> None:
+    """Add odds coverage and catalogue gaps to the Actions run summary."""
+    summary_path = os.getenv("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+    league_labels = {
+        league.id: f"{league.name} ({league.country})"
+        for league in TRACKED_LEAGUES
+    }
+    missing_leagues = ", ".join(
+        f"{league_id}: {league_labels.get(league_id, 'Bilinmeyen lig')}"
+        for league_id in summary["leagues_missing_from_iddaa_catalogue"]
+    ) or "Yok"
+    lines = [
+        "## IdDaa oran kapsamı",
+        f"- Tarih: {match_day.isoformat()}",
+        f"- Eşleşen: {summary['events_matched']} / {summary['events_for_day']}",
+        f"- Kaydedilen oran anlıkları: {summary['quotes_saved']}",
+        f"- Eşleşmeyen: {summary['events_unmatched']}",
+        f"- Katalogda eşleşmeyen lig ID'leri: {missing_leagues}",
+    ]
+    if summary["unmatched_details"]:
+        lines.extend([
+            "",
+            "| Lig ID | IdDaa maçı | Başlama | Olası fikstür | Neden |",
+            "|---:|---|---|---|---|",
+        ])
+        for item in summary["unmatched_details"]:
+            matchup = f"{item['home']} — {item['away']}".replace("|", "\\|")
+            candidates = item.get("candidate_fixtures", [])
+            if candidates:
+                candidate_text = "; ".join(
+                    f"{candidate['home']} — {candidate['away']} (ID {candidate['match_id']})"
+                    for candidate in candidates
+                )
+            elif item.get("candidate_match_id"):
+                candidate_text = (
+                    f"{item.get('candidate_home')} — {item.get('candidate_away')} "
+                    f"(ID {item['candidate_match_id']})"
+                )
+            else:
+                candidate_text = "—"
+            candidate_text = candidate_text.replace("|", "\\|")
+            lines.append(
+                f"| {item['league_id']} | {matchup} | {item['kickoff']} | "
+                f"{candidate_text} | {item['reason']} |"
+            )
+    try:
+        with open(summary_path, "a", encoding="utf-8") as summary_file:
+            summary_file.write("\n".join(lines) + "\n")
+    except OSError:
+        LOG.exception("Could not write IdDaa coverage to the GitHub Actions summary")
 
 
 def main() -> None:
@@ -530,6 +617,7 @@ def main() -> None:
         try:
             summary = import_daily_odds(db, match_day=match_day)
             print({"date": match_day.isoformat(), "iddaa_odds": summary})
+            write_github_summary(match_day, summary)
             if summary["events_unmatched"]:
                 LOG.error(
                     "IdDaa odds import completed with partial coverage: "

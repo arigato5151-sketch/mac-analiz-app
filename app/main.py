@@ -301,20 +301,46 @@ def _match_outcome_probabilities(expected_home: float, expected_away: float) -> 
     return tuple(outcome_probabilities)
 
 
+def _expected_calibration_error(pairs: list[tuple[float, float]]) -> float | None:
+    """Return ten-bin expected calibration error for forecast/actual pairs."""
+    if not pairs:
+        return None
+    error = 0.0
+    for bin_index in range(10):
+        bucket = [
+            (probability, actual)
+            for probability, actual in pairs
+            if min(9, int(probability * 10)) == bin_index
+        ]
+        if bucket:
+            error += len(bucket) / len(pairs) * abs(
+                sum(probability for probability, _ in bucket) / len(bucket)
+                - sum(actual for _, actual in bucket) / len(bucket)
+            )
+    return error
+
+
 @st.cache_data(ttl=86_400, max_entries=32, show_spinner=False)
 def tune_recent_form_prior(league_history: pd.DataFrame) -> dict[str, Any]:
-    """Choose a team-form shrinkage prior by chronological out-of-sample log loss."""
+    """Select a form prior on earlier matches and report later holdout performance."""
     ordered = league_history.sort_values(["match_date", "id"], ascending=True).reset_index(drop=True)
+    empty_result = {
+        "prior": DEFAULT_RECENT_FORM_PRIOR,
+        "validation_matches": 0,
+        "log_loss": None,
+        "baseline_log_loss": None,
+        "selection_matches": 0,
+        "selection_log_loss": None,
+        "market_metrics": {},
+    }
     if len(ordered) < MIN_TUNING_HISTORY:
-        return {
-            "prior": DEFAULT_RECENT_FORM_PRIOR,
-            "validation_matches": 0,
-            "log_loss": None,
-            "baseline_log_loss": None,
-        }
+        return empty_result
 
     first_validation = max(60, len(ordered) - TUNING_VALIDATION_MATCHES)
-    predictions: dict[float, list[float]] = {prior: [] for prior in RECENT_FORM_PRIORS}
+    predictions: dict[float, list[dict[str, float]]] = {
+        prior: [] for prior in RECENT_FORM_PRIORS
+    }
+    actual_outcomes: list[int] = []
     rows = ordered.to_dict("records")
     for index in range(first_validation, len(rows)):
         match = rows[index]
@@ -322,6 +348,7 @@ def tune_recent_form_prior(league_history: pd.DataFrame) -> dict[str, Any]:
             continue
         home_score, away_score = int(match["home_score"]), int(match["away_score"])
         outcome = 0 if home_score > away_score else 1 if home_score == away_score else 2
+        actual_outcomes.append(outcome)
         prior_history = ordered.iloc[:index]
         row = {
             "kickoff": match["match_date"],
@@ -332,42 +359,198 @@ def tune_recent_form_prior(league_history: pd.DataFrame) -> dict[str, Any]:
         for prior in RECENT_FORM_PRIORS:
             means = _expected_goal_means(row, prior_history, prior)
             if means is None:
-                predictions[prior].append(float("nan"))
+                predictions[prior].append(
+                    {
+                        "result": float("nan"),
+                        "result_home": float("nan"),
+                        "result_draw": float("nan"),
+                        "result_away": float("nan"),
+                        "over_2_5": float("nan"),
+                        "over_2_5_probability": float("nan"),
+                        "over_2_5_actual": float("nan"),
+                        "btts": float("nan"),
+                        "btts_probability": float("nan"),
+                        "btts_actual": float("nan"),
+                    }
+                )
             else:
-                predictions[prior].append(_match_outcome_probabilities(*means)[outcome])
+                home_probs = poisson_probabilities(means[0])
+                away_probs = poisson_probabilities(means[1])
+                score_probs = [
+                    (home, away, home_probability * away_probability)
+                    for home, home_probability in enumerate(home_probs)
+                    for away, away_probability in enumerate(away_probs)
+                ]
+                total_probability = sum(probability for _, _, probability in score_probs)
+                over_probability = sum(
+                    probability
+                    for home, away, probability in score_probs
+                    if home + away >= 3
+                ) / total_probability
+                btts_probability = sum(
+                    probability
+                    for home, away, probability in score_probs
+                    if home > 0 and away > 0
+                ) / total_probability
+                predictions[prior].append(
+                    {
+                        "result": _match_outcome_probabilities(*means)[outcome],
+                        "result_home": _match_outcome_probabilities(*means)[0],
+                        "result_draw": _match_outcome_probabilities(*means)[1],
+                        "result_away": _match_outcome_probabilities(*means)[2],
+                        "over_2_5": over_probability if home_score + away_score >= 3 else 1 - over_probability,
+                        "over_2_5_probability": over_probability,
+                        "over_2_5_actual": float(home_score + away_score >= 3),
+                        "btts": btts_probability if home_score > 0 and away_score > 0 else 1 - btts_probability,
+                        "btts_probability": btts_probability,
+                        "btts_actual": float(home_score > 0 and away_score > 0),
+                    }
+                )
 
     baseline = predictions[DEFAULT_RECENT_FORM_PRIOR]
-    valid = [index for index, value in enumerate(baseline) if not math.isnan(value)]
+    valid = [
+        index
+        for index, value in enumerate(baseline)
+        if not math.isnan(value["result"])
+    ]
     if len(valid) < 60:
-        return {
-            "prior": DEFAULT_RECENT_FORM_PRIOR,
-            "validation_matches": len(valid),
-            "log_loss": None,
-            "baseline_log_loss": None,
-        }
+        empty_result["validation_matches"] = len(valid)
+        return empty_result
 
+    selection_end = max(40, int(len(valid) * 0.8))
+    selection_indices = valid[:selection_end]
+    evaluation_indices = valid[selection_end:]
     scores = {
-        prior: sum(-math.log(max(1e-12, predictions[prior][index])) for index in valid) / len(valid)
+        prior: sum(
+            -math.log(max(1e-12, predictions[prior][index]["result"]))
+            for index in selection_indices
+        ) / len(selection_indices)
         for prior in RECENT_FORM_PRIORS
-        if all(not math.isnan(predictions[prior][index]) for index in valid)
+        if all(
+            not math.isnan(predictions[prior][index]["result"])
+            for index in selection_indices
+        )
     }
     baseline_loss = scores.get(DEFAULT_RECENT_FORM_PRIOR)
     if baseline_loss is None:
-        return {
-            "prior": DEFAULT_RECENT_FORM_PRIOR,
-            "validation_matches": len(valid),
-            "log_loss": None,
-            "baseline_log_loss": None,
-        }
+        empty_result["validation_matches"] = len(evaluation_indices)
+        empty_result["selection_matches"] = len(selection_indices)
+        return empty_result
     best_prior = min(scores, key=scores.get)
     best_loss = scores[best_prior]
     if baseline_loss - best_loss < MIN_LOG_LOSS_IMPROVEMENT:
         best_prior, best_loss = DEFAULT_RECENT_FORM_PRIOR, baseline_loss
+
+    if not evaluation_indices:
+        empty_result["selection_matches"] = len(selection_indices)
+        empty_result["selection_log_loss"] = best_loss
+        return empty_result
+    evaluation = {
+        prior: sum(
+            -math.log(max(1e-12, predictions[prior][index]["result"]))
+            for index in evaluation_indices
+        ) / len(evaluation_indices)
+        for prior in (best_prior, DEFAULT_RECENT_FORM_PRIOR)
+        if all(
+            not math.isnan(predictions[prior][index]["result"])
+            for index in evaluation_indices
+        )
+    }
+    if best_prior not in evaluation:
+        best_prior, best_loss = DEFAULT_RECENT_FORM_PRIOR, baseline_loss
+    market_metrics: dict[str, dict[str, Any]] = {}
+    for market in ("result", "over_2_5", "btts"):
+        model_values = [predictions[best_prior][index][market] for index in evaluation_indices]
+        baseline_values = [
+            predictions[DEFAULT_RECENT_FORM_PRIOR][index][market]
+            for index in evaluation_indices
+        ]
+        valid_market = [
+            offset
+            for offset, (model_value, baseline_value) in enumerate(
+                zip(model_values, baseline_values)
+            )
+            if not math.isnan(model_value) and not math.isnan(baseline_value)
+        ]
+        if market == "result":
+            model_pairs = [
+                (
+                    predictions[best_prior][evaluation_indices[offset]][f"result_{outcome}"],
+                    float(actual_outcomes[evaluation_indices[offset]] == outcome),
+                )
+                for offset in valid_market
+                for outcome in range(3)
+            ]
+            baseline_pairs = [
+                (
+                    predictions[DEFAULT_RECENT_FORM_PRIOR][evaluation_indices[offset]][f"result_{outcome}"],
+                    float(actual_outcomes[evaluation_indices[offset]] == outcome),
+                )
+                for offset in valid_market
+                for outcome in range(3)
+            ]
+            model_brier = sum(
+                sum(
+                    (model_pairs[offset * 3 + outcome][0] - model_pairs[offset * 3 + outcome][1]) ** 2
+                    for outcome in range(3)
+                )
+                for offset in range(len(valid_market))
+            ) / len(valid_market) if valid_market else None
+            baseline_brier = sum(
+                sum(
+                    (baseline_pairs[offset * 3 + outcome][0] - baseline_pairs[offset * 3 + outcome][1]) ** 2
+                    for outcome in range(3)
+                )
+                for offset in range(len(valid_market))
+            ) / len(valid_market) if valid_market else None
+        else:
+            probability_key = f"{market}_probability"
+            actual_key = f"{market}_actual"
+            model_pairs = [
+                (
+                    predictions[best_prior][evaluation_indices[offset]][probability_key],
+                    predictions[best_prior][evaluation_indices[offset]][actual_key],
+                )
+                for offset in valid_market
+            ]
+            baseline_pairs = [
+                (
+                    predictions[DEFAULT_RECENT_FORM_PRIOR][evaluation_indices[offset]][probability_key],
+                    predictions[DEFAULT_RECENT_FORM_PRIOR][evaluation_indices[offset]][actual_key],
+                )
+                for offset in valid_market
+            ]
+            model_brier = (
+                sum((probability - actual) ** 2 for probability, actual in model_pairs)
+                / len(model_pairs) if model_pairs else None
+            )
+            baseline_brier = (
+                sum((probability - actual) ** 2 for probability, actual in baseline_pairs)
+                / len(baseline_pairs) if baseline_pairs else None
+            )
+        market_metrics[market] = {
+            "sample_size": len(valid_market),
+            "model_log_loss": (
+                sum(-math.log(max(1e-12, model_values[offset])) for offset in valid_market)
+                / len(valid_market) if valid_market else None
+            ),
+            "baseline_log_loss": (
+                sum(-math.log(max(1e-12, baseline_values[offset])) for offset in valid_market)
+                / len(valid_market) if valid_market else None
+            ),
+            "model_brier_score": model_brier,
+            "baseline_brier_score": baseline_brier,
+            "model_calibration_error": _expected_calibration_error(model_pairs),
+            "baseline_calibration_error": _expected_calibration_error(baseline_pairs),
+        }
     return {
         "prior": best_prior,
-        "validation_matches": len(valid),
-        "log_loss": best_loss,
-        "baseline_log_loss": baseline_loss,
+        "validation_matches": len(evaluation_indices),
+        "log_loss": evaluation.get(best_prior),
+        "baseline_log_loss": evaluation.get(DEFAULT_RECENT_FORM_PRIOR),
+        "selection_matches": len(selection_indices),
+        "selection_log_loss": best_loss,
+        "market_metrics": market_metrics,
     }
 
 
@@ -427,6 +610,8 @@ def model_match_forecast(row: dict[str, Any], history: pd.DataFrame) -> dict[str
         "tuning_matches": tuning["validation_matches"],
         "tuning_log_loss": tuning["log_loss"],
         "tuning_baseline_log_loss": tuning["baseline_log_loss"],
+        "tuning_selection_matches": tuning["selection_matches"],
+        "tuning_market_metrics": tuning["market_metrics"],
     }
 
 
@@ -777,13 +962,16 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
     with st.expander("🤖 Tüm maç tahminleri ve karşılık gelen oranlar", expanded=True):
         st.markdown("#### Model tahmini · Form Poisson")
         st.metric("En olası skor", forecast["most_likely_score"])
-        if forecast["tuning_matches"]:
+        if forecast["tuning_matches"] and forecast["tuning_log_loss"] is not None:
             tuning_note = (
-                f"Form ağırlığı, {forecast['tuning_matches']} geçmiş maça dayalı doğrulamada "
-                f"otomatik ayarlandı (önsel: {forecast['recent_form_prior']:g}). "
+                f"Form ağırlığı {forecast['tuning_selection_matches']} eski maçta seçildi; "
+                f"sonraki {forecast['tuning_matches']} maçta 1X2 log-loss "
+                f"{forecast['tuning_log_loss']:.3f} (sabit ağırlık: "
+                f"{forecast['tuning_baseline_log_loss']:.3f}; düşük değer daha iyi). "
+                f"Uygulanan önsel: {forecast['recent_form_prior']:g}. "
             )
         else:
-            tuning_note = "Doğrulama için yeterli geçmiş maç bulunmadığından varsayılan form ağırlığı kullanılıyor. "
+            tuning_note = "Ayrı değerlendirme için yeterli geçmiş maç bulunmadığından varsayılan form ağırlığı kullanılıyor. "
         st.caption(
             f"Bağımsız Poisson modeli · lig ortalaması ve takımların aynı ligdeki son maçları. "
             f"Lig örneklemi: {forecast['history_count']} maç; takım örneklemi: "
@@ -792,6 +980,44 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
             f"{tuning_note}"
             "Oranlardan türetilmemiştir; olasılıklar istatistiksel tahmindir."
         )
+        if forecast["tuning_market_metrics"]:
+            market_labels = {
+                "result": "Maç sonucu (1X2)",
+                "over_2_5": "Toplam gol 2.5 üst",
+                "btts": "Karşılıklı gol var",
+            }
+            evaluation_rows = []
+            for market, metrics in forecast["tuning_market_metrics"].items():
+                evaluation_rows.append({
+                    "Market": market_labels[market],
+                    "Örnek": metrics["sample_size"],
+                    "Model log-loss": metrics["model_log_loss"],
+                    "Sabit log-loss": metrics["baseline_log_loss"],
+                    "Model Brier": metrics["model_brier_score"],
+                    "Sabit Brier": metrics["baseline_brier_score"],
+                    "Model kalibrasyon": metrics["model_calibration_error"],
+                    "Sabit kalibrasyon": metrics["baseline_calibration_error"],
+                })
+            with st.expander("Geçmiş maçlarda zaman sıralı model değerlendirmesi"):
+                st.caption(
+                    "Ağırlıklar erken dönemden seçildi; aşağıdaki log-loss daha sonraki, "
+                    "seçimde kullanılmayan maçlarda hesaplandı. Brier ve 10 dilimli kalibrasyon "
+                    "hatası da gösterilir (düşük değer daha iyi). Lig bazlıdır; küçük örneklem "
+                    "tek başına modelin gelecekte daha başarılı olacağını göstermez."
+                )
+                st.dataframe(
+                    pd.DataFrame(evaluation_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Model log-loss": st.column_config.NumberColumn(format="%.3f"),
+                        "Sabit log-loss": st.column_config.NumberColumn(format="%.3f"),
+                        "Model Brier": st.column_config.NumberColumn(format="%.3f"),
+                        "Sabit Brier": st.column_config.NumberColumn(format="%.3f"),
+                        "Model kalibrasyon": st.column_config.NumberColumn(format="%.3f"),
+                        "Sabit kalibrasyon": st.column_config.NumberColumn(format="%.3f"),
+                    },
+                )
         st.markdown("#### Tahminler ve karşılık gelen oranlar")
         st.markdown("**Tüm tahminler**")
         total_rows = []
@@ -1005,11 +1231,23 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
         for match_id, quote in latest.items()
         if match_id in daily_match_ids
     )
-    a, b, c = st.columns(3)
+    a, b, c, d = st.columns(4)
     a.metric("Listelenen maç", f"{len(filtered)}")
     b.metric("Oranı bulunan maç", f"{len(quoted_ids)} / {len(matches)}")
-    c.metric("Mevcut market satırı", f"{market_count}")
-    st.caption("Piyasa yüzdeleri, market içindeki iddaa oranlarının marjdan arındırılmış karşılığıdır; bağımsız model tahmini değildir.")
+    c.metric("Oran kaydı olmayan maç", f"{len(matches) - len(quoted_ids)}")
+    d.metric("Mevcut market satırı", f"{market_count}")
+    capture_times = pd.to_datetime(
+        [quote.get("captured_at") for quote in quotes_data], utc=True, errors="coerce"
+    ).dropna()
+    if not capture_times.empty:
+        last_capture = capture_times.max().tz_convert(ISTANBUL).strftime("%d.%m.%Y %H:%M")
+        st.caption(
+            f"Seçili gün için son oran kaydı: {last_capture} (İstanbul). "
+            "Oran kaydı olmayan maç kaynakta bulunmuyor veya henüz eşleşmemiş olabilir."
+        )
+    else:
+        st.caption("Seçili gün için henüz oran kaydı yok; maçlar kaynakta bulunmuyor veya eşleşmemiş olabilir.")
+    st.caption("Piyasa yüzdeleri, market içindeki IdDaa oranlarının marjdan arındırılmış karşılığıdır; bağımsız model tahmini değildir.")
     st.divider()
 
     if filtered.empty:
@@ -1031,7 +1269,7 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
             render_recent_form(row, history, team_names)
             st.divider()
             if not quote:
-                st.warning("Bu maç için seçilen günde iddaa oran kaydı bulunamadı.")
+                st.warning("Bu maç için oran kaydı yok. Kaynakta bulunmuyor veya maç eşleşmesi henüz yapılamamış olabilir.")
                 continue
             if not markets:
                 st.warning("Oran kaydı var ancak gösterilebilir tam market bulunamadı.")
@@ -1072,9 +1310,17 @@ def render_archive() -> None:
 
 st.markdown("<section class='hero'><div class='hero-kicker'>Günlük karşılaşmalar · iddaa marketleri</div><h1>Maç Merkezi</h1><p>Maçları inceleyin, marketleri karşılaştırın ve maç istatistikleri arşivine ulaşın.</p></section>", unsafe_allow_html=True)
 today = datetime.now(ISTANBUL).date()
-col, _ = st.columns([1, 3])
+col, refresh_col, _ = st.columns([1, 1, 2])
 with col:
     selected_day = st.date_input("Maç günü", value=today, format="DD.MM.YYYY")
+with refresh_col:
+    st.write("")
+    if st.button("Verileri şimdi yenile", use_container_width=True):
+        load_reference_catalog.clear()
+        load_match_day.clear()
+        load_completed_match_history.clear()
+        load_iddaa_market_labels.clear()
+        st.rerun()
 tab_analysis, tab_archive = st.tabs(["⚽  Maç Analizleri", "📊  İstatistik Arşivi"])
 try:
     teams, leagues = load_reference_catalog()

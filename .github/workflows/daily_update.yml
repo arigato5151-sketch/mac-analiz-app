@@ -13,6 +13,7 @@ env:
   API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+  ODDS_HISTORY_ALERT_ROWS: ${{ vars.ODDS_HISTORY_ALERT_ROWS || '100000' }}
 
 jobs:
   sync:
@@ -32,3 +33,15 @@ jobs:
       - name: Pull IdDaa daily fixtures and all listed markets
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 3 * * *' || github.event.schedule == '30 20 * * *'
         run: python -m data_pipeline.fetch_iddaa_odds --retries 3
+      - name: Report retained odds history size
+        if: always()
+        run: python -m data_pipeline.monitor_odds_history
+      - name: Add failure details to the run summary
+        if: failure()
+        run: echo "A pipeline step failed. Inspect this run's logs for fixture, result, or partial odds coverage details." >> "$GITHUB_STEP_SUMMARY"
+      - name: Send optional Telegram failure alert
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m data_pipeline.notify_failure "Maç Analiz GitHub Actions pipeline başarısız. GitHub Actions çalışma günlüğünü kontrol edin."

@@ -13,6 +13,15 @@ GitHub Actions secrets alanında `API_FOOTBALL_KEY`, `SUPABASE_URL` ve
 `SUPABASE_SERVICE_ROLE_KEY` tanımlı olmalıdır. Streamlit arayüzünde yalnızca
 `SUPABASE_URL` ile `SUPABASE_ANON_KEY` gerekir.
 
+Hata bildirimi için isteğe bağlı `TELEGRAM_BOT_TOKEN` ve `TELEGRAM_CHAT_ID`
+değerlerini Windows sunucusunun `.env` dosyasına ve GitHub Actions secrets
+alanına ekleyin. Ayarlar yoksa işler yine çalışır; Windows günlükleri ve
+GitHub Actions çalışma özeti hata bilgisini göstermeye devam eder.
+`ODDS_HISTORY_ALERT_ROWS` varsayılan olarak 100.000 satırdır; Windows `.env`
+dosyasına veya GitHub repository variable alanına farklı eşik yazılabilir. Eşik
+aşılınca Telegram uyarısı gönderilir, her çalışmada toplam satır sayısı da
+raporlanır.
+
 ## Oran kapsamı ve hata takibi
 
 Oran çekici IdDaa karşılaşmalarını lig, normalize edilmiş/alias takım adları ve
@@ -25,17 +34,22 @@ eşleşme deneyebilir.
 Windows günlükleri `logs/local_scheduler` altındadır. `PIPELINE FAILED` veya
 eşleşmeyen maç uyarılarını inceleyin; lig, takım ve saat bilgileri eşleşme
 sorununu teşhis etmek için yazılır. GitHub yedeği başarısızsa Actions çalışma
-günlüğünü açın. IdDaa kataloğunda bulunmayan ligler için oran gelmemesi kaynak
-kapsamı olabilir; bu durum takım adı alias'ı eklemekle çözülmez.
+günlüğünü veya çalışmanın özetindeki eşleşme tablosunu açın. Arayüz seçili gün
+için oranı olmayan maç sayısını ve en son kayıt zamanını gösterir; gerekirse
+“Verileri şimdi yenile” ile önbelleği temizleyip veriyi yeniden alabilirsiniz.
+IdDaa kataloğunda bulunmayan ligler için oran gelmemesi kaynak kapsamı olabilir;
+bu durum takım adı alias'ı eklemekle çözülmez.
 
 ## Veri saklama
 
 `odds_quote_history` her başarılı çekimden yeni bir oran anlık kaydı tutar.
-Eski kayıtları otomatik silen bir politika yoktur; geçmiş oran verisini
-korumak için bu denetimde üretim verisine silme/temizleme işlemi yapılmadı.
-Tablo büyümesini izleyin ve saklama süresi belirlenmeden veri temizliği
-eklemeyin.
+Her veri işinde satır sayısı tabloyu indirmeden okunur ve Windows günlüğü / GitHub
+çalışma özeti içine yazılır. Eski kayıtları otomatik silen bir politika yoktur;
+geçmiş oran verisini korumak için otomatik temizlik yapılmaz. Saklama süresi
+belirlenmeden veri silme eklemeyin.
 
-Tahmin doğruluğunu değerlendirmek için tahmin çıktıları ve maç sonuçlarını
-aynı değerlendirme penceresinde karşılaştırın. Yalnızca modelin geçmiş verideki
-ayar seçimini görmek, gelecekte daha doğru tahmin verdiğini kanıtlamaz.
+Tahmin ekranı lig geçmişinin erken bölümünde seçilen form ağırlığını daha sonraki
+ayrı maç diliminde 1X2, 2.5 üst ve karşılıklı gol var için log-loss, Brier skoru
+ve 10 dilimli kalibrasyon hatasıyla ölçer; sabit ağırlık karşılaştırmasını ve
+örnek sayısını da gösterir. Bu, geçmişteki zaman sıralı değerlendirmedir; canlı
+tahmin performansının kaydı değildir ve gelecekte başarıyı garanti etmez.
