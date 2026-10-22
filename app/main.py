@@ -362,9 +362,9 @@ def tune_recent_form_prior(league_history: pd.DataFrame) -> dict[str, Any]:
                 predictions[prior].append(
                     {
                         "result": float("nan"),
-                        "result_home": float("nan"),
-                        "result_draw": float("nan"),
-                        "result_away": float("nan"),
+                        "result_0": float("nan"),
+                        "result_1": float("nan"),
+                        "result_2": float("nan"),
                         "over_2_5": float("nan"),
                         "over_2_5_probability": float("nan"),
                         "over_2_5_actual": float("nan"),
@@ -392,12 +392,13 @@ def tune_recent_form_prior(league_history: pd.DataFrame) -> dict[str, Any]:
                     for home, away, probability in score_probs
                     if home > 0 and away > 0
                 ) / total_probability
+                outcome_probabilities = _match_outcome_probabilities(*means)
                 predictions[prior].append(
                     {
-                        "result": _match_outcome_probabilities(*means)[outcome],
-                        "result_home": _match_outcome_probabilities(*means)[0],
-                        "result_draw": _match_outcome_probabilities(*means)[1],
-                        "result_away": _match_outcome_probabilities(*means)[2],
+                        "result": outcome_probabilities[outcome],
+                        "result_0": outcome_probabilities[0],
+                        "result_1": outcome_probabilities[1],
+                        "result_2": outcome_probabilities[2],
                         "over_2_5": over_probability if home_score + away_score >= 3 else 1 - over_probability,
                         "over_2_5_probability": over_probability,
                         "over_2_5_actual": float(home_score + away_score >= 3),
@@ -1007,7 +1008,7 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
                 )
                 st.dataframe(
                     pd.DataFrame(evaluation_rows),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                     column_config={
                         "Model log-loss": st.column_config.NumberColumn(format="%.3f"),
@@ -1111,7 +1112,7 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
 
         st.dataframe(
             pd.DataFrame(total_rows),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "Model tahmini": st.column_config.NumberColumn(
@@ -1171,10 +1172,10 @@ def render_recent_form(
                     "Sonuç": result,
                 })
             with st.expander(f"{name}: son maçların dökümü"):
-                st.dataframe(pd.DataFrame(log), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(log), width="stretch", hide_index=True)
 
 
-def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[str, Any]], history_data: list[dict[str, Any]], teams: pd.DataFrame, leagues: pd.DataFrame, match_day: date, market_labels: dict[str, str]) -> None:
+def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[str, Any]], teams: pd.DataFrame, leagues: pd.DataFrame, match_day: date, market_labels: dict[str, str]) -> None:
     matches = pd.DataFrame(matches_data)
     if matches.empty:
         st.info(f"{match_day:%d.%m.%Y} için kayıtlı maç bulunamadı.")
@@ -1200,11 +1201,8 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
     live_or_finished = matches["status"].fillna("").astype(str).str.casefold().isin({"live", "finished"})
     kickoff_reached = matches["kickoff"].notna() & (matches["kickoff"] <= now)
     matches = matches[~(live_or_finished | kickoff_reached)].copy()
-    history = pd.DataFrame(history_data)
-    if not history.empty:
-        history["match_date"] = pd.to_datetime(history["match_date"], utc=True, errors="coerce")
-        for column in ("id", "league_id", "home_team_id", "away_team_id", "home_score", "away_score", "home_halftime_score", "away_halftime_score", "home_corners", "away_corners"):
-            history[column] = pd.to_numeric(history[column], errors="coerce")
+    history = pd.DataFrame()
+    history_loaded = False
 
     left, right, third = st.columns([1, 1, 2])
     with left:
@@ -1258,7 +1256,26 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
         quote = latest.get(match_id)
         kickoff = row["kickoff"]
         time_text = kickoff.strftime("%H:%M") if pd.notna(kickoff) else "Saat bilgisi yok"
-        with st.expander(f"{time_text}  ·  {row['home_name']} — {row['away_name']}  ·  {row['league_label']}", expanded=False):
+        match_expander = st.expander(
+            f"{time_text}  ·  {row['home_name']} — {row['away_name']}  ·  {row['league_label']}",
+            expanded=False,
+            key=f"match_{match_id}",
+            on_change="rerun",
+        )
+        if not match_expander.open:
+            continue
+        with match_expander:
+            if not history_loaded:
+                try:
+                    history_data = load_completed_match_history()
+                    history = pd.DataFrame(history_data)
+                    if not history.empty:
+                        history["match_date"] = pd.to_datetime(history["match_date"], utc=True, errors="coerce")
+                        for column in ("id", "league_id", "home_team_id", "away_team_id", "home_score", "away_score", "home_halftime_score", "away_halftime_score", "home_corners", "away_corners"):
+                            history[column] = pd.to_numeric(history[column], errors="coerce")
+                except Exception as exc:
+                    st.warning(f"Geçmiş maçlar yüklenemedi; model tahmini ve form analizi gösterilemiyor: {exc}")
+                history_loaded = True
             meta, status_col = st.columns([4, 1])
             meta.caption(row["league_name"])
             status_col.caption(str(row.get("status", "")).replace("_", " ").title())
@@ -1274,7 +1291,14 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
             if not markets:
                 st.warning("Oran kaydı var ancak gösterilebilir tam market bulunamadı.")
                 continue
-            st.caption(f"Son oran kaydı: {quote.get('captured_at', 'bilinmiyor')}")
+            quote_time = pd.to_datetime(quote.get("captured_at"), utc=True, errors="coerce")
+            if pd.notna(quote_time):
+                st.caption(
+                    "Son oran kaydı: "
+                    f"{quote_time.tz_convert(ISTANBUL).strftime('%d.%m.%Y %H:%M')} (İstanbul)"
+                )
+            else:
+                st.caption("Son oran kaydı zamanı bilinmiyor.")
 
 
 def render_archive() -> None:
@@ -1305,7 +1329,17 @@ def render_archive() -> None:
         matches = matches[matches["Ev sahibi"].fillna("").str.casefold().str.contains(q) | matches["Deplasman"].fillna("").str.casefold().str.contains(q)]
     columns = ["Tarih", "Ülke", "Lig", "Ev sahibi", "Skor", "Deplasman", "home_xg", "away_xg", "home_xa", "away_xa", "home_corners", "away_corners"]
     labels = {"home_xg": "Ev xG", "away_xg": "Dep xG", "home_xa": "Ev xA", "away_xa": "Dep xA", "home_corners": "Ev korner", "away_corners": "Dep korner"}
-    st.dataframe(matches.sort_values("Tarih", ascending=False)[columns].rename(columns=labels), use_container_width=True, hide_index=True)
+    matches = matches.sort_values("Tarih", ascending=False)
+    page_size = 200
+    page_count = max(1, math.ceil(len(matches) / page_size))
+    page = int(st.number_input("Sayfa", min_value=1, max_value=page_count, value=1, step=1))
+    st.caption(f"{len(matches):,} maç · {page} / {page_count} sayfa")
+    start = (page - 1) * page_size
+    st.dataframe(
+        matches.iloc[start : start + page_size][columns].rename(columns=labels),
+        width="stretch",
+        hide_index=True,
+    )
 
 
 st.markdown("<section class='hero'><div class='hero-kicker'>Günlük karşılaşmalar · iddaa marketleri</div><h1>Maç Merkezi</h1><p>Maçları inceleyin, marketleri karşılaştırın ve maç istatistikleri arşivine ulaşın.</p></section>", unsafe_allow_html=True)
@@ -1315,32 +1349,32 @@ with col:
     selected_day = st.date_input("Maç günü", value=today, format="DD.MM.YYYY")
 with refresh_col:
     st.write("")
-    if st.button("Verileri şimdi yenile", use_container_width=True):
+    if st.button("Verileri şimdi yenile", width="stretch"):
         load_reference_catalog.clear()
         load_match_day.clear()
         load_completed_match_history.clear()
         load_iddaa_market_labels.clear()
         st.rerun()
-tab_analysis, tab_archive = st.tabs(["⚽  Maç Analizleri", "📊  İstatistik Arşivi"])
 try:
     teams, leagues = load_reference_catalog()
 except Exception as exc:
     st.error(f"Takım ve lig bilgileri yüklenemedi: {exc}")
     teams, leagues = pd.DataFrame(), pd.DataFrame()
-with tab_analysis:
+section = st.radio(
+    "Bölüm",
+    ["⚽  Maç Analizleri", "📊  İstatistik Arşivi"],
+    horizontal=True,
+    label_visibility="collapsed",
+)
+if section == "⚽  Maç Analizleri":
     try:
         match_records, quote_records = load_match_day(selected_day)
-        try:
-            analysis_records = load_completed_match_history()
-        except Exception as exc:
-            analysis_records = []
-            st.warning(f"Geçmiş maçlar yüklenemedi; model tahmini ve form analizi gösterilemiyor: {exc}")
         try:
             market_labels = load_iddaa_market_labels()
         except Exception:
             market_labels = {}
-        render_analysis(match_records, quote_records, analysis_records, teams, leagues, selected_day, market_labels)
+        render_analysis(match_records, quote_records, teams, leagues, selected_day, market_labels)
     except Exception as exc:
         st.error(f"Maç ve oran verileri yüklenemedi: {exc}")
-with tab_archive:
+else:
     render_archive()
