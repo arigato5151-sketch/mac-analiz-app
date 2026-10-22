@@ -39,6 +39,11 @@ try {
             & $Python -m data_pipeline.fetch_results --lookback-days 7
             if ($LASTEXITCODE -ne 0) { throw "Results refresh failed with exit code $LASTEXITCODE" }
             Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] DONE  Refresh completed match results"
+
+            Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] START Report upcoming fixture coverage and odds freshness"
+            & $Python -m data_pipeline.monitor_data_freshness
+            if ($LASTEXITCODE -ne 0) { throw "Data freshness report failed with exit code $LASTEXITCODE" }
+            Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] DONE  Report upcoming fixture coverage and odds freshness"
         }
 
         Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] START Import IdDaa fixtures and markets"

@@ -22,6 +22,10 @@ dosyasına veya GitHub repository variable alanına farklı eşik yazılabilir. 
 aşılınca Telegram uyarısı gönderilir, her çalışmada toplam satır sayısı da
 raporlanır.
 
+Günlük iş ayrıca şu andan sonraki 7 günün planlanmış maçlarını, IdDaa oranı
+kapsamını ve son oran kaydının yaşını raporlar. Windows günlüklerinde ve GitHub
+Actions çalışma özetinde bu değerler görünür; kapsam raporu veri değiştirmez.
+
 ## Oran kapsamı ve hata takibi
 
 Oran çekici IdDaa karşılaşmalarını lig, normalize edilmiş/alias takım adları ve

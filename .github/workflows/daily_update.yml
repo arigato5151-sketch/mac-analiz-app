@@ -36,6 +36,9 @@ jobs:
       - name: Report retained odds history size
         if: always()
         run: python -m data_pipeline.monitor_odds_history
+      - name: Report upcoming fixture coverage and odds freshness
+        if: always()
+        run: python -m data_pipeline.monitor_data_freshness
       - name: Add failure details to the run summary
         if: failure()
         run: echo "A pipeline step failed. Inspect this run's logs for fixture, result, or partial odds coverage details." >> "$GITHUB_STEP_SUMMARY"
