@@ -285,13 +285,12 @@ def _match_outcome_probabilities(expected_home: float, expected_away: float) -> 
     ]
     total = sum(probability for _, _, probability in probabilities)
     outcome_probabilities = []
-    for outcome in range(3):
-        if outcome == 0:
-            is_outcome = lambda home, away: home > away
-        elif outcome == 1:
-            is_outcome = lambda home, away: home == away
-        else:
-            is_outcome = lambda home, away: home < away
+    outcome_checks = (
+        lambda home, away: home > away,
+        lambda home, away: home == away,
+        lambda home, away: home < away,
+    )
+    for is_outcome in outcome_checks:
         outcome_probabilities.append(
             sum(
                 probability

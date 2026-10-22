@@ -30,5 +30,5 @@ jobs:
       - name: Refresh completed match scores and statistics
         run: python -m data_pipeline.fetch_results --lookback-days 7
       - name: Pull IdDaa daily fixtures and all listed markets
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 3 * * *'
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 3 * * *' || github.event.schedule == '30 20 * * *'
         run: python -m data_pipeline.fetch_iddaa_odds --retries 3

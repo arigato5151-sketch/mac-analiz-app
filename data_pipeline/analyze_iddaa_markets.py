@@ -6,7 +6,7 @@ import json
 import argparse
 import logging
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 

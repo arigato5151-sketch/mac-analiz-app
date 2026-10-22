@@ -8,7 +8,7 @@ import re
 import time
 import unicodedata
 from difflib import SequenceMatcher
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -51,7 +51,13 @@ REQUIRED_IDDAA_LEAGUES = set(IDDAA_COMPETITION_REFS)
 
 
 def normalize(value: str) -> str:
-    value = unicodedata.normalize("NFKD", value.casefold())
+    # NFKD does not decompose several Latin letters used in European club
+    # names (ø, æ, ł), so translate them before removing combining marks.
+    value = value.casefold().translate(str.maketrans({
+        "æ": "ae", "ø": "o", "ł": "l", "ß": "ss", "đ": "d", "ı": "i",
+        "ð": "d", "þ": "th",
+    }))
+    value = unicodedata.normalize("NFKD", value)
     value = "".join(ch for ch in value if not unicodedata.combining(ch))
     value = re.sub(r"[^a-z0-9]+", " ", value)
     return " ".join(value.split())
@@ -60,7 +66,7 @@ def normalize(value: str) -> str:
 TEAM_SUFFIXES = {
     "fc", "cf", "sc", "ac", "afc", "club", "football", "futebol",
     "fbpa", "esporte", "clube", "de", "do", "da", "the", "rb",
-    "sp", "mg", "ba", "rs", "sa", "k",
+    "sp", "mg", "ba", "rs", "sa", "k", "fk",
 }
 
 
@@ -98,6 +104,37 @@ TEAM_ALIASES: dict[str, tuple[str, ...]] = {
     "lask": ("lask linz",),
     "como": ("como 1907",),
     "athletic club": ("athletic bilbao", "athletic club bilbao"),
+    # API-Football and IdDaa spell these Mexican clubs differently.
+    "pumas unam": ("unam pumas", "u n a m pumas", "universidad nacional"),
+    "toluca": ("deportivo toluca", "deportivo toluca fc"),
+    "kairat almaty": ("k almaty",),
+    "kuopion": ("kups", "kups kuopio"),
+    "kauno zalgiris": ("zalgiris kaunas", "zalgiris kauno"),
+    "crvena zvezda": ("kizil yildiz", "red star belgrade", "red star"),
+    "jagiellonia": ("jagiellonia bialystok",),
+    "ferencvarosi": ("ferencvaros", "ferencvarosi tc"),
+    "viktoria plzen": ("plzen",),
+    "omonia nicosia": ("omonia",),
+    "olympiacos": ("olympiakos", "olympiakos piraeus"),
+    "sparta prague": ("sparta prag", "sparta praha"),
+    "ararat armenia": ("ararat", "ararat-armenia"),
+    "marseille": ("marsilya",),
+    "celje": ("nk celje",),
+    "aarhus": ("agf aarhus",),
+    "gent": ("kaa gent",),
+    "union saint gilloise": ("union st gilloise", "union saint-gilloise"),
+    "ofi crete": ("ofi",),
+    "bayer leverkusen": ("b leverkusen",),
+    "universitatea craiova": ("un craiova",),
+    "mjallby": ("mjallby aif",),
+    "jablonec": ("fk jablonec",),
+    "heart of midlothian": ("hearts",),
+    "st truiden": ("st truidense", "sint truiden", "sint truidense"),
+    "hoffenheim": ("1899 hoffenheim",),
+    "copenhagen": ("kobenhavn", "kopenhag", "fc copenhagen"),
+    "cska sofia": ("cska sofya",),
+    "levski sofia": ("levski sofya",),
+    "salzburg": ("red bull salzburg",),
 }
 
 
@@ -203,8 +240,19 @@ def competition_league_ids(competitions: list[dict[str, Any]]) -> dict[int, int]
         # IdDaa's current Champions League catalogue no longer exposes the
         # API-Football league ID as cref. Match its exact football competition
         # name so the daily bulletin does not silently skip those fixtures.
-        if league_id is None and normalize(str(competition.get("n", ""))) == "uefa sampiyonlar ligi":
-            league_id = 2
+        if league_id is None:
+            competition_name = normalize(str(competition.get("n", "")))
+            # IdDaa's current European competition catalogue uses provider
+            # competition refs instead of API-Football league IDs. Match the
+            # exact football competition names so these fixtures are included
+            # in the odds import.
+            european_competitions = {
+                "uefa sampiyonlar ligi": 2,
+                "uefa avrupa ligi": 3,
+                "uefa avrupa konferans ligi": 848,
+                "uefa konferans ligi": 848,
+            }
+            league_id = european_competitions.get(competition_name)
         if league_id is not None:
             result[int(competition["i"])] = league_id
     return result
@@ -300,13 +348,43 @@ def import_daily_odds(
     missing_leagues = REQUIRED_IDDAA_LEAGUES - mapped_leagues
     if missing_leagues:
         LOG.warning("IdDaa catalogue currently has no exact match for app league IDs: %s", sorted(missing_leagues))
+    if not target_competitions:
+        raise RuntimeError("IdDaa competitions response did not match any configured target leagues")
 
+    start = datetime.combine(match_day, datetime_time.min, tzinfo=ISTANBUL).astimezone(timezone.utc)
+    end = datetime.combine(
+        match_day + timedelta(days=1), datetime_time.min, tzinfo=ISTANBUL
+    ).astimezone(timezone.utc)
     matches = db.select_all(
         "matches",
         columns="id,league_id,home_team_id,away_team_id,match_date,status",
+        filters={
+            "league_id": f"in.({','.join(map(str, sorted(set(target_competitions.values()))))})",
+            "status": "in.(scheduled,live)",
+            "match_date": f"gte.{start.isoformat()}",
+            "and": f"(match_date.lt.{end.isoformat()})",
+        },
         order="match_date.asc,id.asc",
     )
-    teams = db.select_all("teams", columns="id,name", order="id.asc")
+    team_ids = sorted(
+        {
+            int(team_id)
+            for match in matches
+            for team_id in (match.get("home_team_id"), match.get("away_team_id"))
+            if team_id is not None
+        }
+    )
+    teams: list[dict[str, Any]] = []
+    for offset in range(0, len(team_ids), 100):
+        team_chunk = team_ids[offset : offset + 100]
+        teams.extend(
+            db.select_all(
+                "teams",
+                columns="id,name",
+                filters={"id": f"in.({','.join(map(str, team_chunk))})"},
+                order="id.asc",
+            )
+        )
     team_names = {int(row["id"]): str(row["name"]) for row in teams}
     index: dict[tuple[int, date], list[dict[str, Any]]] = {}
     for match in matches:
@@ -331,7 +409,6 @@ def import_daily_odds(
     unmatched = 0
     selected_events = 0
     selected_market_events: list[dict[str, Any]] = []
-    unmapped_competitions: set[int] = set()
     for event in events:
         competition_id = int(event.get("ci", -1))
         league_id = target_competitions.get(competition_id)
@@ -365,13 +442,7 @@ def import_daily_odds(
             )
         if not candidates:
             unmatched += 1
-            same_day_league = [
-                row
-                for row in matches
-                if int(row["league_id"]) == league_id
-                and row.get("status") in ("scheduled", "live")
-                and _date(str(row["match_date"])) == kickoff.date()
-            ]
+            same_day_league = index.get((league_id, kickoff.date()), [])
             team_mismatch_candidates = []
             for row in same_day_league:
                 db_home = team_names.get(int(row["home_team_id"]), "")
@@ -429,8 +500,6 @@ def import_daily_odds(
             }
         )
 
-    if not target_competitions:
-        raise RuntimeError("IdDaa competitions response did not match any configured target leagues")
     if selected_events and not records:
         raise RuntimeError(
             f"IdDaa returned {selected_events} target-league events for {match_day}, but none matched app fixtures"
@@ -461,6 +530,17 @@ def main() -> None:
         try:
             summary = import_daily_odds(db, match_day=match_day)
             print({"date": match_day.isoformat(), "iddaa_odds": summary})
+            if summary["events_unmatched"]:
+                LOG.error(
+                    "IdDaa odds import completed with partial coverage: "
+                    "%s of %s target events could not be matched; saved %s quotes",
+                    summary["events_unmatched"],
+                    summary["events_for_day"],
+                    summary["quotes_saved"],
+                )
+                # Records have already been saved. Do not retry this partial
+                # result: a retry would create duplicate history snapshots.
+                raise SystemExit(2)
             return
         except Exception:
             LOG.exception("IdDaa odds import failed (attempt %s/%s)", attempt, args.retries)
