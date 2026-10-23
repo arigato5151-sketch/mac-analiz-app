@@ -23,7 +23,7 @@ def get_db() -> PublicSupabaseRestClient:
 
 @st.cache_data(ttl=900, show_spinner="Maç istatistikleri yükleniyor…")
 def load_completed_match_history() -> list[dict[str, Any]]:
-    """Read finished matches with recorded scores and available statistics."""
+    """Read all completed history for the statistics archive."""
     return get_db().select_all(
         "matches",
         columns=(
@@ -35,6 +35,60 @@ def load_completed_match_history() -> list[dict[str, Any]]:
             "status": "eq.finished",
             "home_score": "not.is.null",
             "away_score": "not.is.null",
+        },
+        order="match_date.desc,id.desc",
+    )
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def load_recent_team_matches(
+    league_id: int, team_ids: tuple[int, ...], before: str, *, limit: int = 5
+) -> list[dict[str, Any]]:
+    """Read only each requested team's latest completed league matches."""
+    before_utc = pd.to_datetime(before, utc=True, errors="coerce")
+    if pd.isna(before_utc):
+        return []
+    before_filter = before_utc.isoformat()
+    columns = "id,home_team_id,away_team_id,match_date,home_score,away_score,home_xg,away_xg"
+    team_matches: dict[int, dict[int, dict[str, Any]]] = {}
+    for team_id in sorted({int(value) for value in team_ids}):
+        rows = get_db().select(
+            "matches",
+            columns=columns,
+            filters={
+                "status": "eq.finished",
+                "home_score": "not.is.null",
+                "away_score": "not.is.null",
+                "league_id": f"eq.{int(league_id)}",
+                "match_date": f"lt.{before_filter}",
+                "or": f"(home_team_id.eq.{team_id},away_team_id.eq.{team_id})",
+            },
+            limit=limit,
+            order="match_date.desc,id.desc",
+        )
+        team_matches[team_id] = {int(row["id"]): row for row in rows}
+    return sorted(
+        (row for rows in team_matches.values() for row in rows.values()),
+        key=lambda row: (str(row.get("match_date", "")), int(row.get("id", 0))),
+        reverse=True,
+    )
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def load_league_match_history(league_id: int) -> list[dict[str, Any]]:
+    """Load only the score fields needed by league-level forecast baselines."""
+    return get_db().select_all(
+        "matches",
+        columns=(
+            "id,league_id,home_team_id,away_team_id,match_date,status,"
+            "home_score,away_score,home_halftime_score,away_halftime_score,"
+            "home_corners,away_corners"
+        ),
+        filters={
+            "status": "eq.finished",
+            "home_score": "not.is.null",
+            "away_score": "not.is.null",
+            "league_id": f"eq.{int(league_id)}",
         },
         order="match_date.desc,id.desc",
     )

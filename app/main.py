@@ -21,7 +21,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.components.data import (
     load_completed_match_history,
     load_iddaa_market_labels,
+    load_league_match_history,
     load_match_day,
+    load_recent_team_matches,
     load_reference_catalog,
 )
 
@@ -1267,10 +1269,21 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
         with match_expander:
             if not history_loaded:
                 try:
-                    history_data = load_completed_match_history()
+                    history_data = load_league_match_history(int(row["league_id"]))
+                    team_history = load_recent_team_matches(
+                        int(row["league_id"]),
+                        (int(row["home_team_id"]), int(row["away_team_id"])),
+                        row["kickoff"].isoformat(),
+                    )
+                    history_by_id = {int(match["id"]): match for match in history_data}
+                    history_by_id.update(
+                        (int(match["id"]), match) for match in team_history
+                    )
+                    history_data = list(history_by_id.values())
                     history = pd.DataFrame(history_data)
                     if not history.empty:
                         history["match_date"] = pd.to_datetime(history["match_date"], utc=True, errors="coerce")
+                        history = history[history["match_date"] < row["kickoff"]].copy()
                         for column in ("id", "league_id", "home_team_id", "away_team_id", "home_score", "away_score", "home_halftime_score", "away_halftime_score", "home_corners", "away_corners"):
                             history[column] = pd.to_numeric(history[column], errors="coerce")
                 except Exception as exc:
@@ -1353,6 +1366,8 @@ with refresh_col:
         load_reference_catalog.clear()
         load_match_day.clear()
         load_completed_match_history.clear()
+        load_league_match_history.clear()
+        load_recent_team_matches.clear()
         load_iddaa_market_labels.clear()
         st.rerun()
 try:
