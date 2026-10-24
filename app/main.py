@@ -34,7 +34,8 @@ COUNTRY_NAMES_TR = {
     "Brazil": "Brezilya", "England": "İngiltere", "France": "Fransa",
     "Germany": "Almanya", "Italy": "İtalya", "Netherlands": "Hollanda",
     "Portugal": "Portekiz", "Russia": "Rusya", "Saudi-Arabia": "Suudi Arabistan",
-    "Spain": "İspanya", "Turkey": "Türkiye", "USA": "ABD", "World": "Uluslararası",
+    "Spain": "İspanya", "Switzerland": "İsviçre", "Turkey": "Türkiye",
+    "USA": "ABD", "World": "Uluslararası",
 }
 LEAGUE_NAMES_TR = {
     "Premier League": "Premier Lig", "La Liga": "LaLiga", "Serie A": "Serie A",
@@ -44,6 +45,7 @@ LEAGUE_NAMES_TR = {
     "Jupiler Pro League": "Belçika Pro Ligi", "Championship": "İngiltere Championship",
     "Pro League": "Suudi Arabistan Pro Ligi", "Major League Soccer": "MLS",
     "Premier Liga": "Rusya Premier Ligi", "Liga Profesional": "Arjantin Profesyonel Ligi",
+    "Swiss Super League": "İsviçre Süper Ligi",
     "FIFA World Cup": "FIFA Dünya Kupası", "Euro Championship": "Avrupa Şampiyonası",
     "UEFA Nations League": "UEFA Uluslar Ligi", "Africa Cup of Nations": "Afrika Uluslar Kupası",
     "Asian Cup": "Asya Kupası", "Copa America": "Copa América", "CONCACAF Gold Cup": "CONCACAF Altın Kupa",
@@ -1027,7 +1029,7 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
         for line in (0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5):
             over = sum(forecast["score_matrix"][h][a] for h in range(len(forecast["score_matrix"])) for a in range(len(forecast["score_matrix"][h])) if h + a > line)
             for outcome, probability in (("over", over), ("under", 1 - over)):
-                total_rows.append({"Pazar": f"Maç Sonucu Alt/Üst · {line}", "Seçim": "Üst" if outcome == "over" else "Alt", "Model tahmini": probability, **quote_columns("total_goals", line, outcome)})
+                total_rows.append({"Pazar": f"Toplam Gol Alt/Üst · {line}", "Seçim": "Üst" if outcome == "over" else "Alt", "Model tahmini": probability, **quote_columns("total_goals", line, outcome)})
         for key, label in (("1", "1 · Ev sahibi"), ("x", "X · Beraberlik"), ("2", "2 · Deplasman")):
             probability = {"1": forecast["home_win"], "x": forecast["draw"], "2": forecast["away_win"]}[key]
             total_rows.append({"Pazar": "Maç Sonucu", "Seçim": label, "Model tahmini": probability, **quote_columns("result", key, key)})
@@ -1232,9 +1234,9 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
         if match_id in daily_match_ids
     )
     a, b, c, d = st.columns(4)
-    a.metric("Listelenen maç", f"{len(filtered)}")
-    b.metric("Oranı bulunan maç", f"{len(quoted_ids)} / {len(matches)}")
-    c.metric("Oran kaydı olmayan maç", f"{len(matches) - len(quoted_ids)}")
+    a.metric("Filtreye uyan maç", f"{len(filtered)}")
+    b.metric("Gün toplamı · oranlı", f"{len(quoted_ids)} / {len(matches)}", help="Oran kapsamı, seçili filtreye değil günün tüm maçlarına göredir.")
+    c.metric("Gün toplamı · oransız", f"{len(matches) - len(quoted_ids)}", help="Oran kapsamı, seçili filtreye değil günün tüm maçlarına göredir.")
     d.metric("Mevcut market satırı", f"{market_count}")
     capture_times = pd.to_datetime(
         [quote.get("captured_at") for quote in quotes_data], utc=True, errors="coerce"
@@ -1328,6 +1330,8 @@ def render_archive() -> None:
     away = teams.rename(columns={"id": "away_team_id", "name": "Deplasman"})[["away_team_id", "Deplasman"]]
     league_labels = leagues.rename(columns={"id": "league_id", "name": "Lig", "country": "Ülke"})[["league_id", "Lig", "Ülke"]]
     matches = matches.merge(home, on="home_team_id", how="left").merge(away, on="away_team_id", how="left").merge(league_labels, on="league_id", how="left")
+    matches["Lig"] = matches["Lig"].map(lambda name: LEAGUE_NAMES_TR.get(name, name))
+    matches["Ülke"] = matches["Ülke"].map(lambda country: COUNTRY_NAMES_TR.get(country, country))
     matches["Tarih"] = pd.to_datetime(matches["match_date"], utc=True, errors="coerce").dt.tz_convert(ISTANBUL)
     matches["Skor"] = matches["home_score"].astype("Int64").astype(str) + " - " + matches["away_score"].astype("Int64").astype(str)
     c1, c2 = st.columns(2)
