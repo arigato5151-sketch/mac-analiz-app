@@ -23,12 +23,12 @@ BASE_URL = "https://sportsbookv2.iddaa.com/sportsbook"
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 LOG = logging.getLogger("iddaa_odds")
 
-# IdDaa exposes the corresponding API-Football ID in `cref` for most leagues;
-# its own German/Belgian competition IDs are included as fallbacks.
+# IdDaa exposes the corresponding API-Football ID in `cref` for most leagues.
 IDDAA_COMPETITION_REFS: dict[int, int] = {
     39: 1,
     140: 36,
     135: 33,
+    136: 34,  # Italian Serie B
     # IdDaa catalogue currently identifies Germany Bundesliga as cref 42.
     78: 42,
     61: 4,
@@ -38,7 +38,7 @@ IDDAA_COMPETITION_REFS: dict[int, int] = {
     203: 62,
     88: 39,
     253: 18,
-    144: 22,
+    144: 38,
     307: 3708,
     235: 53,
     128: 170677,
@@ -48,6 +48,9 @@ IDDAA_COMPETITION_REFS: dict[int, int] = {
     262: 28,  # Liga MX: IdDaa Meksika Primera Ligi
     141: 37,  # Segunda División: IdDaa İspanya La Liga 2
     62: 19,  # Ligue 2: IdDaa Fransa Ligue 2
+    179: 54,  # Scottish Premiership
+    218: 29,  # Austrian Bundesliga
+    197: 127,  # Greek Super League
 }
 REQUIRED_IDDAA_LEAGUES = set(IDDAA_COMPETITION_REFS) | {3, 848}
 
@@ -67,7 +70,7 @@ def normalize(value: str) -> str:
 
 TEAM_SUFFIXES = {
     "fc", "cf", "sc", "ac", "afc", "club", "football", "futebol",
-    "fbpa", "esporte", "clube", "de", "do", "da", "the", "rb",
+    "fbpa", "esporte", "clube", "de", "do", "da", "the", "rb", "sv",
     "sp", "mg", "ba", "rs", "sa", "k", "fk",
 }
 
@@ -80,6 +83,55 @@ def normalize_team(value: str) -> str:
 
 
 TEAM_ALIASES: dict[str, tuple[str, ...]] = {
+    "queens park rangers": ("qpr",),
+    "swansea city": ("swansea",),
+    "sheffield united": ("sheffield utd",),
+    "derby county": ("derby",),
+    "lincoln": ("lincoln city",),
+    "cardiff": ("cardiff city",),
+    "birmingham": ("birmingham city",),
+    "rb leipzig": ("leipzig",),
+    "pec zwolle": ("zwolle",),
+    "fsv mainz 05": ("mainz",),
+    "real sociedad ii": ("real sociedad b",),
+    "racing santander": ("santander",),
+    "vitoria": ("vitoria ba",),
+    "atletico paranaense": ("paranaense",),
+    "botafogo": ("botafogo rj",),
+    "rubin": ("rubin kazan",),
+    "lanus": ("ath lanus", "atletico lanus"),
+    "1 fc koln": ("koln", "koln fc"),
+    "saint etienne": ("st etienne",),
+    "rayo vallecano": ("vallecano",),
+    "baltika": ("fc baltika kaliningrad",),
+    "west brom": ("west bromwich", "west bromwich albion"),
+    "amed": ("amed sportif faaliyetler",),
+    "hamburger sv": ("hamburg",),
+    "sc paderborn 07": ("paderborn",),
+    "cf montreal": ("montreal impact", "montreal"),
+    "norwich": ("norwich city",),
+    "blackburn": ("blackburn rovers",),
+    "celtic": ("glasgow celtic",),
+    "dinamo moskva": ("dinamo moskova", "dinamo moscow", "dynamo", "dynamo moscow"),
+    "akron": ("akron tolyatti",),
+    "oviedo": ("real oviedo",),
+    "celta de vigo ii": ("celta vigo b", "celta b"),
+    "levadiakos": ("levadeiakos", "apo levadeiakos"),
+    "tsv hartberg": ("hartberg",),
+    "wolfsberger ac": ("wolfsberg", "wolfsberger"),
+    "iraklis 1908": ("iraklis", "pot iraklis"),
+    "kifisia": ("ae kifisia", "ae kifisia fc"),
+    "rapid vienna": ("rapid wien",),
+    "austria lustenau": ("aus lustenau",),
+    "wsg wattens": ("wsg tirol", "tirol"),
+    "kvc westerlo": ("westerlo",),
+    "lommel united": ("lommel sk",),
+    "mantova": ("mantova 1911",),
+    "avellino": ("as avellino 1912",),
+    "arezzo": ("us arezzo", "ss arezzo"),
+    "catanzaro": ("us catanzaro 1929",),
+    "defensa y justicia": ("df justicia", "defensa justicia"),
+    "talleres cordoba": ("talleres",),
     "rodez": ("rodez af", "rodez aveyron football"),
     "gremio": ("gremio fbpa", "gremio foot ball porto alegrense"),
     "fluminense": ("fluminense fc",),
@@ -239,6 +291,8 @@ def competition_league_ids(competitions: list[dict[str, Any]]) -> dict[int, int]
         league_id = league_by_competition_ref.get(competition_ref)
         if league_id is None and own_competition_id in {1220, 1219, 1221}:
             league_id = 144
+        if league_id is None and own_competition_id == 57705:
+            league_id = 207  # Switzerland Super League; IdDaa publishes a provider-specific ref.
         # IdDaa's current Champions League catalogue no longer exposes the
         # API-Football league ID as cref. Match its exact football competition
         # name so the daily bulletin does not silently skip those fixtures.
