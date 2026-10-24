@@ -20,7 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.components.data import (
     load_completed_match_history,
-    load_evaluated_prediction_results,
+    get_db,
     load_iddaa_market_labels,
     load_league_match_history,
     load_match_day,
@@ -80,6 +80,21 @@ def unpack_payload(value: Any) -> dict[str, Any]:
         except json.JSONDecodeError:
             return {}
     return {}
+
+
+@st.cache_data(ttl=900, show_spinner="Tahmin performansı yükleniyor…")
+def load_evaluated_prediction_results() -> list[dict[str, Any]]:
+    """Read evaluated forecasts without requiring a newly imported helper module."""
+    return get_db().select_all(
+        "evaluated_prediction_results",
+        columns=(
+            "match_id,match_date,predicted_at,model_version,actual_result,was_correct,brier_score,"
+            "prob_home_win,prob_draw,prob_away_win,prob_over_2_5,over_2_5_actual,"
+            "over_2_5_was_correct,over_2_5_brier_score,prob_btts,btts_actual,"
+            "btts_was_correct,btts_brier_score,market_probabilities,market_performance"
+        ),
+        order="match_date.asc,match_id.asc",
+    )
 
 
 def market_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[str, Any]]:

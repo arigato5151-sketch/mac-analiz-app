@@ -40,21 +40,6 @@ def load_completed_match_history() -> list[dict[str, Any]]:
     )
 
 
-@st.cache_data(ttl=900, show_spinner="Tahmin performansı yükleniyor…")
-def load_evaluated_prediction_results() -> list[dict[str, Any]]:
-    """Read evaluated model forecasts and per-market outcomes for reporting."""
-    return get_db().select_all(
-        "evaluated_prediction_results",
-        columns=(
-            "match_id,match_date,predicted_at,model_version,actual_result,was_correct,brier_score,"
-            "prob_home_win,prob_draw,prob_away_win,prob_over_2_5,over_2_5_actual,"
-            "over_2_5_was_correct,over_2_5_brier_score,prob_btts,btts_actual,"
-            "btts_was_correct,btts_brier_score,market_probabilities,market_performance"
-        ),
-        order="match_date.asc,match_id.asc",
-    )
-
-
 @st.cache_data(ttl=900, show_spinner=False)
 def load_recent_team_matches(
     league_id: int, team_ids: tuple[int, ...], before: str, *, limit: int = 5
