@@ -52,6 +52,20 @@ IDDAA_COMPETITION_REFS: dict[int, int] = {
     218: 29,  # Austrian Bundesliga
     197: 127,  # Greek Super League
 }
+# IdDaa's catalogue occasionally stops exposing API-Football refs in `cref`
+# and instead publishes its own competition ID. Keep these explicit mappings
+# tied to the current football catalogue; never infer a league from team names.
+IDDAA_COMPETITION_IDS: dict[int, int] = {
+    39: 43,  # English Premier League
+    141: 123,  # Spanish Segunda División
+    144: 148,  # Belgian Pro League
+    94: 566,  # Portuguese Primeira Liga
+    128: 49038,  # Argentine Primera LPF (current season)
+    62: 614,  # French Ligue 2
+    78: 45,  # German Bundesliga
+    262: 37,  # Mexican Liga MX (Apertura)
+    235: 62,  # Russian Premier League
+}
 REQUIRED_IDDAA_LEAGUES = set(IDDAA_COMPETITION_REFS) | {3, 848}
 
 
@@ -189,6 +203,39 @@ TEAM_ALIASES: dict[str, tuple[str, ...]] = {
     "cska sofia": ("cska sofya",),
     "levski sofia": ("levski sofya",),
     "salzburg": ("red bull salzburg",),
+    "newells old boys": ("new old boys", "newell's old boys", "newells"),
+    "newcastle": ("newcastle united",),
+    "st louis city": ("saint louis city", "st louis city sc", "saint louis city sc"),
+    "sporting gijon": ("s gijon", "sporting de gijon", "sporting gijon",),
+    "sabadell": ("ce sabadell fc",),
+    "nacional": ("n madeira", "nacional madeira", "cd nacional"),
+    "estac troyes": ("troyes", "est troyes", "es troyes"),
+    "genk": ("krc genk",),
+    "rostov": ("fc rostov", "fk rostov"),
+    "lokomotiv": ("lokomotiv moskova", "lokomotiv moscow"),
+    "aldosivi": ("ca aldosivi",),
+    "belgrano cordoba": ("belgrano", "ca belgrano"),
+    "rosario central": ("rosario c",),
+    "huracan": ("ca huracan", "club atletico huracan"),
+    "pumas unam": ("u.n.a.m. pumas", "pumas unam", "unam pumas"),
+    "tigres uanl": ("tigres", "tigres u.a.n.l."),
+    "olympiacos": ("olympiakos", "olympiakos piraeus", "olympiacos piraeus"),
+    "kalamata": ("pae ps kalamata",),
+    "aris thessalonikis": ("aris", "aris fc",),
+    "auxerre": ("aj auxerre",),
+    "toulouse": ("toulouse fc",),
+    "palermo": ("us palermo",),
+    "carrarese": ("carrarese calcio", "carrarese calcio 1908"),
+    "leeds": ("leeds united",),
+    "sporting cp": ("sporting lisbon", "sporting lizbon"),
+    "academico viseu": ("a de viseu", "academico de viseu"),
+    "braga": ("sc braga",),
+    "estoril": ("estoril praia",),
+    "standard liege": ("standard liege", "standard de liege",),
+    "volos nfc": ("volos", "volos fc"),
+    "cska moscow": ("cska moskova", "cska moscou"),
+    "spartak moscow": ("spartak moskova", "spartak moscou"),
+    "eldense": ("club deportivo eldense", "cd eldense"),
 }
 
 
@@ -289,6 +336,10 @@ def competition_league_ids(competitions: list[dict[str, Any]]) -> dict[int, int]
         except (TypeError, ValueError):
             continue
         league_id = league_by_competition_ref.get(competition_ref)
+        # Prefer the stable API-Football ref where available. Fall back to
+        # verified IdDaa catalogue IDs for leagues whose cref is provider-local.
+        if league_id is None:
+            league_id = IDDAA_COMPETITION_IDS.get(own_competition_id)
         if league_id is None and own_competition_id in {1220, 1219, 1221}:
             league_id = 144
         if league_id is None and own_competition_id == 57705:
@@ -392,6 +443,7 @@ def import_daily_odds(
     *,
     match_day: date,
     session: requests.Session | None = None,
+    only_uncovered: bool = False,
 ) -> dict[str, Any]:
     http = session or requests.Session()
     http.headers.update({"Accept": "application/json", "User-Agent": "mac-analiz-app/1.0"})
@@ -445,6 +497,18 @@ def import_daily_odds(
             )
         )
     team_names = {int(row["id"]): str(row["name"]) for row in teams}
+    covered_match_ids: set[int] = set()
+    if only_uncovered and matches:
+        match_ids = [int(row["id"]) for row in matches]
+        for offset in range(0, len(match_ids), 100):
+            chunk = match_ids[offset : offset + 100]
+            history = db.select_all(
+                "odds_quote_history",
+                columns="match_id",
+                filters={"match_id": f"in.({','.join(map(str, chunk))})"},
+                order="match_id.asc",
+            )
+            covered_match_ids.update(int(row["match_id"]) for row in history)
     index: dict[tuple[int, date], list[dict[str, Any]]] = {}
     for match in matches:
         if int(match["league_id"]) not in target_competitions.values():
@@ -573,6 +637,8 @@ def import_daily_odds(
             continue
         seen_events.add(event_id)
         matched_ids.add(int(target["id"]))
+        if int(target["id"]) in covered_match_ids:
+            continue
         records.append(
             {
                 "match_id": int(target["id"]),
@@ -660,6 +726,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--date", help="Istanbul calendar date (YYYY-MM-DD); defaults to today")
     parser.add_argument("--retries", type=int, default=3, help="Attempts before reporting failure")
+    parser.add_argument(
+        "--allow-partial-retry",
+        action="store_true",
+        help="Retry a partial import after matching logic is fixed; existing quotes are retained",
+    )
     args = parser.parse_args()
     if args.retries < 1 or args.retries > 5:
         parser.error("--retries must be between 1 and 5")
@@ -669,7 +740,11 @@ def main() -> None:
 
     for attempt in range(1, args.retries + 1):
         try:
-            summary = import_daily_odds(db, match_day=match_day)
+            summary = import_daily_odds(
+                db,
+                match_day=match_day,
+                only_uncovered=args.allow_partial_retry,
+            )
             print({"date": match_day.isoformat(), "iddaa_odds": summary})
             write_github_summary(match_day, summary)
             if summary["events_unmatched"]:
@@ -680,9 +755,14 @@ def main() -> None:
                     summary["events_for_day"],
                     summary["quotes_saved"],
                 )
-                # Records have already been saved. Do not retry this partial
-                # result: a retry would create duplicate history snapshots.
-                raise SystemExit(2)
+                if not args.allow_partial_retry:
+                    # Records have already been saved. Avoid accidental
+                    # duplicate history snapshots on routine scheduled runs.
+                    raise SystemExit(2)
+                LOG.warning(
+                    "Partial retry explicitly enabled; unmatched events may be retried"
+                )
+                return
             return
         except Exception:
             LOG.exception("IdDaa odds import failed (attempt %s/%s)", attempt, args.retries)

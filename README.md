@@ -37,7 +37,11 @@ açık depoya veya Streamlit arayüz ayarlarına koymayın.
   uygulama fikstürlerine eşleştirilir; oran geçmişine yeni kayıt eklenir.
 - Eşleşmeyen hedef maç varsa çekim kısmi başarısızlık koduyla biter ve görev
   günlüklerinde sayıları gösterir. Kaydedilmiş maçların tekrar yazılmaması
-  için kısmi sonuç yeniden denenmez.
+  için rutin çalıştırmada kısmi sonuç yeniden denenmez. Eşleştirme düzeltmesi
+  sonrası eksik event'leri tamamlamak için `python -m
+  data_pipeline.fetch_iddaa_odds --date YYYY-MM-DD --allow-partial-retry`
+  kullanılabilir; mevcut kayıtlar korunur ve yalnızca eşleşmemiş maçlara yeni
+  oran anlığı eklenir.
 - Günlük oran toplaması Windows Görev Zamanlayıcısı'nda; yedek fikstür,
   sonuç ve oran uzlaştırması GitHub Actions'ta çalışır. Ayrıntılar
   [`OPERATIONS.md`](OPERATIONS.md) dosyasındadır.
