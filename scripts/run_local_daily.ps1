@@ -3,6 +3,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$env:PYTHONUTF8 = '1'
+$env:PYTHONIOENCODING = 'utf-8'
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $Python = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
 $LogDirectory = Join-Path $ProjectRoot 'logs\local_scheduler'
@@ -56,7 +59,7 @@ catch {
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] PIPELINE FAILED: $($_.Exception.Message)" -ForegroundColor Red
     $ExitCode = 1
     if (Test-Path -LiteralPath $Python) {
-        & $Python -m data_pipeline.notify_failure "Maç Analiz pipeline başarısız. Günlük: $LogPath"
+        & $Python -m data_pipeline.notify_failure "Mac Analiz pipeline failed. Log: $LogPath"
     }
 }
 finally {
@@ -70,7 +73,7 @@ finally {
         catch {
             Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] HISTORY MONITOR FAILED: $($_.Exception.Message)" -ForegroundColor Red
             $ExitCode = 1
-            & $Python -m data_pipeline.notify_failure "Oran geçmişi boyut raporu başarısız. Günlük: $LogPath"
+            & $Python -m data_pipeline.notify_failure "Odds history size report failed. Log: $LogPath"
         }
     }
     if ($ExitCode -eq 0) {

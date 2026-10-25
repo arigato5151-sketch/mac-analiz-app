@@ -42,6 +42,9 @@ açık depoya veya Streamlit arayüz ayarlarına koymayın.
   data_pipeline.fetch_iddaa_odds --date YYYY-MM-DD --allow-partial-retry`
   kullanılabilir; mevcut kayıtlar korunur ve yalnızca eşleşmemiş maçlara yeni
   oran anlığı eklenir.
+- Windows görev zamanlayıcısı hata bildirimlerinde ASCII mesaj kullanır ve
+  Python çıktısını UTF-8'e sabitler; Türkçe Windows kod sayfası kaynaklı bozuk
+  karakterleri önler.
 - Günlük oran toplaması Windows Görev Zamanlayıcısı'nda; yedek fikstür,
   sonuç ve oran uzlaştırması GitHub Actions'ta çalışır. Ayrıntılar
   [`OPERATIONS.md`](OPERATIONS.md) dosyasındadır.

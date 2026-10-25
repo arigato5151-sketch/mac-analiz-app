@@ -208,7 +208,7 @@ TEAM_ALIASES: dict[str, tuple[str, ...]] = {
     "st louis city": ("saint louis city", "st louis city sc", "saint louis city sc"),
     "sporting gijon": ("s gijon", "sporting de gijon", "sporting gijon",),
     "sabadell": ("ce sabadell fc",),
-    "nacional": ("n madeira", "nacional madeira", "cd nacional"),
+    "nacional": ("n madeira", "nacional madeira", "nacional da madeira", "cd nacional"),
     "estac troyes": ("troyes", "est troyes", "es troyes"),
     "genk": ("krc genk",),
     "rostov": ("fc rostov", "fk rostov"),
@@ -229,7 +229,7 @@ TEAM_ALIASES: dict[str, tuple[str, ...]] = {
     "leeds": ("leeds united",),
     "sporting cp": ("sporting lisbon", "sporting lizbon"),
     "academico viseu": ("a de viseu", "academico de viseu"),
-    "braga": ("sc braga",),
+    "braga": ("sc braga", "sporting de braga"),
     "estoril": ("estoril praia",),
     "standard liege": ("standard liege", "standard de liege",),
     "volos nfc": ("volos", "volos fc"),
@@ -466,15 +466,17 @@ def import_daily_odds(
     end = datetime.combine(
         match_day + timedelta(days=1), datetime_time.min, tzinfo=ISTANBUL
     ).astimezone(timezone.utc)
+    match_filters = {
+        "league_id": f"in.({','.join(map(str, sorted(set(target_competitions.values()))))})",
+        "match_date": f"gte.{start.isoformat()}",
+        "and": f"(match_date.lt.{end.isoformat()})",
+    }
+    if not only_uncovered:
+        match_filters["status"] = "in.(scheduled,live)"
     matches = db.select_all(
         "matches",
         columns="id,league_id,home_team_id,away_team_id,match_date,status",
-        filters={
-            "league_id": f"in.({','.join(map(str, sorted(set(target_competitions.values()))))})",
-            "status": "in.(scheduled,live)",
-            "match_date": f"gte.{start.isoformat()}",
-            "and": f"(match_date.lt.{end.isoformat()})",
-        },
+        filters=match_filters,
         order="match_date.asc,id.asc",
     )
     team_ids = sorted(
@@ -513,7 +515,7 @@ def import_daily_odds(
     for match in matches:
         if int(match["league_id"]) not in target_competitions.values():
             continue
-        if match.get("status") not in ("scheduled", "live"):
+        if not only_uncovered and match.get("status") not in ("scheduled", "live"):
             continue
         home = team_names.get(int(match["home_team_id"]))
         away = team_names.get(int(match["away_team_id"]))
@@ -649,7 +651,7 @@ def import_daily_odds(
             }
         )
 
-    if selected_events and not records and not unmatched:
+    if selected_events and not matched_ids and not unmatched:
         raise RuntimeError(
             f"IdDaa returned {selected_events} target-league events for {match_day}, "
             "but produced no unique fixture matches"
