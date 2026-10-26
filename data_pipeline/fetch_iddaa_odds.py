@@ -236,6 +236,11 @@ TEAM_ALIASES: dict[str, tuple[str, ...]] = {
     "cska moscow": ("cska moskova", "cska moscou"),
     "spartak moscow": ("spartak moskova", "spartak moscou"),
     "eldense": ("club deportivo eldense", "cd eldense"),
+    "la galaxy": ("los angeles galaxy",),
+    "barracas central": ("barracas",),
+    "estudiantes de rio cuarto": ("estudiantes rio cuarto",),
+    "central cordoba de santiago": ("c cordoba", "central cordoba"),
+    "boulogne": ("us boulogne", "boulogne sur mer"),
 }
 
 
