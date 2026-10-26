@@ -9,6 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from config.settings import get_settings
+from data_pipeline.evaluate_predictions import evaluate_completed_predictions
 from data_pipeline.api_client import ApiFootballClient
 from data_pipeline.fetch_fixtures import SyncSummary, sync_fixtures, transform_fixtures
 from db.db_client import SupabaseRestClient
@@ -330,15 +331,24 @@ def main() -> None:
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     if args.date:
         summary = sync_results(api, db, match_date=args.date)
+        evaluation = evaluate_completed_predictions(
+            db, today=args.date, lookback_days=0
+        )
     else:
+        today = datetime.now(ZoneInfo("Europe/Istanbul")).date()
         summary = sync_recent_results(
             api,
             db,
-            today=datetime.now(ZoneInfo("Europe/Istanbul")).date(),
+            today=today,
             lookback_days=args.lookback_days,
         )
+        # Scores can arrive late or an earlier evaluator run can be missed.
+        # Revisit two weeks of already stored finished fixtures on every run.
+        evaluation = evaluate_completed_predictions(
+            db, today=today, lookback_days=max(args.lookback_days, 14)
+        )
     diagnostics = api.diagnostics()
-    print({"sync": asdict(summary), "api": diagnostics})
+    print({"sync": asdict(summary), "evaluation": evaluation, "api": diagnostics})
 
 
 if __name__ == "__main__":

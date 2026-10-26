@@ -33,6 +33,8 @@ açık depoya veya Streamlit arayüz ayarlarına koymayın.
 ## Veri akışı
 
 - API-Football fikstür ve sonuçları toplar.
+- Sonuç yenilemesi tamamlanan maçların saklanmış maç önü tahminlerini de
+  değerlendirir; daha önce işlenmiş tahminleri atlayarak son 14 günü uzlaştırır.
 - IdDaa günlük bültenindeki maçlar lig, takım adları ve başlama saatiyle
   uygulama fikstürlerine eşleştirilir; oran geçmişine yeni kayıt eklenir.
 - Eşleşmeyen hedef maç varsa çekim kısmi başarısızlık koduyla biter ve görev
