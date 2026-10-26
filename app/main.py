@@ -156,6 +156,37 @@ def market_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[st
     return rows
 
 
+def all_market_quote_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[str, Any]]:
+    """Build a complete IdDaa odds table, including markets outside model coverage."""
+    rows: list[dict[str, Any]] = []
+    for market in payload.get("markets", []):
+        code = market.get("market_id")
+        sport_type = market.get("sport_type")
+        key = f"{sport_type if sport_type is not None else ''}:{code if code is not None else ''}"
+        name = str(labels.get(key) or labels.get(str(code or "")) or market.get("market_name") or f"Market {code or ''}")
+        if market.get("line") not in (None, "", 0, "0"):
+            name = f"{name} · {market['line']}"
+        selections = []
+        for selection in market.get("selections", []):
+            raw_odd = selection.get("display_odds")
+            try:
+                odd = float(raw_odd if raw_odd is not None else selection.get("odds"))
+            except (TypeError, ValueError):
+                continue
+            if odd > 1:
+                selections.append((str(selection.get("name") or selection.get("id") or "Seçim"), odd))
+        implied = [1 / odd for _, odd in selections]
+        total = sum(implied)
+        for (selection_name, odd), probability in zip(selections, implied):
+            rows.append({
+                "Market": name,
+                "Seçim": selection_name,
+                "Oran": f"{odd:.2f}",
+                "Piyasa %": f"%{probability / total * 100:.1f}" if len(selections) > 1 and total else "—",
+            })
+    return rows
+
+
 def _infer_legacy_market_name(selections: list[tuple[str, float]]) -> str | None:
     """Give old code-less market rows a useful label from their outcomes."""
     names = [name.strip().casefold() for name, _ in selections]
@@ -1312,6 +1343,7 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
             status_col.caption(str(row.get("status", "")).replace("_", " ").title())
             payload = unpack_payload(quote.get("odds")) if quote else {}
             markets = market_rows(payload, market_labels) if quote else []
+            displayed_markets = all_market_quote_rows(payload, market_labels) if quote else []
             model_forecast, corner_forecast = render_model_forecast(row, history, markets)
             st.divider()
             render_recent_form(row, history, team_names)
@@ -1319,7 +1351,7 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
             if not quote:
                 st.warning("Bu maç için oran kaydı yok. Kaynakta bulunmuyor veya maç eşleşmesi henüz yapılamamış olabilir.")
                 continue
-            if not markets:
+            if not displayed_markets:
                 st.warning("Oran kaydı var ancak gösterilebilir tam market bulunamadı.")
                 continue
             quote_time = pd.to_datetime(quote.get("captured_at"), utc=True, errors="coerce")
@@ -1330,6 +1362,8 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
                 )
             else:
                 st.caption("Son oran kaydı zamanı bilinmiyor.")
+            st.markdown("#### IdDaa marketleri ve oranları")
+            st.dataframe(pd.DataFrame(displayed_markets), width="stretch", hide_index=True)
 
 
 def render_archive() -> None:
