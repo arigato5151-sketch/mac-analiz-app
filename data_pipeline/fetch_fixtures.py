@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -100,7 +101,6 @@ def sync_fixtures(
     tracked_ids = set(league_ids)
     all_fixtures: list[dict[str, Any]] = []
     cursor = start_date
-    today = datetime.now(ZoneInfo("Europe/Istanbul")).date()
     while cursor <= end_date:
         try:
             day_fixtures = api.get(
@@ -108,15 +108,31 @@ def sync_fixtures(
                 {"date": cursor.isoformat(), "timezone": "Europe/Istanbul"},
             )
         except ApiFootballError as exc:
-            # Free API-Football plans can reject dates beyond their current
-            # window. Preserve the dates already fetched and leave existing
-            # future rows intact instead of failing the entire daily pipeline.
-            if cursor > today and "Free plans do not have access to this date" in str(exc):
-                print(
-                    f"API-Football plan does not allow future fixture date {cursor}; "
-                    "stopping the upcoming-fixture refresh at the last accessible date."
-                )
-                break
+            # Free API-Football plans expose a moving date window. Skip dates
+            # outside that advertised range but preserve all accessible dates
+            # already fetched so the whole daily pipeline can keep running.
+            message = str(exc)
+            plan_window = re.search(
+                r"Free plans do not have access to this date, try from "
+                r"(\d{4}-\d{2}-\d{2}) to (\d{4}-\d{2}-\d{2})",
+                message,
+            )
+            if plan_window:
+                allowed_start = date.fromisoformat(plan_window.group(1))
+                allowed_end = date.fromisoformat(plan_window.group(2))
+                if cursor < allowed_start:
+                    print(
+                        f"API-Football plan excludes {cursor} through "
+                        f"{allowed_start - timedelta(days=1)}; skipping to {allowed_start}."
+                    )
+                    cursor = allowed_start
+                    continue
+                if cursor > allowed_end:
+                    print(
+                        f"API-Football plan excludes future fixture date {cursor}; "
+                        "stopping at the last accessible date."
+                    )
+                    break
             raise
         all_fixtures.extend(day_fixtures)
         cursor += timedelta(days=1)
