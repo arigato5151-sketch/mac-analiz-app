@@ -38,6 +38,9 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "Fixture refresh failed with exit code $LASTEXITCODE" }
             Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] DONE  Refresh fixtures"
 
+            Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] WAIT API-Football rate-limit window"
+            Start-Sleep -Seconds 65
+
             Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] START Refresh completed match results"
             & $Python -m data_pipeline.fetch_results --lookback-days 7
             if ($LASTEXITCODE -ne 0) { throw "Results refresh failed with exit code $LASTEXITCODE" }

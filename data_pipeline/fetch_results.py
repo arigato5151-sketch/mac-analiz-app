@@ -19,7 +19,8 @@ EXPECTED_ASSISTS_STAT_TYPES = frozenset(
     {"expected_assists", "expected_assist", "xa", "x_a"}
 )
 STALE_ACTIVE_GRACE = timedelta(hours=4)
-MAX_STALE_ACTIVE_RECONCILIATIONS = 20
+MAX_STALE_ACTIVE_RECONCILIATIONS = 4
+MAX_EXPECTED_METRIC_REQUESTS_PER_RUN = 2
 
 
 def _statistic_key(value: object) -> str:
@@ -251,6 +252,7 @@ def sync_recent_expected_metrics(
         },
     )
     updates: list[dict[str, Any]] = []
+    api_requests = 0
     for match in matches:
         checked_at = match.get("expected_metrics_checked_at")
         already_complete = all(
@@ -263,7 +265,14 @@ def sync_recent_expected_metrics(
         ) >= datetime.now(ZoneInfo("UTC")) - timedelta(hours=12)
         if already_complete or recently_checked:
             continue
+        if api_requests >= MAX_EXPECTED_METRIC_REQUESTS_PER_RUN:
+            print(
+                "Deferring remaining expected-metric lookups to a later run "
+                f"after {MAX_EXPECTED_METRIC_REQUESTS_PER_RUN} API requests."
+            )
+            break
         try:
+            api_requests += 1
             statistics = api.get("fixtures/statistics", {"fixture": int(match["id"])})
         except Exception as error:
             # Keep final scores even when optional xG/xA is unavailable.
