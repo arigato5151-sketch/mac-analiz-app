@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from config.leagues import LEAGUES_BY_ID, TRACKED_LEAGUE_IDS
 from config.settings import UPCOMING_HORIZON_DAYS, get_settings
-from data_pipeline.api_client import ApiFootballClient
+from data_pipeline.api_client import ApiFootballClient, ApiFootballError
 from db.db_client import SupabaseRestClient
 
 FINISHED_STATUSES = {"FT", "AET", "PEN"}
@@ -100,13 +100,25 @@ def sync_fixtures(
     tracked_ids = set(league_ids)
     all_fixtures: list[dict[str, Any]] = []
     cursor = start_date
+    today = datetime.now(ZoneInfo("Europe/Istanbul")).date()
     while cursor <= end_date:
-        all_fixtures.extend(
-            api.get(
+        try:
+            day_fixtures = api.get(
                 "fixtures",
                 {"date": cursor.isoformat(), "timezone": "Europe/Istanbul"},
             )
-        )
+        except ApiFootballError as exc:
+            # Free API-Football plans can reject dates beyond their current
+            # window. Preserve the dates already fetched and leave existing
+            # future rows intact instead of failing the entire daily pipeline.
+            if cursor > today and "Free plans do not have access to this date" in str(exc):
+                print(
+                    f"API-Football plan does not allow future fixture date {cursor}; "
+                    "stopping the upcoming-fixture refresh at the last accessible date."
+                )
+                break
+            raise
+        all_fixtures.extend(day_fixtures)
         cursor += timedelta(days=1)
 
     tracked = [

@@ -97,6 +97,12 @@ def normalize_team(value: str) -> str:
 
 
 TEAM_ALIASES: dict[str, tuple[str, ...]] = {
+    "independiente rivadavia": (
+        "independ. rivadavia",
+        "ind. mendoza",
+        "independiente mendoza",
+        "independ. mendoza",
+    ),
     "queens park rangers": ("qpr",),
     "swansea city": ("swansea",),
     "sheffield united": ("sheffield utd",),
