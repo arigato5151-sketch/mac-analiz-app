@@ -174,12 +174,14 @@ TEAM_ALIASES: dict[str, tuple[str, ...]] = {
     "sabah fa": ("sabah",),
     "lens": ("rc lens",),
     "brugge": ("club brugge", "club brugge kv", "brugge kv"),
-    "sporting lisbon": ("sporting cp", "sporting lizbon"),
+    "sporting lisbon": ("sporting lizbon",),
     "lask": ("lask linz",),
     "como": ("como 1907",),
     "athletic club": ("athletic bilbao", "athletic club bilbao"),
     # API-Football and IdDaa spell these Mexican clubs differently.
-    "pumas unam": ("unam pumas", "u n a m pumas", "universidad nacional"),
+    "pumas unam": (
+        "unam pumas", "u n a m pumas", "universidad nacional", "u.n.a.m. pumas"
+    ),
     "toluca": ("deportivo toluca", "deportivo toluca fc"),
     "kairat almaty": ("k almaty",),
     "kuopion": ("kups", "kups kuopio"),
@@ -189,7 +191,9 @@ TEAM_ALIASES: dict[str, tuple[str, ...]] = {
     "ferencvarosi": ("ferencvaros", "ferencvarosi tc"),
     "viktoria plzen": ("plzen",),
     "omonia nicosia": ("omonia",),
-    "olympiacos": ("olympiakos", "olympiakos piraeus"),
+    "olympiacos": (
+        "olympiakos", "olympiakos piraeus", "olympiacos piraeus"
+    ),
     "sparta prague": ("sparta prag", "sparta praha"),
     "ararat armenia": ("ararat", "ararat-armenia"),
     "marseille": ("marsilya",),
@@ -223,9 +227,7 @@ TEAM_ALIASES: dict[str, tuple[str, ...]] = {
     "belgrano cordoba": ("belgrano", "ca belgrano"),
     "rosario central": ("rosario c",),
     "huracan": ("ca huracan", "club atletico huracan"),
-    "pumas unam": ("u.n.a.m. pumas", "pumas unam", "unam pumas"),
     "tigres uanl": ("tigres", "tigres u.a.n.l."),
-    "olympiacos": ("olympiakos", "olympiakos piraeus", "olympiacos piraeus"),
     "kalamata": ("pae ps kalamata",),
     "aris thessalonikis": ("aris", "aris fc",),
     "auxerre": ("aj auxerre",),
@@ -233,7 +235,7 @@ TEAM_ALIASES: dict[str, tuple[str, ...]] = {
     "palermo": ("us palermo",),
     "carrarese": ("carrarese calcio", "carrarese calcio 1908"),
     "leeds": ("leeds united",),
-    "sporting cp": ("sporting lisbon", "sporting lizbon"),
+    "sporting cp": (),
     "academico viseu": ("a de viseu", "academico de viseu"),
     "braga": ("sc braga", "sporting de braga"),
     "estoril": ("estoril praia",),
