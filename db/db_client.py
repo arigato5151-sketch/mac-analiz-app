@@ -71,9 +71,8 @@ class SupabaseRestClient:
             timeout=self._timeout,
         )
         if not response.ok:
-            detail = response.text[:500]
             raise DatabaseError(
-                f"Supabase {method} {table} failed ({response.status_code}): {detail}"
+                f"Supabase {method} {table} failed ({response.status_code})"
             )
         if not response.content:
             return []
