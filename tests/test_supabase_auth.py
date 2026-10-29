@@ -93,6 +93,28 @@ def test_authenticated_client_sends_access_token_as_bearer() -> None:
     assert headers["Authorization"] == "Bearer user-access-token"
 
 
+def test_rpc_uses_postgrest_rpc_endpoint_with_empty_parameters() -> None:
+    session = FakeSession(FakeResponse(payload=[]))
+    client = SupabaseRestClient(
+        "https://example.supabase.co", "test-service-key", session=session
+    )
+
+    assert client.rpc("verify_public_table_acl") == []
+    assert session.calls[-1]["method"] == "POST"
+    assert session.calls[-1]["url"] == (
+        "https://example.supabase.co/rest/v1/rpc/verify_public_table_acl"
+    )
+    assert session.calls[-1]["json"] == {}
+
+
+def test_rpc_rejects_invalid_function_path() -> None:
+    client = SupabaseRestClient(
+        "https://example.supabase.co", "test-service-key", session=FakeSession()
+    )
+    with pytest.raises(ValueError, match="function name"):
+        client.rpc("schema/function")
+
+
 def test_database_errors_do_not_expose_body_or_credentials_in_logs(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

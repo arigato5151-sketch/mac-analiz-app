@@ -37,6 +37,11 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m db.migrations --verify-production
+      - name: Verify production public table ACLs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python -m db.verify_acl
       - name: Refresh fixtures
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}

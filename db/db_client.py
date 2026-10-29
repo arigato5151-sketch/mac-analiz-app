@@ -154,6 +154,16 @@ class SupabaseRestClient:
             params["order"] = order
         return self._request("GET", table, params=params)
 
+    def rpc(
+        self,
+        function: str,
+        params: Mapping[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Call a PostgREST RPC function without logging its request details."""
+        if not function or "/" in function:
+            raise ValueError("RPC function name is invalid")
+        return self._request("POST", f"rpc/{function}", json=dict(params or {}))
+
     def select_all(
         self,
         table: str,
