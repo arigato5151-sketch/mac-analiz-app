@@ -76,7 +76,12 @@ class SupabaseRestClient:
             )
         if not response.content:
             return []
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise DatabaseError(
+                f"Supabase {method} {table} returned invalid JSON"
+            ) from exc
         return payload if isinstance(payload, list) else [payload]
 
     def upsert(
@@ -159,7 +164,7 @@ class SupabaseRestClient:
         function: str,
         params: Mapping[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """Call a PostgREST RPC function without logging its request details."""
+        """Call a PostgREST RPC; list responses are required by this client."""
         if not function or "/" in function:
             raise ValueError("RPC function name is invalid")
         return self._request("POST", f"rpc/{function}", json=dict(params or {}))

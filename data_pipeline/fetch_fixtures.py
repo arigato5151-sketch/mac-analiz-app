@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
+import sys
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -20,6 +22,13 @@ LIVE_STATUSES = {"1H", "HT", "2H", "ET", "BT", "P", "SUSP", "INT", "LIVE"}
 
 @dataclass(frozen=True, slots=True)
 class SyncSummary:
+    requested_start: str
+    requested_end: str
+    completed_start: str | None
+    completed_end: str | None
+    skipped_start: str | None
+    skipped_end: str | None
+    is_complete: bool
     api_fixtures: int
     tracked_fixtures: int
     leagues_upserted: int
@@ -101,6 +110,8 @@ def sync_fixtures(
     tracked_ids = set(league_ids)
     all_fixtures: list[dict[str, Any]] = []
     cursor = start_date
+    skipped_dates: list[date] = []
+    completed_dates: list[date] = []
     while cursor <= end_date:
         try:
             day_fixtures = api.get(
@@ -121,20 +132,28 @@ def sync_fixtures(
                 allowed_start = date.fromisoformat(plan_window.group(1))
                 allowed_end = date.fromisoformat(plan_window.group(2))
                 if cursor < allowed_start:
+                    skipped_dates.extend(
+                        current
+                        for current in _date_range(cursor, min(end_date, allowed_start - timedelta(days=1)))
+                    )
                     print(
                         f"API-Football plan excludes {cursor} through "
-                        f"{allowed_start - timedelta(days=1)}; skipping to {allowed_start}."
+                        f"{allowed_start - timedelta(days=1)}; skipping to {allowed_start}.",
+                        file=sys.stderr,
                     )
                     cursor = allowed_start
                     continue
                 if cursor > allowed_end:
+                    skipped_dates.extend(_date_range(cursor, end_date))
                     print(
                         f"API-Football plan excludes future fixture date {cursor}; "
-                        "stopping at the last accessible date."
+                        "stopping at the last accessible date.",
+                        file=sys.stderr,
                     )
                     break
             raise
         all_fixtures.extend(day_fixtures)
+        completed_dates.append(cursor)
         cursor += timedelta(days=1)
 
     tracked = [
@@ -150,12 +169,25 @@ def sync_fixtures(
     db.upsert("matches", matches, on_conflict="id")
 
     return SyncSummary(
+        requested_start=start_date.isoformat(),
+        requested_end=end_date.isoformat(),
+        completed_start=min(completed_dates).isoformat() if completed_dates else None,
+        completed_end=max(completed_dates).isoformat() if completed_dates else None,
+        skipped_start=min(skipped_dates).isoformat() if skipped_dates else None,
+        skipped_end=max(skipped_dates).isoformat() if skipped_dates else None,
+        is_complete=not skipped_dates,
         api_fixtures=len(all_fixtures),
         tracked_fixtures=len(tracked),
         leagues_upserted=len(leagues),
         teams_upserted=len(teams),
         matches_upserted=len(matches),
     )
+
+
+def _date_range(start: date, end: date) -> list[date]:
+    if end < start:
+        return []
+    return [start + timedelta(days=offset) for offset in range((end - start).days + 1)]
 
 
 def main() -> None:
@@ -180,7 +212,7 @@ def main() -> None:
         api, db, start_date=today, end_date=today + timedelta(days=args.days - 1)
     )
     diagnostics = api.diagnostics()
-    print({"sync": asdict(summary), "api": diagnostics})
+    print(json.dumps({"sync": asdict(summary), "api": diagnostics}, sort_keys=True), flush=True)
 
 
 if __name__ == "__main__":

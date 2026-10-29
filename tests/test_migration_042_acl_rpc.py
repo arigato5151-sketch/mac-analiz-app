@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from db.db_client import DatabaseError, SupabaseRestClient
 from db.verify_acl import assert_no_acl_violations
 
 
@@ -45,3 +48,66 @@ def test_acl_rpc_reports_only_effective_violations() -> None:
         assert "TRUNCATE" in str(error)
     else:
         raise AssertionError("ACL violation must fail the production check")
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {},
+        None,
+        "[]",
+        3,
+        [{"grantee": "anon", "table_name": "schema_migrations", "privilege_type": "SELECT"}],
+        [{"grantee": "owner", "table_name": "schema_migrations", "privilege_type": "TRUNCATE"}],
+        [{"grantee": "anon", "table_name": "unknown_table", "privilege_type": "TRUNCATE"}],
+        [{"grantee": "anon", "table_name": "schema_migrations"}],
+        [{"grantee": "anon", "table_name": "schema_migrations", "privilege_type": "TRUNCATE", "extra": "value"}],
+        ["not a row"],
+        [{"grantee": 4, "table_name": "schema_migrations", "privilege_type": "TRUNCATE"}],
+    ],
+)
+def test_acl_rpc_rejects_invalid_response_contract(response: object) -> None:
+    with pytest.raises(RuntimeError, match="invalid response"):
+        assert_no_acl_violations(response)
+
+
+def test_acl_rpc_accepts_object_row_normalized_by_rest_client() -> None:
+    class FakeResponse:
+        ok = True
+        content = b"{}"
+
+        @staticmethod
+        def json() -> dict[str, str]:
+            return {"grantee": "anon", "table_name": "schema_migrations", "privilege_type": "TRUNCATE"}
+
+    class FakeSession:
+        @staticmethod
+        def request(*args, **kwargs) -> FakeResponse:
+            return FakeResponse()
+
+    rows = SupabaseRestClient("https://example.supabase.co", "test-service-key", session=FakeSession()).rpc(
+        "verify_public_table_acl"
+    )
+    assert isinstance(rows, list)
+    with pytest.raises(RuntimeError, match="violations"):
+        assert_no_acl_violations(rows)
+
+
+def test_invalid_rpc_json_is_wrapped_without_response_body() -> None:
+    class FakeResponse:
+        ok = True
+        content = b"sensitive-response-body"
+
+        @staticmethod
+        def json() -> object:
+            raise ValueError("sensitive-response-body")
+
+    class FakeSession:
+        @staticmethod
+        def request(*args, **kwargs) -> FakeResponse:
+            return FakeResponse()
+
+    client = SupabaseRestClient("https://example.supabase.co", "test-service-key", session=FakeSession())
+    with pytest.raises(DatabaseError, match="invalid JSON") as error:
+        client.rpc("verify_public_table_acl")
+    assert "sensitive-response-body" not in str(error.value)
