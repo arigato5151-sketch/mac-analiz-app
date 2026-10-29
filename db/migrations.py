@@ -33,8 +33,10 @@ def discover_migrations(directory: Path = MIGRATIONS_DIR) -> list[Migration]:
         if match is None:
             raise ValueError(f"Invalid migration filename: {path.name}")
         text = path.read_text(encoding="utf-8")
-        normalized = text.strip().upper()
-        if not normalized.startswith(("--", "BEGIN;")) or "BEGIN;" not in normalized or not normalized.endswith("COMMIT;"):
+        executable = "\n".join(
+            line for line in text.splitlines() if not line.lstrip().startswith("--")
+        ).strip().upper()
+        if not executable.startswith("BEGIN;") or not executable.endswith("COMMIT;"):
             raise ValueError(f"Migration must be transaction-wrapped: {path.name}")
         migrations.append(
             Migration(
