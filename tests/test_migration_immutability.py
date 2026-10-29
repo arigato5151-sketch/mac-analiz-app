@@ -35,6 +35,36 @@ def test_controller_checksum_normalizes_crlf_and_lf(tmp_path: Path) -> None:
     assert lf_checksum == crlf_checksum
 
 
+def test_validator_rejects_transaction_control_inside_migration(tmp_path: Path) -> None:
+    path = tmp_path / "001_bad_transaction.sql"
+    path.write_text(
+        "BEGIN;\nCOMMIT;\nSELECT 1;\nCOMMIT;\n",
+        encoding="utf-8",
+    )
+
+    try:
+        discover_migrations(tmp_path)
+    except ValueError as error:
+        assert "transaction-wrapped" in str(error)
+    else:
+        raise AssertionError("An early COMMIT must not pass migration validation")
+
+
+def test_validator_ignores_transaction_words_inside_literals_and_dollar_quotes(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "001_quoted_transaction_words.sql"
+    path.write_text(
+        "BEGIN;\n"
+        "SELECT 'COMMIT;';\n"
+        "DO $$ BEGIN; PERFORM 1; END; $$;\n"
+        "COMMIT;\n",
+        encoding="utf-8",
+    )
+
+    assert len(discover_migrations(tmp_path)) == 1
+
+
 def test_verify_production_reports_changed_applied_migration_as_mismatch() -> None:
     migrations = discover_migrations()
     baseline = {migration.version: migration.checksum for migration in migrations}
