@@ -40,5 +40,6 @@
   "039_match_corner_history": "04797f139c606efa0a24eb5e3086d97f72d4f6e57d2eeca4a7ca9d56c5d1058d",
   "040_half_time_score_history": "a0c346c945aa1a3c9b3ca434ef055e865b0a419ce16d5f0ba2ae70bb2e688718",
   "041_revoke_dangerous_public_table_acl": "572d522b18b9182cece4f34ad0bd4580f44f8c3e6045a01cefa52076fe71e52b",
-  "042_read_only_public_acl_check": "85895ccf340ffeb0473342d388da6878f6a207109f2dfb59ffb59f2aa8ae6481"
+  "042_read_only_public_acl_check": "85895ccf340ffeb0473342d388da6878f6a207109f2dfb59ffb59f2aa8ae6481",
+  "043_nightly_match_analysis_cache": "909d16d1d9c0bb9130dacf21a5cff8830a049976d8a504e390dd0680c7ae5afb"
 }

@@ -24,6 +24,10 @@ To refresh the repository migration manifest, run `python -m db.migrations --man
 
 The pinned checksums in `tests/fixtures/migration_checksums.json` protect migration source files from accidental edits in local CI. When adding a new migration, add its controller checksum to that fixture; never replace an applied migration's checksum. The production ledger comparison remains authoritative for deployed migrations: changing an applied file makes `--verify-production` report that version in `mismatched` and exit unsuccessfully.
 
+## Nightly match analysis cache
+
+Migration `043_nightly_match_analysis_cache.sql` creates a public-read, service-role-write cache of upcoming match forecasts, halftime/corner models, and each team's last five completed matches. The `Match statistics sync` workflow refreshes it once on the `30 20 * * *` UTC schedule (23:30 in Istanbul), after fixture and result updates. The Streamlit card reads this prepared JSON instead of loading full league history and running the model/backtest when opened. If a fixture was added or changed after the nightly refresh, the app falls back to the current on-demand calculation until the next scheduled refresh. The cache table retains only upcoming matches; the nightly job removes rows for past kickoff times before upserting the current cache.
+
 ## Production ACL verification
 
 Migration `042_read_only_public_acl_check.sql` adds the read-only `public.verify_public_table_acl()` RPC. It returns one row per remaining effective `TRUNCATE`, `REFERENCES`, `TRIGGER`, or PostgreSQL 17+ `MAINTAIN` privilege for `anon` or `authenticated` on the nine tables governed by migration 041. Execution is revoked from `PUBLIC`, `anon`, and `authenticated`, and granted only to `service_role`. `python -m db.verify_acl` calls it; the workflow runs this step after verifying the migration ledger. The check sends the Supabase URL and service-role key only to that step's process environment and never prints them.

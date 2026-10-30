@@ -29,6 +29,8 @@ from app.components.data import (
 )
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
+# Bump this when forecast logic or the persisted analysis JSON contract changes.
+ANALYSIS_MODEL_VERSION = "form_poisson_v1"
 
 COUNTRY_NAMES_TR = {
     "Argentina": "Arjantin", "Austria": "Avusturya", "Belgium": "Belçika",
@@ -52,22 +54,23 @@ LEAGUE_NAMES_TR = {
     "Asian Cup": "Asya Kupası", "Copa America": "Copa América", "CONCACAF Gold Cup": "CONCACAF Altın Kupa",
 }
 
-st.set_page_config(page_title="Maç Merkezi", page_icon="⚽", layout="wide")
-st.markdown(
-    """
-    <style>
-    .block-container{max-width:1440px;padding-top:1.6rem;padding-bottom:3rem}
-    .hero{padding:1.5rem 1.8rem;border:1px solid rgba(140,160,190,.18);border-radius:20px;
-      background:linear-gradient(120deg,#101c31 0%,#152b3c 55%,#153a36 100%);margin-bottom:1.2rem}
-    .hero-kicker{color:#84e0be;text-transform:uppercase;letter-spacing:.12em;font-size:.78rem;font-weight:700}
-    .hero h1{margin:.4rem 0 .2rem;font-size:2.2rem}.hero p{color:#c1cedb;margin:0}
-    .match-title{font-size:1.25rem;font-weight:700;margin:.2rem 0 .7rem}
-    .market-head{font-size:1rem;font-weight:700;margin:.4rem 0 .2rem}
-    [data-testid="stMetric"]{background:rgba(128,150,180,.08);padding:.8rem 1rem;border-radius:14px}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+if __name__ == "__main__":
+    st.set_page_config(page_title="Maç Merkezi", page_icon="⚽", layout="wide")
+    st.markdown(
+        """
+        <style>
+        .block-container{max-width:1440px;padding-top:1.6rem;padding-bottom:3rem}
+        .hero{padding:1.5rem 1.8rem;border:1px solid rgba(140,160,190,.18);border-radius:20px;
+          background:linear-gradient(120deg,#101c31 0%,#152b3c 55%,#153a36 100%);margin-bottom:1.2rem}
+        .hero-kicker{color:#84e0be;text-transform:uppercase;letter-spacing:.12em;font-size:.78rem;font-weight:700}
+        .hero h1{margin:.4rem 0 .2rem;font-size:2.2rem}.hero p{color:#c1cedb;margin:0}
+        .match-title{font-size:1.25rem;font-weight:700;margin:.2rem 0 .7rem}
+        .market-head{font-size:1rem;font-weight:700;margin:.4rem 0 .2rem}
+        [data-testid="stMetric"]{background:rgba(128,150,180,.08);padding:.8rem 1rem;border-radius:14px}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def unpack_payload(value: Any) -> dict[str, Any]:
@@ -606,7 +609,12 @@ def tune_recent_form_prior(league_history: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def model_match_forecast(row: dict[str, Any], history: pd.DataFrame) -> dict[str, Any] | None:
+@st.cache_data(ttl=86_400, max_entries=256, show_spinner=False)
+def model_match_forecast(
+    row: dict[str, Any],
+    history: pd.DataFrame,
+    recent_form_tuning: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """Fit a simple independent Poisson goals model from pre-match league history."""
     kickoff = row["kickoff"]
     if history.empty or pd.isna(kickoff):
@@ -620,7 +628,7 @@ def model_match_forecast(row: dict[str, Any], history: pd.DataFrame) -> dict[str
     ]
     if len(league_matches) < 10:
         return None
-    tuning = tune_recent_form_prior(league_matches)
+    tuning = recent_form_tuning or tune_recent_form_prior(league_matches)
     recent_form_prior = float(tuning["prior"])
     means = _expected_goal_means(row, history, recent_form_prior)
     if means is None:
@@ -667,6 +675,7 @@ def model_match_forecast(row: dict[str, Any], history: pd.DataFrame) -> dict[str
     }
 
 
+@st.cache_data(ttl=86_400, max_entries=256, show_spinner=False)
 def model_half_forecast(
     row: dict[str, Any], history: pd.DataFrame, *, half: int
 ) -> dict[str, Any] | None:
@@ -741,6 +750,7 @@ def model_half_forecast(
     }
 
 
+@st.cache_data(ttl=86_400, max_entries=256, show_spinner=False)
 def model_corner_forecast(row: dict[str, Any], history: pd.DataFrame) -> dict[str, Any] | None:
     """Estimate full-time corners from historical corner counts in this league."""
     kickoff = row["kickoff"]
@@ -902,12 +912,26 @@ def quote_selection_model_probability(
     return None
 
 
-def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    forecast = model_match_forecast(row, history)
+def render_model_forecast(
+    row: dict[str, Any],
+    history: pd.DataFrame,
+    markets: list[dict[str, Any]],
+    *,
+    precomputed: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    forecast = (
+        precomputed.get("forecast")
+        if precomputed is not None
+        else model_match_forecast(row, history)
+    )
     if forecast is None:
         st.info("Bu ligde model tahmini üretmek için yeterli maç geçmişi yok.")
         return None, None
-    corners = model_corner_forecast(row, history)
+    corners = (
+        precomputed.get("corners")
+        if precomputed is not None
+        else model_corner_forecast(row, history)
+    )
     # Index quoted selections by market category and line for inline display
     # within the corresponding model tables below.
     quote_index: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -1085,7 +1109,11 @@ def render_model_forecast(row: dict[str, Any], history: pd.DataFrame, markets: l
         for outcome, probability in (("yes", forecast["btts"]), ("no", 1 - forecast["btts"])):
             total_rows.append({"Pazar": "Karşılıklı Gol", "Seçim": "Var" if outcome == "yes" else "Yok", "Model tahmini": probability, **quote_columns("btts", "", outcome)})
         def render_half_table(half: int, half_label: str) -> None:
-            half_forecast = model_half_forecast(row, history, half=half)
+            half_forecast = (
+                precomputed.get("halves", {}).get(str(half))
+                if precomputed is not None
+                else model_half_forecast(row, history, half=half)
+            )
             if half_forecast is None:
                 st.caption(f"{half_label}: en az 20 geçmiş devre skoru olmadığı için tahmin üretilemedi.")
                 return
@@ -1226,7 +1254,67 @@ def render_recent_form(
                 st.dataframe(pd.DataFrame(log), width="stretch", hide_index=True)
 
 
-def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[str, Any]], teams: pd.DataFrame, leagues: pd.DataFrame, match_day: date, market_labels: dict[str, str]) -> None:
+def build_precomputed_match_analysis(
+    row: dict[str, Any],
+    history: pd.DataFrame,
+    recent_form_tuning: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build display-ready match analysis without Streamlit rendering calls."""
+    kickoff = row["kickoff"]
+    league_id = int(row["league_id"])
+    home_recent = team_recent_matches(history, row["home_team_id"], kickoff, league_id)
+    away_recent = team_recent_matches(history, row["away_team_id"], kickoff, league_id)
+    history_by_id = {
+        int(match["id"]): match
+        for match in (*home_recent.to_dict("records"), *away_recent.to_dict("records"))
+    }
+    return {
+        "history": list(history_by_id.values()),
+        "forecast": model_match_forecast(row, history, recent_form_tuning),
+        "corners": model_corner_forecast(row, history),
+        "halves": {
+            str(half): model_half_forecast(row, history, half=half)
+            for half in (1, 2)
+        },
+    }
+
+
+def _cached_analysis_for_match(
+    record: dict[str, Any] | None, row: dict[str, Any]
+) -> dict[str, Any] | None:
+    if not record or record.get("model_version") != ANALYSIS_MODEL_VERSION:
+        return None
+    try:
+        if any(
+            int(record.get(key, -1)) != int(row[key])
+            for key in ("league_id", "home_team_id", "away_team_id")
+        ):
+            return None
+        cached_date = pd.to_datetime(record.get("match_date"), utc=True, errors="coerce")
+        fixture_date = pd.to_datetime(row.get("match_date"), utc=True, errors="coerce")
+        if pd.isna(cached_date) or pd.isna(fixture_date) or cached_date != fixture_date:
+            return None
+    except (KeyError, TypeError, ValueError):
+        return None
+    analysis = record.get("analysis_json")
+    if (
+        not isinstance(analysis, dict)
+        or not isinstance(analysis.get("history"), list)
+        or not isinstance(analysis.get("halves"), dict)
+    ):
+        return None
+    return analysis
+
+
+def render_analysis(
+    matches_data: list[dict[str, Any]],
+    quotes_data: list[dict[str, Any]],
+    analyses_data: list[dict[str, Any]],
+    teams: pd.DataFrame,
+    leagues: pd.DataFrame,
+    match_day: date,
+    market_labels: dict[str, str],
+) -> None:
     matches = pd.DataFrame(matches_data)
     if matches.empty:
         st.info(f"{match_day:%d.%m.%Y} için kayıtlı maç bulunamadı.")
@@ -1240,6 +1328,11 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
             latest[int(quote["match_id"])] = quote
         except (KeyError, TypeError, ValueError):
             continue
+    analyses_by_id = {
+        int(record["match_id"]): record
+        for record in analyses_data
+        if record.get("match_id") is not None
+    }
 
     matches["home_name"] = matches["home_team_id"].map(team_names).fillna("Ev sahibi")
     matches["away_name"] = matches["away_team_id"].map(team_names).fillna("Deplasman")
@@ -1252,9 +1345,6 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
     live_or_finished = matches["status"].fillna("").astype(str).str.casefold().isin({"live", "finished"})
     kickoff_reached = matches["kickoff"].notna() & (matches["kickoff"] <= now)
     matches = matches[~(live_or_finished | kickoff_reached)].copy()
-    history = pd.DataFrame()
-    history_loaded = False
-
     left, right, third = st.columns([1, 1, 2])
     with left:
         league_filter = st.selectbox("Lig", ["Tüm ligler", *sorted(matches["league_label"].unique())])
@@ -1316,7 +1406,18 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
         if not match_expander.open:
             continue
         with match_expander:
-            if not history_loaded:
+            cached_record = analyses_by_id.get(match_id)
+            cached_analysis = _cached_analysis_for_match(cached_record, row)
+            history = pd.DataFrame()
+            if cached_analysis is not None:
+                history = pd.DataFrame(cached_analysis["history"])
+                if not history.empty:
+                    history["match_date"] = pd.to_datetime(history["match_date"], utc=True, errors="coerce")
+                    for column in ("id", "league_id", "home_team_id", "away_team_id", "home_score", "away_score", "home_halftime_score", "away_halftime_score", "home_corners", "away_corners"):
+                        if column in history:
+                            history[column] = pd.to_numeric(history[column], errors="coerce")
+                st.caption(f"Analiz gece önceden hesaplandı · {cached_record.get('calculated_at', '')}")
+            else:
                 try:
                     history_data = load_league_match_history(int(row["league_id"]))
                     team_history = load_recent_team_matches(
@@ -1328,23 +1429,25 @@ def render_analysis(matches_data: list[dict[str, Any]], quotes_data: list[dict[s
                     history_by_id.update(
                         (int(match["id"]), match) for match in team_history
                     )
-                    history_data = list(history_by_id.values())
-                    history = pd.DataFrame(history_data)
+                    history = pd.DataFrame(history_by_id.values())
                     if not history.empty:
                         history["match_date"] = pd.to_datetime(history["match_date"], utc=True, errors="coerce")
                         history = history[history["match_date"] < row["kickoff"]].copy()
                         for column in ("id", "league_id", "home_team_id", "away_team_id", "home_score", "away_score", "home_halftime_score", "away_halftime_score", "home_corners", "away_corners"):
-                            history[column] = pd.to_numeric(history[column], errors="coerce")
+                            if column in history:
+                                history[column] = pd.to_numeric(history[column], errors="coerce")
                 except Exception as exc:
                     st.warning(f"Geçmiş maçlar yüklenemedi; model tahmini ve form analizi gösterilemiyor: {exc}")
-                history_loaded = True
+                st.caption("Bu maçın gece analiz önbelleği yok; geçmiş ve tahmin şimdi hazırlanıyor.")
             meta, status_col = st.columns([4, 1])
             meta.caption(row["league_name"])
             status_col.caption(str(row.get("status", "")).replace("_", " ").title())
             payload = unpack_payload(quote.get("odds")) if quote else {}
             markets = market_rows(payload, market_labels) if quote else []
             displayed_markets = all_market_quote_rows(payload, market_labels) if quote else []
-            model_forecast, corner_forecast = render_model_forecast(row, history, markets)
+            model_forecast, corner_forecast = render_model_forecast(
+                row, history, markets, precomputed=cached_analysis
+            )
             st.divider()
             render_recent_form(row, history, team_names)
             st.divider()
@@ -1587,44 +1690,47 @@ def render_performance() -> None:
     st.caption("Brier, log-loss ve 10 dilimli kalibrasyon hatasında düşük değer daha iyidir. Kalibrasyon, seçilen sonucun güven olasılığını gerçekleşen isabetle karşılaştırır.")
 
 
-st.markdown("<section class='hero'><div class='hero-kicker'>Günlük karşılaşmalar · iddaa marketleri</div><h1>Maç Merkezi</h1><p>Maçları inceleyin, marketleri karşılaştırın ve maç istatistikleri arşivine ulaşın.</p></section>", unsafe_allow_html=True)
-today = datetime.now(ISTANBUL).date()
-col, refresh_col, _ = st.columns([1, 1, 2])
-with col:
-    selected_day = st.date_input("Maç günü", value=today, format="DD.MM.YYYY")
-with refresh_col:
-    st.write("")
-    if st.button("Verileri şimdi yenile", width="stretch"):
-        load_reference_catalog.clear()
-        load_match_day.clear()
-        load_completed_match_history.clear()
-        load_evaluated_prediction_results.clear()
-        load_league_match_history.clear()
-        load_recent_team_matches.clear()
-        load_iddaa_market_labels.clear()
-        st.rerun()
-try:
-    teams, leagues = load_reference_catalog()
-except Exception as exc:
-    st.error(f"Takım ve lig bilgileri yüklenemedi: {exc}")
-    teams, leagues = pd.DataFrame(), pd.DataFrame()
-section = st.radio(
-    "Bölüm",
-    ["⚽  Maç Analizleri", "📊  İstatistik Arşivi", "📈  Tahmin Performansı"],
-    horizontal=True,
-    label_visibility="collapsed",
-)
-if section == "⚽  Maç Analizleri":
+if __name__ == '__main__':
+    st.markdown("<section class='hero'><div class='hero-kicker'>Günlük karşılaşmalar · iddaa marketleri</div><h1>Maç Merkezi</h1><p>Maçları inceleyin, marketleri karşılaştırın ve maç istatistikleri arşivine ulaşın.</p></section>", unsafe_allow_html=True)
+    today = datetime.now(ISTANBUL).date()
+    col, refresh_col, _ = st.columns([1, 1, 2])
+    with col:
+        selected_day = st.date_input("Maç günü", value=today, format="DD.MM.YYYY")
+    with refresh_col:
+        st.write("")
+        if st.button("Verileri şimdi yenile", width="stretch"):
+            load_reference_catalog.clear()
+            load_match_day.clear()
+            load_completed_match_history.clear()
+            load_evaluated_prediction_results.clear()
+            load_league_match_history.clear()
+            load_recent_team_matches.clear()
+            load_iddaa_market_labels.clear()
+            st.rerun()
     try:
-        match_records, quote_records = load_match_day(selected_day)
-        try:
-            market_labels = load_iddaa_market_labels()
-        except Exception:
-            market_labels = {}
-        render_analysis(match_records, quote_records, teams, leagues, selected_day, market_labels)
+        teams, leagues = load_reference_catalog()
     except Exception as exc:
-        st.error(f"Maç ve oran verileri yüklenemedi: {exc}")
-elif section == "📊  İstatistik Arşivi":
-    render_archive()
-else:
-    render_performance()
+        st.error(f"Takım ve lig bilgileri yüklenemedi: {exc}")
+        teams, leagues = pd.DataFrame(), pd.DataFrame()
+    section = st.radio(
+        "Bölüm",
+        ["⚽  Maç Analizleri", "📊  İstatistik Arşivi", "📈  Tahmin Performansı"],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    if section == "⚽  Maç Analizleri":
+        try:
+            match_records, quote_records, analyses = load_match_day(selected_day)
+            try:
+                market_labels = load_iddaa_market_labels()
+            except Exception:
+                market_labels = {}
+            render_analysis(
+                match_records, quote_records, analyses, teams, leagues, selected_day, market_labels
+            )
+        except Exception as exc:
+            st.error(f"Maç ve oran verileri yüklenemedi: {exc}")
+    elif section == "📊  İstatistik Arşivi":
+        render_archive()
+    else:
+        render_performance()

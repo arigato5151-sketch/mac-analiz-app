@@ -11,7 +11,7 @@ import requests
 import streamlit as st
 
 from config.settings import get_public_supabase_settings
-from db.db_client import PublicSupabaseRestClient
+from db.db_client import DatabaseError, PublicSupabaseRestClient
 
 
 @st.cache_resource(show_spinner=False)
@@ -105,7 +105,9 @@ def load_reference_catalog() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 @st.cache_data(ttl=300, show_spinner="Günün maçları ve oranları yükleniyor…")
-def load_match_day(match_day: date) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def load_match_day(
+    match_day: date,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Read fixtures and IdDaa quotes for one Istanbul calendar day."""
     istanbul = ZoneInfo("Europe/Istanbul")
     start = datetime.combine(match_day, time.min, tzinfo=istanbul).astimezone(timezone.utc)
@@ -120,7 +122,14 @@ def load_match_day(match_day: date) -> tuple[list[dict[str, Any]], list[dict[str
     # The odds collector may run before kickoff day (and retry later), so quote
     # capture time is not a reliable way to find quotes for a selected fixture.
     # Query by the fixture IDs and keep the latest capture in the UI instead.
-    match_ids = [int(row["id"]) for row in matches if row.get("id") is not None]
+    now = datetime.now(timezone.utc)
+    match_ids = [
+        int(row["id"])
+        for row in matches
+        if row.get("id") is not None
+        and str(row.get("status") or "").casefold() not in {"live", "finished"}
+        and pd.to_datetime(row.get("match_date"), utc=True, errors="coerce") > pd.Timestamp(now)
+    ]
     quotes: list[dict[str, Any]] = []
     for offset in range(0, len(match_ids), 100):
         chunk = match_ids[offset : offset + 100]
@@ -137,7 +146,27 @@ def load_match_day(match_day: date) -> tuple[list[dict[str, Any]], list[dict[str
                 order="captured_at.asc,id.asc",
             )
         )
-    return matches, quotes
+    analyses: list[dict[str, Any]] = []
+    for offset in range(0, len(match_ids), 100):
+        chunk = match_ids[offset : offset + 100]
+        if not chunk:
+            continue
+        try:
+            analyses.extend(
+                db.select_all(
+                    "match_analysis_cache",
+                    columns=(
+                        "match_id,league_id,home_team_id,away_team_id,match_date,"
+                        "model_version,calculated_at,analysis_json"
+                    ),
+                    filters={"match_id": f"in.({','.join(map(str, chunk))})"},
+                )
+            )
+        except DatabaseError:
+            # Keep the app usable while the cache migration is rolling out.
+            analyses = []
+            break
+    return matches, quotes, analyses
 
 
 @st.cache_data(ttl=86_400, show_spinner=False)

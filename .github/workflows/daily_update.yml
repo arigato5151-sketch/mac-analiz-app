@@ -43,14 +43,16 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m db.verify_acl
       - name: Refresh fixtures
+        id: refresh_fixtures
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python -m data_pipeline.fetch_fixtures --days 14
+        run: python -m data_pipeline.fetch_fixtures --days 2
       - name: Allow API-Football rate-limit window to reset
         run: sleep 65
       - name: Refresh completed match scores and statistics
+        id: refresh_results
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -63,6 +65,12 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m data_pipeline.fetch_iddaa_odds --retries 3
+      - name: Precompute nightly match analysis
+        if: always() && github.event.schedule == '30 20 * * *' && steps.refresh_fixtures.outcome == 'success' && steps.refresh_results.outcome == 'success'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python -m data_pipeline.precompute_match_analysis
       - name: Report retained odds history size
         if: always()
         env:
