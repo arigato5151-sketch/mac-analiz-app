@@ -25,8 +25,16 @@ HISTORY_COLUMNS = (
     "home_halftime_score,away_halftime_score,home_xg,away_xg,home_corners,away_corners"
 )
 NUMERIC_HISTORY_COLUMNS = (
-    "id,league_id,home_team_id,away_team_id,home_score,away_score,"
-    "home_halftime_score,away_halftime_score,home_corners,away_corners"
+    "id",
+    "league_id",
+    "home_team_id",
+    "away_team_id",
+    "home_score",
+    "away_score",
+    "home_halftime_score",
+    "away_halftime_score",
+    "home_corners",
+    "away_corners",
 )
 
 
