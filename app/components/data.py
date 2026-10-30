@@ -160,6 +160,7 @@ def load_match_day(
                         "model_version,calculated_at,analysis_json"
                     ),
                     filters={"match_id": f"in.({','.join(map(str, chunk))})"},
+                    order="match_id.asc",
                 )
             )
         except DatabaseError:
