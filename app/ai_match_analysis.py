@@ -118,7 +118,8 @@ def build_match_analysis_context(
 
 
 def generate_match_analysis(
-    context: dict[str, Any], *, api_key: str, model: str = "gemini-3.8-flash"
+    context: dict[str, Any], *, api_key: str, model: str = "gemini-3.8-flash",
+    instructions_override: str | None = None, json_mode: bool = False,
 ) -> str:
     """Generate a Turkish analysis using only supplied match and model data."""
     if not api_key:
@@ -138,6 +139,8 @@ def generate_match_analysis(
         "yüzdeyle yaz; listede olmayan market/olasılık ekleme. Oran, kazanç garantisi "
         "veya kesin sonuç iddiası verme. Sonunda tahminin sınırlarını kısa belirt."
     )
+    if instructions_override:
+        instructions = instructions_override
     request_url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     )
@@ -156,6 +159,7 @@ def generate_match_analysis(
         "generationConfig": {
             "maxOutputTokens": 1800,
             "temperature": 0.7,
+            **({"responseMimeType": "application/json"} if json_mode else {}),
         },
     }
     try:
@@ -192,11 +196,13 @@ def generate_match_analysis(
             and "no longer available" in detail.lower()
         ):
             return generate_match_analysis(
-                context, api_key=api_key, model="gemini-3.8-flash"
+                context, api_key=api_key, model="gemini-3.8-flash",
+                instructions_override=instructions_override, json_mode=json_mode,
             )
         if response.status_code == 503 and model != "gemini-3.6-flash":
             return generate_match_analysis(
-                context, api_key=api_key, model="gemini-3.6-flash"
+                context, api_key=api_key, model="gemini-3.6-flash",
+                instructions_override=instructions_override, json_mode=json_mode,
             )
         diagnostic = ": ".join(part for part in (status, detail) if part)
         if len(diagnostic) > 400:
@@ -217,3 +223,45 @@ def generate_match_analysis(
     if not output:
         raise MatchAnalysisAIError("Google Gemini API boş bir analiz döndürdü.")
     return output
+
+
+def generate_match_risk_recommendations(
+    context: dict[str, Any], *, api_key: str, model: str = "gemini-3.8-flash"
+) -> dict[str, list[dict[str, str]]]:
+    """Ask Gemini to choose match-specific selections for three risk profiles."""
+    allowed = context.get("model", {}).get("candidate_markets", {})
+    instructions = (
+        "Türkçe futbol tahmin analisti olarak yalnızca verilen maç ve model JSON'una dayan. "
+        "Üç risk profili için market seç: low daha yüksek olasılıklı ve temkinli; medium "
+        "makul olasılık ile getiri dengesinde; high düşük olasılıklı fakat futbol açısından "
+        "tutarlı ve daha koşullu. Sadece candidate_markets içindeki tam market adlarını "
+        "seç; olasılık üretme veya değiştirme. Her profile 1-2 seçim koy, aynı seçimi iki "
+        "profile tekrar etme. Her seçim için maç verisine dayanan tek cümlelik Türkçe "
+        "gerekçe ver. Çıktı yalnızca şu JSON şemasında olsun: {\"low\":[{\"market\":\"...\","
+        "\"reason\":\"...\"}],\"medium\":[...],\"high\":[...]}."
+    )
+    raw = generate_match_analysis(
+        context, api_key=api_key, model=model,
+        instructions_override=instructions, json_mode=True,
+    )
+    try:
+        result = json.loads(raw)
+    except ValueError as exc:
+        raise MatchAnalysisAIError("Yapay zekâ risk seçimlerini yapılandırılmış biçimde döndürmedi.") from exc
+    validated: dict[str, list[dict[str, str]]] = {"low": [], "medium": [], "high": []}
+    used: set[str] = set()
+    for profile in validated:
+        items = result.get(profile, []) if isinstance(result, dict) else []
+        if not isinstance(items, list):
+            continue
+        for item in items[:2]:
+            if not isinstance(item, dict):
+                continue
+            market = str(item.get("market", "")).strip()
+            reason = str(item.get("reason", "")).strip()
+            if market in allowed and market not in used and reason:
+                validated[profile].append({"market": market, "reason": reason[:300]})
+                used.add(market)
+    if not any(validated.values()):
+        raise MatchAnalysisAIError("Yapay zekâ geçerli risk seçimi döndürmedi.")
+    return validated

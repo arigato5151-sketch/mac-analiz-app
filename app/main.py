@@ -24,6 +24,7 @@ from app.ai_match_analysis import (
     MatchAnalysisAIError,
     build_match_analysis_context,
     generate_match_analysis,
+    generate_match_risk_recommendations,
 )
 from config.settings import get_optional_setting
 from app.components.data import (
@@ -1444,27 +1445,47 @@ def render_tactical_match_readout(
             lambda h, a: f"{h}-{a}" == str(forecast["most_likely_score"]).replace("–", "-").replace(":", "-")
         ), "Model matrisinde en yüksek olasılığa sahip tek skor."),
     ])
-    candidates.sort(key=lambda item: item[1], reverse=True)
-    # Assign match-specific selections to probability bands. If a band is empty,
-    # show the closest available model outcome and state its actual probability.
-    cautious_pool = [item for item in candidates if item[1] >= 0.62]
-    main_pool = [item for item in candidates if 0.35 <= item[1] < 0.72]
-    risk_pool = [item for item in candidates if 0.08 <= item[1] < 0.40]
-    cautious = cautious_pool[:2] if cautious_pool else candidates[:1]
-    main = sorted(main_pool, key=lambda item: abs(item[1] - 0.52))[:2] if main_pool else candidates[:1]
-    risk = risk_pool[:2] if risk_pool else sorted(candidates, key=lambda item: abs(item[1] - 0.25))[:1]
-
+    candidate_probabilities = {label: chance for label, chance, _ in candidates}
+    risk_state_key = f"ai_risk_selections_{int(row['id'])}"
+    if st.button(
+        "🧠 Risk seçimlerini yapay zekâ belirlesin",
+        key=f"generate_ai_risks_{int(row['id'])}",
+        help="Gemini maç verisini ve model olasılıklarını değerlendirerek üç risk profiline seçim yapar.",
+    ):
+        api_key = get_optional_setting("GOOGLE_API_KEY")
+        if not api_key:
+            st.warning("AI risk seçimi için GOOGLE_API_KEY ayarlanmalı (.env veya Streamlit secrets).")
+        else:
+            model = get_optional_setting("GOOGLE_MODEL", "gemini-3.8-flash")
+            context = build_match_analysis_context(row, history, forecast)
+            context["model"]["candidate_markets"] = {
+                label: float(chance) for label, chance, _ in candidates
+            }
+            with st.spinner("Yapay zekâ maç senaryolarını değerlendiriyor…"):
+                try:
+                    st.session_state[risk_state_key] = generate_match_risk_recommendations(
+                        context, api_key=api_key, model=model
+                    )
+                except MatchAnalysisAIError as exc:
+                    st.error(str(exc))
+    ai_risks = st.session_state.get(risk_state_key, {})
     low, medium, high = st.columns(3)
-    for column, title, selections, explanation in (
-        (low, "Görece daha olası", cautious, "Modelde üst olasılık bandına giren, bu maça özgü sonuçlar:"),
-        (medium, "Dengeli risk", main, "Olasılığı orta bantta kalan maç senaryoları:"),
-        (high, "Daha yüksek risk", risk, "Daha fazla koşul gerektiren veya daha düşük olasılıklı senaryolar:"),
+    for column, title, profile, explanation in (
+        (low, "Görece daha olası", "low", "Yapay zekânın temkinli bulduğu, model olasılığı yüksek seçimler:"),
+        (medium, "Dengeli risk", "medium", "Yapay zekânın olasılık ve maç senaryosu bakımından dengeli bulduğu seçimler:"),
+        (high, "Daha yüksek risk", "high", "Yapay zekânın daha koşullu ve riskli bulduğu seçimler:"),
     ):
         with column:
             st.markdown(f"**{title}**")
             st.caption(explanation)
-            for label, chance, rationale in selections:
-                st.markdown(f"**{label} · %{chance * 100:.1f}**  \n{rationale}")
+            selections = ai_risks.get(profile, [])
+            if not selections:
+                st.caption("Bu maç için henüz yapay zekâ seçimi oluşturulmadı.")
+            for selection in selections:
+                label = selection["market"]
+                chance = candidate_probabilities.get(label)
+                if chance is not None:
+                    st.markdown(f"**{label} · %{chance * 100:.1f}**  \n{selection['reason']}")
     st.caption("Senaryolar tahmin garantisi veya bahis tavsiyesi değildir. Birleşik koşulların gerçekleşme olasılığı daha düşüktür; maç önü kadro ve sakatlık bilgileri bu model özetinde yer almaz.")
 
 
