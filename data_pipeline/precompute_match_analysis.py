@@ -108,6 +108,7 @@ def collect_match_analysis_cache(
             "match_analysis_cache",
             columns="match_id,model_version,analysis_json",
             filters={"match_id": f"in.({','.join(fixture_ids[offset:offset + 100])})"},
+            order="match_id.asc",
         )
         for cached in cached_rows:
             cached_analysis = cached.get("analysis_json") or {}
