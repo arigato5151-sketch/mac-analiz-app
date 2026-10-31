@@ -33,6 +33,8 @@ ISTANBUL = ZoneInfo("Europe/Istanbul")
 # Bump this when forecast logic or the persisted analysis JSON contract changes.
 ANALYSIS_MODEL_VERSION = "form_poisson_v1"
 NON_PLAYABLE_MATCH_STATUSES = {"postponed", "cancelled"}
+# Confirmed postponed while the fixture provider's account is suspended.
+MANUALLY_NON_PLAYABLE_MATCH_IDS = {1556696}  # Hibernian–Dundee, 2026-10-31
 
 COUNTRY_NAMES_TR = {
     "Argentina": "Arjantin", "Austria": "Avusturya", "Belgium": "Belçika",
@@ -1500,8 +1502,11 @@ def render_analysis(
     live_or_finished = matches["status"].fillna("").astype(str).str.casefold().isin(
         {"live", "finished", *NON_PLAYABLE_MATCH_STATUSES}
     )
+    manually_unavailable = pd.to_numeric(matches["id"], errors="coerce").isin(
+        MANUALLY_NON_PLAYABLE_MATCH_IDS
+    )
     kickoff_reached = matches["kickoff"].notna() & (matches["kickoff"] <= now)
-    matches = matches[~(live_or_finished | kickoff_reached)].copy()
+    matches = matches[~(live_or_finished | manually_unavailable | kickoff_reached)].copy()
     left, right, third = st.columns([1, 1, 2])
     with left:
         league_filter = st.selectbox("Lig", ["Tüm ligler", *sorted(matches["league_label"].unique())])
@@ -1682,7 +1687,15 @@ def render_auto_coupon(
     status_done = matches["status"].fillna("").astype(str).str.casefold().isin(
         {"live", "finished", *NON_PLAYABLE_MATCH_STATUSES}
     )
-    upcoming = matches[~status_done & matches["kickoff"].notna() & (matches["kickoff"] > now)].copy()
+    manually_unavailable = pd.to_numeric(matches["id"], errors="coerce").isin(
+        MANUALLY_NON_PLAYABLE_MATCH_IDS
+    )
+    upcoming = matches[
+        ~status_done
+        & ~manually_unavailable
+        & matches["kickoff"].notna()
+        & (matches["kickoff"] > now)
+    ].copy()
     if upcoming.empty:
         st.info("Seçili tarihte henüz başlamamış maç bulunmuyor.")
         return
