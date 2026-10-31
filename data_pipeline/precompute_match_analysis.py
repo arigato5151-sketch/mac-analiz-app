@@ -207,7 +207,12 @@ def main() -> None:
                 "ai_analyses_cached": sum(
                     1 for row in rows if row["analysis_json"].get("ai_analysis")
                 ),
-                "ai_failures": ai_failures,
+                "ai_failures": sum(
+                    1
+                    for row in rows
+                    if row["analysis_json"].get("forecast")
+                    and not row["analysis_json"].get("ai_analysis")
+                ),
                 "model_version": ANALYSIS_MODEL_VERSION,
             }
         )
