@@ -51,6 +51,7 @@ IDDAA_COMPETITION_REFS: dict[int, int] = {
     179: 54,  # Scottish Premiership
     218: 29,  # Austrian Bundesliga
     197: 127,  # Greek Super League
+    207: 1060,  # Switzerland Super League (current IdDaa catalogue reference)
 }
 # IdDaa's catalogue occasionally stops exposing API-Football refs in `cref`
 # and instead publishes its own competition ID. Keep these explicit mappings
