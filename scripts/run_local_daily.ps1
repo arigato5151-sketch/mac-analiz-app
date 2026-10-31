@@ -33,13 +33,15 @@ try {
     }
     else {
         if (-not $OddsRefreshOnly) {
-            Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] START Refresh fixtures"
-            & $Python -m data_pipeline.fetch_fixtures --days 14
+            Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] START Refresh fixtures from IdDaa bulletin"
+            & $Python -m data_pipeline.fetch_iddaa_fixtures
             if ($LASTEXITCODE -ne 0) { throw "Fixture refresh failed with exit code $LASTEXITCODE" }
-            Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] DONE  Refresh fixtures"
+            Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] DONE  Refresh fixtures from IdDaa bulletin"
 
-            Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] WAIT API-Football rate-limit window"
-            Start-Sleep -Seconds 65
+            Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] START Import IdDaa fixtures and markets"
+            & $Python -m data_pipeline.fetch_iddaa_odds --retries 3
+            if ($LASTEXITCODE -ne 0) { throw "IdDaa odds import failed with exit code $LASTEXITCODE" }
+            Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] DONE  Import IdDaa fixtures and markets"
 
             Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] START Refresh completed match results"
             & $Python -m data_pipeline.fetch_results --lookback-days 7
@@ -51,11 +53,13 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "Data freshness report failed with exit code $LASTEXITCODE" }
             Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] DONE  Report upcoming fixture coverage and odds freshness"
         }
+        else {
+            Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] START Import IdDaa markets"
+            & $Python -m data_pipeline.fetch_iddaa_odds --retries 3
+            if ($LASTEXITCODE -ne 0) { throw "IdDaa odds import failed with exit code $LASTEXITCODE" }
+            Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] DONE  Import IdDaa markets"
+        }
 
-        Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] START Import IdDaa fixtures and markets"
-        & $Python -m data_pipeline.fetch_iddaa_odds --retries 3
-        if ($LASTEXITCODE -ne 0) { throw "IdDaa odds import failed with exit code $LASTEXITCODE" }
-        Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')] DONE  Import IdDaa fixtures and markets"
     }
 }
 catch {

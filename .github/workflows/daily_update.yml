@@ -42,15 +42,18 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m db.verify_acl
-      - name: Refresh fixtures
+      - name: Refresh fixtures from IdDaa bulletin
         id: refresh_fixtures
         env:
-          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python -m data_pipeline.fetch_fixtures --days 2
-      - name: Allow API-Football rate-limit window to reset
-        run: sleep 65
+        run: python -m data_pipeline.fetch_iddaa_fixtures
+      - name: Pull IdDaa daily fixtures and all listed markets
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 3 * * *' || github.event.schedule == '30 20 * * *'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python -m data_pipeline.fetch_iddaa_odds --retries 3
       - name: Refresh completed match scores and statistics
         id: refresh_results
         env:
@@ -58,13 +61,6 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m data_pipeline.fetch_results --lookback-days 7
-      - name: Pull IdDaa daily fixtures and all listed markets
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 3 * * *' || github.event.schedule == '30 20 * * *'
-        env:
-          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python -m data_pipeline.fetch_iddaa_odds --retries 3
       - name: Precompute nightly match analysis
         if: always() && github.event.schedule == '30 20 * * *' && steps.refresh_fixtures.outcome == 'success' && steps.refresh_results.outcome == 'success'
         env:
