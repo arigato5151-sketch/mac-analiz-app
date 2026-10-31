@@ -1333,12 +1333,10 @@ def render_tactical_match_readout(
         return
 
     home_id, away_id = row["home_team_id"], row["away_team_id"]
-    home_form = summarize_team_form(
-        team_recent_matches(history, home_id, row["kickoff"], row["league_id"]), home_id
-    )
-    away_form = summarize_team_form(
-        team_recent_matches(history, away_id, row["kickoff"], row["league_id"]), away_id
-    )
+    home_recent = team_recent_matches(history, home_id, row["kickoff"], row["league_id"])
+    away_recent = team_recent_matches(history, away_id, row["kickoff"], row["league_id"])
+    home_form = summarize_team_form(home_recent, home_id)
+    away_form = summarize_team_form(away_recent, away_id)
     home_xg, away_xg = forecast["expected_home"], forecast["expected_away"]
     home_p, draw_p, away_p = forecast["home_win"], forecast["draw"], forecast["away_win"]
     home_edge = home_p - away_p
@@ -1358,18 +1356,55 @@ def render_tactical_match_readout(
     )
     btts_no = 1 - forecast["btts"]
 
-    home_points = home_form["points"] / max(1, len(team_recent_matches(history, home_id, row["kickoff"], row["league_id"]))) if home_form["points"] is not None else None
-    away_points = away_form["points"] / max(1, len(team_recent_matches(history, away_id, row["kickoff"], row["league_id"]))) if away_form["points"] is not None else None
-    if home_xg - away_xg >= 0.45:
-        tactical = f"Model, {row['home_name']} için daha yüksek gol beklentisi gösteriyor ({home_xg:.2f}–{away_xg:.2f}). Ev sahibinin topu rakip yarı alana taşıması ve deplasman ekibinin geçiş hücumlarını sınırlaması maçın ana eşleşmesi."
-    elif away_xg - home_xg >= 0.45:
-        tactical = f"Model, {row['away_name']} için daha yüksek gol beklentisi gösteriyor ({away_xg:.2f}–{home_xg:.2f}). Deplasman ekibinin hücum üretimi ile ev sahibinin kendi sahasındaki geçiş savunması belirleyici olabilir."
+    home_name, away_name = row["home_name"], row["away_name"]
+    recent_goal_diff = (
+        (home_form["goals_for"] - home_form["goals_against"])
+        - (away_form["goals_for"] - away_form["goals_against"])
+        if home_form["goals_for"] is not None and away_form["goals_for"] is not None else None
+    )
+    if home_form["points"] is not None and away_form["points"] is not None:
+        points_gap = home_form["points"] - away_form["points"]
+        goal_balance = (
+            f"Gol ortalamaları {home_name} için {home_form['goals_for']:.1f} attı / {home_form['goals_against']:.1f} yedi, "
+            f"{away_name} için {away_form['goals_for']:.1f} attı / {away_form['goals_against']:.1f} yedi."
+        )
+        if points_gap >= 0.7:
+            form_read = f"Son 5 maçın puan ortalaması {home_name} lehine belirgin: {home_form['points']:.2f}'e {away_form['points']:.2f}. {goal_balance}"
+        elif points_gap <= -0.7:
+            form_read = f"Yakın dönem sonuçları {away_name} lehine: maç başına {away_form['points']:.2f} puan, {home_name} için {home_form['points']:.2f}. {goal_balance} Form üstünlüğüne rağmen ev sahibinin saha avantajı model tahmininde ayrıca hesaba katılıyor."
+        else:
+            form_read = f"Son 5 maçın puan temposu birbirine yakın ({home_name} {home_form['points']:.2f}, {away_name} {away_form['points']:.2f} puan/maç). {goal_balance} Ayrımı sonuç serisinden çok savunma direnci ve saha avantajı yapabilir."
+        form_read += f" Son maç form dizileri: {home_name} {home_form['form']}; {away_name} {away_form['form']} (yeniden eskiye)."
+        if home_form["xg_for"] is not None and away_form["xg_for"] is not None:
+            form_read += f" Mevcut xG kayıtlarında maç başı üretim {home_name} {home_form['xg_for']:.2f}, {away_name} {away_form['xg_for']:.2f}."
     else:
-        tactical = f"Beklenen goller birbirine yakın ({home_xg:.2f}–{away_xg:.2f}); merkezde top kayıpları ve geçişleri daha iyi değerlendiren taraf avantaj sağlayabilir."
-    if home_points is not None and away_points is not None:
-        tactical += f" Son maçlardaki puan ortalaması: {row['home_name']} {home_points:.2f}, {row['away_name']} {away_points:.2f} puan/maç."
+        form_read = "Takımlardan en az biri için yeterli yakın dönem maç kaydı bulunmadığından form karşılaştırması sınırlı; aşağıdaki senaryolar modelin mevcut lig örneklemine dayanıyor."
 
-    st.markdown(tactical)
+    total_xg = home_xg + away_xg
+    if total_xg < 2.15:
+        tempo_read = f"Beklenen toplam gol {total_xg:.2f}: model düşük skorlu ve sabırlı bir karşılaşmaya daha yakın. İlk golün değeri artıyor; geriye düşen tarafın risk alması maçın son bölümünü belirgin biçimde açabilir."
+    elif total_xg > 3.15:
+        tempo_read = f"Beklenen toplam gol {total_xg:.2f} ile açık oyun ihtimali öne çıkıyor. İki tarafın da hücum katkısı var; savunma arkası koşular ve top kaybı sonrası geçişler skorun yönünü sık değiştirebilir."
+    else:
+        tempo_read = f"Beklenen toplam gol {total_xg:.2f}: model dengeli bir gol bandına işaret ediyor. Maçın tamamen açılması için erken gol veya savunma hatası gerekebilir; aksi durumda skor uzun süre tek farklı kalabilir."
+    if forecast["btts"] >= 0.62:
+        tempo_read += f" Karşılıklı gol olasılığının %{forecast['btts'] * 100:.0f} olması, iki takımın da skor katkısı vermesini makul kılıyor."
+    elif forecast["btts"] <= 0.38:
+        tempo_read += f" KG Var olasılığı yalnızca %{forecast['btts'] * 100:.0f}; model gol tehdidinin en az bir tarafta sınırlı kalabileceğini düşünüyor."
+
+    if draw_p >= max(home_p, away_p) - 0.06:
+        edge_read = f"Üç sonuç olasılığı birbirine yakın; beraberlik %{draw_p:.0%} ile güçlü bir seçenek. {home_name} için {home_xg:.2f}, {away_name} için {away_xg:.2f} beklenen gol farkı küçük olduğundan duran toplar ve ceza sahası içindeki verim öne çıkabilir."
+    elif home_p > away_p:
+        edge_read = f"Model {home_name} tarafını %{home_p:.0f} galibiyet olasılığıyla önde tutuyor. Ev sahibinin beklenen gol üstünlüğü {home_xg - away_xg:+.2f}; {away_name} için en gerçekçi karşılık, savunma arkasına hızlı çıkışlar ve geçişlerde sayısal dengeyi korumak."
+    else:
+        edge_read = f"Deplasman tarafı {away_name}, %{away_p:.0f} galibiyet olasılığıyla modelde öne çıkıyor. Bu tablo saha avantajının tek başına yeterli olmadığını gösteriyor; {home_name} için geçiş savunması ve erken baskıdan çıkış kalitesi kritik."
+    if recent_goal_diff is not None and abs(recent_goal_diff) >= 0.7:
+        stronger = home_name if recent_goal_diff > 0 else away_name
+        edge_read += f" Son maçlardaki gol atma/yeme farkı da {stronger} lehine ayrışıyor."
+
+    st.markdown(f"**Form ve üretim.** {form_read}")
+    st.markdown(f"**Beklenen oyun akışı.** {tempo_read}")
+    st.markdown(f"**Maçın belirleyici eşleşmesi.** {edge_read}")
     st.caption(
         f"Model görünümü: {row['home_name']} {home_p:.0%} · Beraberlik {draw_p:.0%} · "
         f"{row['away_name']} {away_p:.0%} | KG Yok {btts_no:.0%} | 1,5 gol üst {over_15:.0%} | "
