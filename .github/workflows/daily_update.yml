@@ -45,6 +45,7 @@ jobs:
       - name: Refresh fixtures from IdDaa bulletin
         id: refresh_fixtures
         env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m data_pipeline.fetch_iddaa_fixtures
