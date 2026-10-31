@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import re
 from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from config.leagues import TRACKED_LEAGUE_IDS
 from config.settings import get_settings
 from data_pipeline.evaluate_predictions import evaluate_completed_predictions
-from data_pipeline.api_client import ApiFootballClient
-from data_pipeline.fetch_fixtures import SyncSummary, sync_fixtures, transform_fixtures
+from data_pipeline.api_client import ApiFootballClient, ApiFootballError
+from data_pipeline.fetch_fixtures import SyncSummary, transform_fixtures
 from db.db_client import SupabaseRestClient
 
 EXPECTED_GOALS_STAT_TYPES = frozenset({"expected_goals", "xg"})
@@ -40,8 +42,60 @@ def _non_negative_float(value: object) -> float | None:
 def sync_results(
     api: ApiFootballClient, db: SupabaseRestClient, *, match_date: date
 ) -> SyncSummary:
-    # The fixture upsert is idempotent and updates scores/status atomically.
-    return sync_fixtures(api, db, start_date=match_date, end_date=match_date)
+    """Apply completed scores to existing fixtures without changing the bulletin."""
+    api_fixtures = api.get(
+        "fixtures",
+        {"date": match_date.isoformat(), "timezone": "Europe/Istanbul"},
+    )
+    _, transformed = transform_fixtures(api_fixtures)
+    tracked = [
+        row
+        for row in transformed
+        if int(row["league_id"]) in TRACKED_LEAGUE_IDS
+    ]
+    finished = [row for row in tracked if row["status"] == "finished"]
+    fixture_ids = sorted({int(row["id"]) for row in finished})
+    existing_ids: set[int] = set()
+    for offset in range(0, len(fixture_ids), 100):
+        chunk = fixture_ids[offset : offset + 100]
+        existing_ids.update(
+            int(row["id"])
+            for row in db.select_all(
+                "matches",
+                columns="id",
+                filters={"id": f"in.({','.join(map(str, chunk))})"},
+            )
+        )
+    updates = [
+        {
+            "id": int(row["id"]),
+            "status": "finished",
+            "home_score": row["home_score"],
+            "away_score": row["away_score"],
+            "home_halftime_score": row["home_halftime_score"],
+            "away_halftime_score": row["away_halftime_score"],
+        }
+        for row in finished
+        if int(row["id"]) in existing_ids
+    ]
+    for row in updates:
+        match_id = row.pop("id")
+        db.update("matches", row, filters={"id": f"eq.{match_id}"})
+    day = match_date.isoformat()
+    return SyncSummary(
+        requested_start=day,
+        requested_end=day,
+        completed_start=day,
+        completed_end=day,
+        skipped_start=None,
+        skipped_end=None,
+        is_complete=True,
+        api_fixtures=len(api_fixtures),
+        tracked_fixtures=len(tracked),
+        leagues_upserted=0,
+        teams_upserted=0,
+        matches_upserted=len(updates),
+    )
 
 
 def sync_recent_results(
@@ -51,15 +105,55 @@ def sync_recent_results(
     today: date,
     lookback_days: int,
 ) -> SyncSummary:
-    """Reconcile recent days so a missed run cannot strand stale fixtures."""
+    """Refresh completed results while leaving fixture dates to the bulletin."""
     if lookback_days < 0 or lookback_days > 14:
         raise ValueError("lookback_days must be between 0 and 14")
-    reconcile_stale_active_fixtures(api, db)
-    summary = sync_fixtures(
-        api,
-        db,
-        start_date=today - timedelta(days=lookback_days),
-        end_date=today,
+    requested_start = today - timedelta(days=lookback_days)
+    daily: list[SyncSummary] = []
+    skipped_days: list[date] = []
+    cursor = requested_start
+    while cursor <= today:
+        try:
+            daily.append(sync_results(api, db, match_date=cursor))
+            cursor += timedelta(days=1)
+        except ApiFootballError as exc:
+            plan_window = re.search(
+                r"Free plans do not have access to this date, try from "
+                r"(\d{4}-\d{2}-\d{2}) to (\d{4}-\d{2}-\d{2})",
+                str(exc),
+            )
+            if not plan_window:
+                raise
+            allowed_start = date.fromisoformat(plan_window.group(1))
+            allowed_end = date.fromisoformat(plan_window.group(2))
+            if cursor < allowed_start:
+                last_skipped = min(today, allowed_start - timedelta(days=1))
+                skipped_days.extend(
+                    cursor + timedelta(days=offset)
+                    for offset in range((last_skipped - cursor).days + 1)
+                )
+                cursor = allowed_start
+                continue
+            if cursor > allowed_end:
+                skipped_days.extend(
+                    cursor + timedelta(days=offset)
+                    for offset in range((today - cursor).days + 1)
+                )
+                break
+            raise
+    summary = SyncSummary(
+        requested_start=requested_start.isoformat(),
+        requested_end=today.isoformat(),
+        completed_start=daily[0].completed_start if daily else None,
+        completed_end=daily[-1].completed_end if daily else None,
+        skipped_start=min(skipped_days).isoformat() if skipped_days else None,
+        skipped_end=max(skipped_days).isoformat() if skipped_days else None,
+        is_complete=not skipped_days,
+        api_fixtures=sum(item.api_fixtures for item in daily),
+        tracked_fixtures=sum(item.tracked_fixtures for item in daily),
+        leagues_upserted=0,
+        teams_upserted=0,
+        matches_upserted=sum(item.matches_upserted for item in daily),
     )
     sync_recent_expected_metrics(api, db, today=today, lookback_days=lookback_days)
     return summary
