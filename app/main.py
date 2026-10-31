@@ -1323,6 +1323,75 @@ def _cached_analysis_for_match(
     return analysis
 
 
+def render_tactical_match_readout(
+    row: dict[str, Any], history: pd.DataFrame, forecast: dict[str, Any] | None
+) -> None:
+    """Summarize each fixture from its pre-match form and independent goal model."""
+    st.markdown("#### Taktik eşleşme ve senaryolar")
+    if forecast is None:
+        st.info("Bu eşleşme için yeterli maç geçmişi bulunmadığından veriye dayalı senaryo üretilemedi.")
+        return
+
+    home_id, away_id = row["home_team_id"], row["away_team_id"]
+    home_form = summarize_team_form(
+        team_recent_matches(history, home_id, row["kickoff"], row["league_id"]), home_id
+    )
+    away_form = summarize_team_form(
+        team_recent_matches(history, away_id, row["kickoff"], row["league_id"]), away_id
+    )
+    home_xg, away_xg = forecast["expected_home"], forecast["expected_away"]
+    home_p, draw_p, away_p = forecast["home_win"], forecast["draw"], forecast["away_win"]
+    home_edge = home_p - away_p
+    favorite = row["home_name"] if home_edge >= 0 else row["away_name"]
+    favorite_edge = abs(home_edge)
+    over_15 = sum(
+        forecast["score_matrix"][h][a]
+        for h in range(len(forecast["score_matrix"]))
+        for a in range(len(forecast["score_matrix"][h]))
+        if h + a >= 2
+    )
+    under_35 = 1 - sum(
+        forecast["score_matrix"][h][a]
+        for h in range(len(forecast["score_matrix"]))
+        for a in range(len(forecast["score_matrix"][h]))
+        if h + a >= 4
+    )
+    btts_no = 1 - forecast["btts"]
+
+    home_points = home_form["points"] / max(1, len(team_recent_matches(history, home_id, row["kickoff"], row["league_id"]))) if home_form["points"] is not None else None
+    away_points = away_form["points"] / max(1, len(team_recent_matches(history, away_id, row["kickoff"], row["league_id"]))) if away_form["points"] is not None else None
+    if home_xg - away_xg >= 0.45:
+        tactical = f"Model, {row['home_name']} için daha yüksek gol beklentisi gösteriyor ({home_xg:.2f}–{away_xg:.2f}). Ev sahibinin topu rakip yarı alana taşıması ve deplasman ekibinin geçiş hücumlarını sınırlaması maçın ana eşleşmesi."
+    elif away_xg - home_xg >= 0.45:
+        tactical = f"Model, {row['away_name']} için daha yüksek gol beklentisi gösteriyor ({away_xg:.2f}–{home_xg:.2f}). Deplasman ekibinin hücum üretimi ile ev sahibinin kendi sahasındaki geçiş savunması belirleyici olabilir."
+    else:
+        tactical = f"Beklenen goller birbirine yakın ({home_xg:.2f}–{away_xg:.2f}); merkezde top kayıpları ve geçişleri daha iyi değerlendiren taraf avantaj sağlayabilir."
+    if home_points is not None and away_points is not None:
+        tactical += f" Son maçlardaki puan ortalaması: {row['home_name']} {home_points:.2f}, {row['away_name']} {away_points:.2f} puan/maç."
+
+    st.markdown(tactical)
+    st.caption(
+        f"Model görünümü: {row['home_name']} {home_p:.0%} · Beraberlik {draw_p:.0%} · "
+        f"{row['away_name']} {away_p:.0%} | KG Yok {btts_no:.0%} | 1,5 gol üst {over_15:.0%} | "
+        f"En olası skor {forecast['most_likely_score']}. Olasılıklar geçmiş lig ve takım maçlarından hesaplanan model çıktılarıdır."
+    )
+    low, medium, high = st.columns(3)
+    with low:
+        st.markdown("**Daha temkinli senaryolar**")
+        safest_side = f"Çifte şans 1X (%{(home_p + draw_p) * 100:.1f})" if home_p >= away_p else f"Çifte şans X2 (%{(away_p + draw_p) * 100:.1f})"
+        safest_total = "1,5 gol üst" if over_15 >= 0.5 else "3,5 gol alt"
+        total_probability = over_15 if over_15 >= 0.5 else under_35
+        st.markdown(f"- {safest_side}\n- {safest_total} (%{total_probability * 100:.1f})")
+    with medium:
+        st.markdown("**Ana senaryo**")
+        outcome = f"{favorite} kazanır" if favorite_edge >= 0.08 else "Dengeli maç; beraberlik olasılığı yüksek"
+        st.markdown(f"- {outcome} ({max(home_p, away_p):.0%} model olasılığı)\n- KG {'Var' if forecast['btts'] >= 0.5 else 'Yok'} (%{max(forecast['btts'], btts_no) * 100:.1f})")
+    with high:
+        st.markdown("**Daha yüksek riskli senaryo**")
+        st.markdown(f"- {favorite} galibiyeti + KG Yok\n- Temsili skor: {forecast['most_likely_score']}")
+    st.caption("Senaryolar tahmin garantisi veya bahis tavsiyesi değildir. Birleşik koşulların gerçekleşme olasılığı daha düşüktür; maç önü kadro ve sakatlık bilgileri bu model özetinde yer almaz.")
+
+
 def render_analysis(
     matches_data: list[dict[str, Any]],
     quotes_data: list[dict[str, Any]],
@@ -1471,6 +1540,8 @@ def render_analysis(
             model_forecast, corner_forecast = render_model_forecast(
                 row, history, markets, precomputed=cached_analysis
             )
+            st.divider()
+            render_tactical_match_readout(row, history, model_forecast)
             st.divider()
             render_recent_form(row, history, team_names)
             st.divider()
@@ -1748,11 +1819,11 @@ if __name__ == '__main__':
         teams, leagues = pd.DataFrame(), pd.DataFrame()
     section = st.radio(
         "Bölüm",
-        ["⚽  Maç Analizleri", "📊  İstatistik Arşivi", "📈  Tahmin Performansı"],
+        ["⚽  Maç Analizleri", "🧠  Günlük Taktik Analiz", "📊  İstatistik Arşivi", "📈  Tahmin Performansı"],
         horizontal=True,
         label_visibility="collapsed",
     )
-    if section == "⚽  Maç Analizleri":
+    if section in {"⚽  Maç Analizleri", "🧠  Günlük Taktik Analiz"}:
         try:
             match_records, quote_records, analyses = load_match_day(selected_day)
             try:
