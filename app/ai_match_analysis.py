@@ -128,6 +128,7 @@ def generate_match_analysis(
     context: dict[str, Any], *, api_key: str, model: str = "gemini-3.8-flash",
     instructions_override: str | None = None, json_mode: bool = False,
     max_output_tokens: int = 1800,
+    response_schema: dict[str, Any] | None = None,
 ) -> str:
     """Generate a Turkish analysis using only supplied match and model data."""
     if not api_key:
@@ -168,6 +169,7 @@ def generate_match_analysis(
             "maxOutputTokens": max_output_tokens,
             "temperature": 0.7,
             **({"responseMimeType": "application/json"} if json_mode else {}),
+            **({"responseSchema": response_schema} if response_schema else {}),
         },
     }
     try:
@@ -187,6 +189,12 @@ def generate_match_analysis(
                 delay = 1.5 * (attempt + 1)
             time.sleep(delay)
     except requests.RequestException as exc:
+        if model != "gemini-3.5-flash-lite":
+            return generate_match_analysis(
+                context, api_key=api_key, model="gemini-3.5-flash-lite",
+                instructions_override=instructions_override, json_mode=json_mode,
+                max_output_tokens=max_output_tokens, response_schema=response_schema,
+            )
         raise MatchAnalysisAIError("Google Gemini API bağlantısı kurulamadı.") from exc
     if not response.ok:
         # Google returns a structured reason (for example, model not found or
@@ -206,13 +214,13 @@ def generate_match_analysis(
             return generate_match_analysis(
                 context, api_key=api_key, model="gemini-3.8-flash",
                 instructions_override=instructions_override, json_mode=json_mode,
-                max_output_tokens=max_output_tokens,
+                max_output_tokens=max_output_tokens, response_schema=response_schema,
             )
         if response.status_code in {429, 503} and model != "gemini-3.5-flash-lite":
             return generate_match_analysis(
                 context, api_key=api_key, model="gemini-3.5-flash-lite",
                 instructions_override=instructions_override, json_mode=json_mode,
-                max_output_tokens=max_output_tokens,
+                max_output_tokens=max_output_tokens, response_schema=response_schema,
             )
         diagnostic = ": ".join(part for part in (status, detail) if part)
         if len(diagnostic) > 400:
@@ -325,9 +333,47 @@ def generate_match_ai_packages(
         "\"risk_selections\":{\"low\":[{\"market\":\"...\",\"reason\":\"...\"}],"
         "\"medium\":[...],\"high\":[...]}}]}"
     )
+    selection_schema = {
+        "type": "ARRAY",
+        "items": {
+            "type": "OBJECT",
+            "properties": {
+                "market": {"type": "STRING"},
+                "reason": {"type": "STRING"},
+            },
+            "required": ["market", "reason"],
+        },
+    }
+    response_schema = {
+        "type": "OBJECT",
+        "properties": {
+            "matches": {
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "match_id": {"type": "INTEGER"},
+                        "analysis": {"type": "STRING"},
+                        "risk_selections": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "low": selection_schema,
+                                "medium": selection_schema,
+                                "high": selection_schema,
+                            },
+                            "required": ["low", "medium", "high"],
+                        },
+                    },
+                    "required": ["match_id", "analysis", "risk_selections"],
+                },
+            },
+        },
+        "required": ["matches"],
+    }
     raw = generate_match_analysis(
         {"matches": contexts}, api_key=api_key, model=model,
         instructions_override=instructions, json_mode=True, max_output_tokens=12000,
+        response_schema=response_schema,
     )
     try:
         payload = json.loads(raw)
