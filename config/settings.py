@@ -40,6 +40,10 @@ def _load_streamlit_secrets() -> None:
         for key in (
             "SUPABASE_URL",
             "SUPABASE_ANON_KEY",
+            "GOOGLE_API_KEY",
+            "GOOGLE_MODEL",
+            "GEMINI_API_KEY",
+            "GEMINI_MODEL",
         ):
             if not os.getenv(key):
                 value = st.secrets.get(key)
@@ -49,6 +53,17 @@ def _load_streamlit_secrets() -> None:
         # Settings must remain usable outside Streamlit and before secrets are
         # configured; the caller will report the precise missing keys.
         return
+
+
+def get_optional_setting(name: str, default: str = "") -> str:
+    """Read an optional setting from the local environment or Streamlit secrets."""
+    _load_env_file(PROJECT_ROOT / ".env")
+    _load_streamlit_secrets()
+    aliases = {
+        "GOOGLE_API_KEY": "GEMINI_API_KEY",
+        "GOOGLE_MODEL": "GEMINI_MODEL",
+    }
+    return os.getenv(name, os.getenv(aliases.get(name, ""), default)).strip()
 
 
 @dataclass(frozen=True, slots=True)

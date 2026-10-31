@@ -2,6 +2,7 @@
 
 Streamlit uygulaması, günlük fikstürleri ve IdDaa oranlarını Supabase'den okur;
 geçmiş maç sonuçları ve istatistiklerinden Poisson tabanlı tahminler üretir.
+Maç analizlerinde isteğe bağlı Google Gemini yorumu da oluşturulabilir.
 İstatistik arşivinde tamamlanmış maçların skor, xG, xA ve korner verileri
 gösterilir. Uygulama ekranı veritabanına yazma yapmaz.
 
@@ -14,6 +15,8 @@ API_FOOTBALL_KEY=...
 SUPABASE_URL=https://<project>.supabase.co
 SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
+GOOGLE_API_KEY=...       # İsteğe bağlı Gemini maç yorumu
+GOOGLE_MODEL=gemini-3.8-flash  # İsteğe bağlı model seçimi
 TELEGRAM_BOT_TOKEN=...  # İsteğe bağlı hata bildirimi
 TELEGRAM_CHAT_ID=...    # İsteğe bağlı hata bildirimi
 ODDS_HISTORY_ALERT_ROWS=...  # İsteğe bağlı satır sayısı uyarı eşiği
@@ -26,9 +29,11 @@ python -m pip install -r requirements.txt
 streamlit run app/main.py
 ```
 
-Arayüz Supabase anon anahtarıyla salt okunur erişim kullanır. Servis rolü ve
-API-Football anahtarı yalnızca veri toplama işleri içindir; bunları herkese
-açık depoya veya Streamlit arayüz ayarlarına koymayın.
+Arayüz Supabase anon anahtarıyla salt okunur erişim kullanır. Yerel Gemini
+yorumları için `GOOGLE_API_KEY` gerekir; Streamlit Cloud dağıtımında bu anahtarı
+uygulamanın Secrets ayarına ekleyin. `GEMINI_API_KEY` ve `GEMINI_MODEL` adları da
+geriye dönük uyumluluk için okunur. Servis rolü ve API anahtarı değerlerini
+herkese açık depoya koymayın.
 
 ## Veri akışı
 

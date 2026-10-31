@@ -20,6 +20,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.odds_quality import total_market_key
 from app.market_mapping import is_compound_selection, standard_market_price, total_goals_outcome
+from app.ai_match_analysis import (
+    MatchAnalysisAIError,
+    build_match_analysis_context,
+    generate_match_analysis,
+)
+from config.settings import get_optional_setting
 from app.components.data import (
     load_completed_match_history,
     get_db,
@@ -1603,9 +1609,54 @@ def render_analysis(
             )
             st.divider()
             render_tactical_match_readout(row, history, model_forecast)
+            if model_forecast is not None:
+                render_ai_match_analysis(row, history, model_forecast, match_id)
             st.divider()
             render_recent_form(row, history, team_names)
             st.divider()
+
+
+def render_ai_match_analysis(
+    row: dict[str, Any],
+    history: pd.DataFrame,
+    forecast: dict[str, Any],
+    match_id: int,
+) -> None:
+    """Generate an optional, session-cached AI interpretation for one match."""
+    home_probability = round(float(forecast["home_win"]), 3)
+    away_probability = round(float(forecast["away_win"]), 3)
+    state_key = (
+        f"ai_match_analysis_{match_id}_"
+        f"{round(home_probability * 1000)}_{round(away_probability * 1000)}"
+    )
+    st.markdown("#### Yapay zekâ destekli detaylı yorum")
+    st.caption(
+        "Google Gemini, uygulamanın maç geçmişi ve Poisson olasılıklarını yorumlar; "
+        "hesaplanmış model tahminlerini değiştirmez. Kadro bilgisi yoksa oyuncu veya sakatlık iddiası üretmez."
+    )
+    if st.button(
+        "🧠 Yapay zekâ analizi oluştur",
+        key=f"generate_ai_analysis_{match_id}",
+        help="Bu maç için bir Google Gemini API isteği gönderir.",
+    ):
+        api_key = get_optional_setting("GOOGLE_API_KEY")
+        if not api_key:
+            st.warning(
+                "AI yorumu için GOOGLE_API_KEY ayarlanmalı (.env veya Streamlit secrets)."
+            )
+        else:
+            context = build_match_analysis_context(row, history, forecast)
+            model = get_optional_setting("GOOGLE_MODEL", "gemini-3.8-flash")
+            with st.spinner("Maç verileri yorumlanıyor…"):
+                try:
+                    st.session_state[state_key] = generate_match_analysis(
+                        context, api_key=api_key, model=model
+                    )
+                except MatchAnalysisAIError as exc:
+                    st.error(str(exc))
+    analysis = st.session_state.get(state_key)
+    if analysis:
+        st.markdown(analysis)
 
 
 def coupon_market_candidates(row: dict[str, Any], forecast: dict[str, Any]) -> list[dict[str, Any]]:
