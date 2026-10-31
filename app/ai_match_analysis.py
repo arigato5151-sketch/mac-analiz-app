@@ -127,6 +127,7 @@ def build_match_analysis_context(
 def generate_match_analysis(
     context: dict[str, Any], *, api_key: str, model: str = "gemini-3.8-flash",
     instructions_override: str | None = None, json_mode: bool = False,
+    max_output_tokens: int = 1800,
 ) -> str:
     """Generate a Turkish analysis using only supplied match and model data."""
     if not api_key:
@@ -164,7 +165,7 @@ def generate_match_analysis(
             }],
         }],
         "generationConfig": {
-            "maxOutputTokens": 1800,
+            "maxOutputTokens": max_output_tokens,
             "temperature": 0.7,
             **({"responseMimeType": "application/json"} if json_mode else {}),
         },
@@ -205,11 +206,13 @@ def generate_match_analysis(
             return generate_match_analysis(
                 context, api_key=api_key, model="gemini-3.8-flash",
                 instructions_override=instructions_override, json_mode=json_mode,
+                max_output_tokens=max_output_tokens,
             )
-        if response.status_code == 503 and model != "gemini-3.6-flash":
+        if response.status_code in {429, 503} and model != "gemini-3.5-flash-lite":
             return generate_match_analysis(
-                context, api_key=api_key, model="gemini-3.6-flash",
+                context, api_key=api_key, model="gemini-3.5-flash-lite",
                 instructions_override=instructions_override, json_mode=json_mode,
+                max_output_tokens=max_output_tokens,
             )
         diagnostic = ": ".join(part for part in (status, detail) if part)
         if len(diagnostic) > 400:
@@ -299,6 +302,67 @@ def generate_match_ai_package(
     if not any(package["risk_selections"].values()):
         raise MatchAnalysisAIError("Yapay zekâ geçerli risk seçimi döndürmedi.")
     return package
+
+
+def generate_match_ai_packages(
+    contexts: list[dict[str, Any]], *, api_key: str, model: str = "gemini-3.8-flash"
+) -> dict[int, dict[str, Any]]:
+    """Generate compact, match-specific packages in one quota-efficient request."""
+    if not contexts:
+        return {}
+    instructions = (
+        "Türkçe futbol analisti olarak her maçı ayrı değerlendir ve yalnızca verilen "
+        "JSON'daki verilere dayan. Oyuncu, sakatlık, diziliş, oran veya haber uydurma. "
+        "Her maç için 4 kısa başlıklı Markdown yorum yaz: Maç profili, Form ve eşleşme, "
+        "Olası senaryolar, Risk profillerine göre seçimler. Yorum her maçta o maçın "
+        "takım adlarına, formuna ve Poisson olasılıklarına özgü olsun; veri zayıfsa "
+        "bunu belirt. Seçimleri yalnızca ilgili maçın candidate_markets listesinden "
+        "seç ve market olasılıklarını değiştirme. Her risk grubuna bir seçim ve kısa "
+        "gerekçe koy: low temkinli, medium dengeli, high daha koşullu. Aynı maçta "
+        "marketleri tekrar etme. Kesinlik veya kazanç garantisi verme. Her girişteki "
+        "match_id değerini aynen koru. Yalnızca bu JSON şemasını döndür: "
+        "{\"matches\":[{\"match_id\":123,\"analysis\":\"...\","
+        "\"risk_selections\":{\"low\":[{\"market\":\"...\",\"reason\":\"...\"}],"
+        "\"medium\":[...],\"high\":[...]}}]}"
+    )
+    raw = generate_match_analysis(
+        {"matches": contexts}, api_key=api_key, model=model,
+        instructions_override=instructions, json_mode=True, max_output_tokens=12000,
+    )
+    try:
+        payload = json.loads(raw)
+    except ValueError as exc:
+        raise MatchAnalysisAIError("Yapay zekâ maç paketlerini JSON olarak döndürmedi.") from exc
+    context_by_id = {
+        int(item["match_id"]): item
+        for item in contexts
+        if item.get("match_id") is not None
+    }
+    packages: dict[int, dict[str, Any]] = {}
+    matches = payload.get("matches", []) if isinstance(payload, dict) else []
+    for item in matches if isinstance(matches, list) else []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            match_id = int(item["match_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        context = context_by_id.get(match_id)
+        analysis = str(item.get("analysis", "")).strip()
+        if context is None or not analysis:
+            continue
+        selections = _validate_risk_selections(
+            item.get("risk_selections", {}),
+            context.get("model", {}).get("candidate_markets", {}),
+        )
+        if any(selections.values()):
+            packages[match_id] = {
+                "analysis": analysis[:12000],
+                "risk_selections": selections,
+            }
+    if not packages:
+        raise MatchAnalysisAIError("Yapay zekâ geçerli maç paketi döndürmedi.")
+    return packages
 
 
 def _validate_risk_selections(

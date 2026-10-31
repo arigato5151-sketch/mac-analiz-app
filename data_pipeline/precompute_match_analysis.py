@@ -17,7 +17,7 @@ from app.main import (
 from app.ai_match_analysis import (
     MatchAnalysisAIError,
     build_match_analysis_context,
-    generate_match_ai_package,
+    generate_match_ai_packages,
 )
 from config.settings import get_optional_setting, get_supabase_admin_settings
 from db.db_client import SupabaseRestClient
@@ -101,6 +101,26 @@ def collect_match_analysis_cache(
         },
         order="match_date.asc,id.asc",
     )
+    cached_ai: dict[int, dict[str, Any]] = {}
+    fixture_ids = [str(item["id"]) for item in fixtures if item.get("id") is not None]
+    for offset in range(0, len(fixture_ids), 100):
+        cached_rows = db.select_all(
+            "match_analysis_cache",
+            columns="match_id,model_version,analysis_json",
+            filters={"match_id": f"in.({','.join(fixture_ids[offset:offset + 100])})"},
+        )
+        for cached in cached_rows:
+            cached_analysis = cached.get("analysis_json") or {}
+            if (
+                cached.get("model_version") == ANALYSIS_MODEL_VERSION
+                and isinstance(cached_analysis, dict)
+                and cached_analysis.get("ai_analysis")
+                and cached_analysis.get("ai_risk_selections")
+            ):
+                cached_ai[int(cached["match_id"])] = {
+                    "analysis": cached_analysis["ai_analysis"],
+                    "risk_selections": cached_analysis["ai_risk_selections"],
+                }
     team_names = {
         int(item["id"]): str(item["name"])
         for item in db.select_all("teams", columns="id,name")
@@ -119,6 +139,9 @@ def collect_match_analysis_cache(
     histories: dict[int, pd.DataFrame] = {}
     tuning_by_league: dict[int, dict[str, Any] | None] = {}
     rows: list[dict[str, Any]] = []
+    cache_row_by_match: dict[int, dict[str, Any]] = {}
+    ai_contexts: list[dict[str, Any]] = []
+    analysis_by_match: dict[int, dict[str, Any]] = {}
     for fixture in fixtures:
         try:
             league_id = int(fixture["league_id"])
@@ -155,24 +178,22 @@ def collect_match_analysis_cache(
             row, histories[league_id], tuning_by_league[league_id]
         )
         if google_api_key and analysis.get("forecast"):
-            try:
+            analysis_by_match[match_id] = analysis
+            if match_id in cached_ai:
+                ai_package = cached_ai[match_id]
+                analysis["ai_analysis"] = ai_package["analysis"]
+                analysis["ai_risk_selections"] = ai_package["risk_selections"]
+            else:
                 ai_context = build_match_analysis_context(
                     row, histories[league_id], analysis["forecast"]
                 )
+                ai_context["match_id"] = match_id
                 ai_context["model"]["candidate_markets"] = {
                     str(name): float(probability)
                     for name, probability in ai_context["model"]["candidate_markets"].items()
                 }
-                ai_package = generate_match_ai_package(
-                    ai_context, api_key=google_api_key, model=google_model
-                )
-                analysis["ai_analysis"] = ai_package["analysis"]
-                analysis["ai_risk_selections"] = ai_package["risk_selections"]
-            except MatchAnalysisAIError as exc:
-                ai_failures += 1
-                print(f"AI precompute failed for match {match_id}: {exc}")
-        rows.append(
-            {
+                ai_contexts.append(ai_context)
+        cache_row = {
                 "match_id": match_id,
                 "league_id": league_id,
                 "home_team_id": home_team_id,
@@ -182,7 +203,38 @@ def collect_match_analysis_cache(
                 "calculated_at": reference.isoformat(),
                 "analysis_json": _json_safe(analysis),
             }
-        )
+        rows.append(cache_row)
+        cache_row_by_match[match_id] = cache_row
+    # One structured request can analyze several fixtures, keeping a full slate
+    # within the free-tier daily request budget. Existing AI results are reused
+    # by the second scheduled refresh instead of consuming the quota twice.
+    for offset in range(0, len(ai_contexts), 10):
+        batch = ai_contexts[offset : offset + 10]
+        try:
+            packages = generate_match_ai_packages(
+                batch, api_key=google_api_key or "", model=google_model
+            )
+            for match_id, package in packages.items():
+                analysis = analysis_by_match.get(match_id)
+                if analysis is not None:
+                    analysis["ai_analysis"] = package["analysis"]
+                    analysis["ai_risk_selections"] = package["risk_selections"]
+                    cache_row = cache_row_by_match.get(match_id)
+                    if cache_row is not None:
+                        cache_row["analysis_json"]["ai_analysis"] = package["analysis"]
+                        cache_row["analysis_json"]["ai_risk_selections"] = package[
+                            "risk_selections"
+                        ]
+            missing = {int(context["match_id"]) for context in batch} - packages.keys()
+            ai_failures += len(missing)
+            if missing:
+                print(f"AI precompute returned no package for matches: {sorted(missing)}")
+        except MatchAnalysisAIError as exc:
+            ai_failures += len(batch)
+            print(
+                f"AI precompute failed for match batch "
+                f"{offset // 10 + 1} ({len(batch)} matches): {exc}"
+            )
     return rows
 
 
