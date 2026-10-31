@@ -1339,20 +1339,11 @@ def render_tactical_match_readout(
     away_form = summarize_team_form(away_recent, away_id)
     home_xg, away_xg = forecast["expected_home"], forecast["expected_away"]
     home_p, draw_p, away_p = forecast["home_win"], forecast["draw"], forecast["away_win"]
-    home_edge = home_p - away_p
-    favorite = row["home_name"] if home_edge >= 0 else row["away_name"]
-    favorite_edge = abs(home_edge)
     over_15 = sum(
         forecast["score_matrix"][h][a]
         for h in range(len(forecast["score_matrix"]))
         for a in range(len(forecast["score_matrix"][h]))
         if h + a >= 2
-    )
-    under_35 = 1 - sum(
-        forecast["score_matrix"][h][a]
-        for h in range(len(forecast["score_matrix"]))
-        for a in range(len(forecast["score_matrix"][h]))
-        if h + a >= 4
     )
     btts_no = 1 - forecast["btts"]
 
@@ -1410,20 +1401,61 @@ def render_tactical_match_readout(
         f"{row['away_name']} {away_p:.0%} | KG Yok {btts_no:.0%} | 1,5 gol üst {over_15:.0%} | "
         f"En olası skor {forecast['most_likely_score']}. Olasılıklar geçmiş lig ve takım maçlarından hesaplanan model çıktılarıdır."
     )
+    matrix = forecast["score_matrix"]
+    def probability(predicate: Any) -> float:
+        return sum(
+            matrix[h][a]
+            for h in range(len(matrix))
+            for a in range(len(matrix[h]))
+            if predicate(h, a)
+        )
+
+    candidates = [
+        ("1X", home_p + draw_p, "Ev sahibi kazanır veya maç berabere biter."),
+        ("X2", away_p + draw_p, "Deplasman kazanır veya maç berabere biter."),
+        ("12", home_p + away_p, "Maçta kazanan çıkar; beraberlik olmaz."),
+        (f"Maç sonucu 1 · {home_name}", home_p, f"Model ev sahibine %{home_p:.0f} galibiyet olasılığı veriyor."),
+        ("Beraberlik", draw_p, f"Beraberlik olasılığı %{draw_p:.0f}; iki takımın beklenen golleri {home_xg:.2f}–{away_xg:.2f}."),
+        (f"Maç sonucu 2 · {away_name}", away_p, f"Model deplasman galibiyetini %{away_p:.0f} hesaplıyor."),
+        ("1,5 gol üst", probability(lambda h, a: h + a >= 2), f"İki veya daha fazla gol gerekir; beklenen toplam gol {total_xg:.2f}."),
+        ("2,5 gol üst", probability(lambda h, a: h + a >= 3), f"En az üç gol gerekir; beklenen toplam gol {total_xg:.2f}."),
+        ("2,5 gol alt", probability(lambda h, a: h + a <= 2), "En fazla iki gol çıkması gerekir."),
+        ("3,5 gol alt", probability(lambda h, a: h + a <= 3), "Dört veya daha fazla gol çıkmaması gerekir."),
+        ("Karşılıklı gol · Var", forecast["btts"], f"İki takımın da gol bulma olasılığı %{forecast['btts']:.0f}."),
+        ("Karşılıklı gol · Yok", btts_no, f"En az bir takımın gol bulamama olasılığı %{btts_no:.0f}."),
+        (f"{home_name} 0,5 gol üst", probability(lambda h, a: h >= 1), f"Ev sahibinin en az bir gol bulma ihtimali; beklenen gol {home_xg:.2f}."),
+        (f"{away_name} 0,5 gol üst", probability(lambda h, a: a >= 1), f"Deplasmanın en az bir gol bulma ihtimali; beklenen gol {away_xg:.2f}."),
+        (f"{home_name} kazanır ve KG Yok", probability(lambda h, a: h > a and a == 0), "Ev sahibinin galibiyetiyle birlikte deplasmanın gol atamaması gerekir."),
+        (f"{away_name} kazanır ve KG Yok", probability(lambda h, a: a > h and h == 0), "Deplasman galibiyetiyle birlikte ev sahibinin gol atamaması gerekir."),
+        (f"{home_name} kazanır ve 2,5 üst", probability(lambda h, a: h > a and h + a >= 3), "Ev sahibi kazanmalı ve maçta en az üç gol çıkmalı."),
+        (f"{away_name} kazanır ve 2,5 üst", probability(lambda h, a: a > h and h + a >= 3), "Deplasman kazanmalı ve maçta en az üç gol çıkmalı."),
+    ]
+    candidates.extend([
+        (f"Tam skor {forecast['most_likely_score']}", probability(
+            lambda h, a: f"{h}-{a}" == str(forecast["most_likely_score"]).replace("–", "-").replace(":", "-")
+        ), "Model matrisinde en yüksek olasılığa sahip tek skor."),
+    ])
+    candidates.sort(key=lambda item: item[1], reverse=True)
+    # Assign match-specific selections to probability bands. If a band is empty,
+    # show the closest available model outcome and state its actual probability.
+    cautious_pool = [item for item in candidates if item[1] >= 0.62]
+    main_pool = [item for item in candidates if 0.35 <= item[1] < 0.72]
+    risk_pool = [item for item in candidates if 0.08 <= item[1] < 0.40]
+    cautious = cautious_pool[:2] if cautious_pool else candidates[:1]
+    main = sorted(main_pool, key=lambda item: abs(item[1] - 0.52))[:2] if main_pool else candidates[:1]
+    risk = risk_pool[:2] if risk_pool else sorted(candidates, key=lambda item: abs(item[1] - 0.25))[:1]
+
     low, medium, high = st.columns(3)
-    with low:
-        st.markdown("**Daha temkinli senaryolar**")
-        safest_side = f"Çifte şans 1X (%{(home_p + draw_p) * 100:.1f})" if home_p >= away_p else f"Çifte şans X2 (%{(away_p + draw_p) * 100:.1f})"
-        safest_total = "1,5 gol üst" if over_15 >= 0.5 else "3,5 gol alt"
-        total_probability = over_15 if over_15 >= 0.5 else under_35
-        st.markdown(f"- {safest_side}\n- {safest_total} (%{total_probability * 100:.1f})")
-    with medium:
-        st.markdown("**Ana senaryo**")
-        outcome = f"{favorite} kazanır" if favorite_edge >= 0.08 else "Dengeli maç; beraberlik olasılığı yüksek"
-        st.markdown(f"- {outcome} ({max(home_p, away_p):.0%} model olasılığı)\n- KG {'Var' if forecast['btts'] >= 0.5 else 'Yok'} (%{max(forecast['btts'], btts_no) * 100:.1f})")
-    with high:
-        st.markdown("**Daha yüksek riskli senaryo**")
-        st.markdown(f"- {favorite} galibiyeti + KG Yok\n- Temsili skor: {forecast['most_likely_score']}")
+    for column, title, selections, explanation in (
+        (low, "Görece daha olası", cautious, "Modelde üst olasılık bandına giren, bu maça özgü sonuçlar:"),
+        (medium, "Dengeli risk", main, "Olasılığı orta bantta kalan maç senaryoları:"),
+        (high, "Daha yüksek risk", risk, "Daha fazla koşul gerektiren veya daha düşük olasılıklı senaryolar:"),
+    ):
+        with column:
+            st.markdown(f"**{title}**")
+            st.caption(explanation)
+            for label, chance, rationale in selections:
+                st.markdown(f"**{label} · %{chance * 100:.1f}**  \n{rationale}")
     st.caption("Senaryolar tahmin garantisi veya bahis tavsiyesi değildir. Birleşik koşulların gerçekleşme olasılığı daha düşüktür; maç önü kadro ve sakatlık bilgileri bu model özetinde yer almaz.")
 
 
