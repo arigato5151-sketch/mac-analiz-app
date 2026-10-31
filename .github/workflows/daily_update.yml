@@ -62,7 +62,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m data_pipeline.fetch_results --lookback-days 7
       - name: Precompute nightly match analysis
-        if: always() && github.event.schedule == '30 20 * * *' && steps.refresh_fixtures.outcome == 'success' && steps.refresh_results.outcome == 'success'
+        if: always() && (github.event_name == 'workflow_dispatch' || github.event.schedule == '30 20 * * *') && steps.refresh_fixtures.outcome == 'success' && steps.refresh_results.outcome == 'success'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
