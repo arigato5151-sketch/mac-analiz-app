@@ -171,6 +171,14 @@ def generate_match_analysis(
             status = str(error_payload.get("status", "")).strip()
         except (ValueError, AttributeError):
             detail, status = "", ""
+        if (
+            response.status_code == 404
+            and model != "gemini-3.8-flash"
+            and "no longer available" in detail.lower()
+        ):
+            return generate_match_analysis(
+                context, api_key=api_key, model="gemini-3.8-flash"
+            )
         diagnostic = ": ".join(part for part in (status, detail) if part)
         if len(diagnostic) > 400:
             diagnostic = diagnostic[:397] + "..."
