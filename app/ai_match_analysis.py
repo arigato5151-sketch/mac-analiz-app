@@ -56,19 +56,26 @@ def _model_markets(forecast: dict[str, Any], home: str, away: str) -> dict[str, 
         )
 
     return {
-        f"{home} kazanır": float(forecast["home_win"]),
-        "Beraberlik": float(forecast["draw"]),
-        f"{away} kazanır": float(forecast["away_win"]),
         "1X": chance(lambda h, a: h >= a),
+        "X2": chance(lambda h, a: a >= h),
+        "12": chance(lambda h, a: h != a),
+        f"Maç sonucu 1 · {home}": float(forecast["home_win"]),
+        "Beraberlik": float(forecast["draw"]),
+        f"Maç sonucu 2 · {away}": float(forecast["away_win"]),
         "1,5 gol üst": chance(lambda h, a: h + a >= 2),
         "2,5 gol üst": chance(lambda h, a: h + a >= 3),
+        "2,5 gol alt": chance(lambda h, a: h + a <= 2),
         "3,5 gol alt": chance(lambda h, a: h + a <= 3),
-        "Karşılıklı gol var": float(forecast["btts"]),
-        "Karşılıklı gol yok": 1.0 - float(forecast["btts"]),
-        f"{home} 1,5 gol üst": chance(lambda h, a: h >= 2),
-        "1X ve 1,5 gol üst": chance(lambda h, a: h >= a and h + a >= 2),
-        f"{home} kazanır ve KG var": chance(
-            lambda h, a: h > a and h > 0 and a > 0
+        "Karşılıklı gol · Var": float(forecast["btts"]),
+        "Karşılıklı gol · Yok": 1.0 - float(forecast["btts"]),
+        f"{home} 0,5 gol üst": chance(lambda h, a: h >= 1),
+        f"{away} 0,5 gol üst": chance(lambda h, a: a >= 1),
+        f"{home} kazanır ve KG Yok": chance(lambda h, a: h > a and a == 0),
+        f"{away} kazanır ve KG Yok": chance(lambda h, a: a > h and h == 0),
+        f"{home} kazanır ve 2,5 üst": chance(lambda h, a: h > a and h + a >= 3),
+        f"{away} kazanır ve 2,5 üst": chance(lambda h, a: a > h and h + a >= 3),
+        f"Tam skor {forecast['most_likely_score']}": chance(
+            lambda h, a: f"{h}-{a}" == str(forecast["most_likely_score"]).replace("–", "-").replace(":", "-")
         ),
     }
 
@@ -248,10 +255,61 @@ def generate_match_risk_recommendations(
         result = json.loads(raw)
     except ValueError as exc:
         raise MatchAnalysisAIError("Yapay zekâ risk seçimlerini yapılandırılmış biçimde döndürmedi.") from exc
+    validated = _validate_risk_selections(result, allowed)
+    if not any(validated.values()):
+        raise MatchAnalysisAIError("Yapay zekâ geçerli risk seçimi döndürmedi.")
+    return validated
+
+
+def generate_match_ai_package(
+    context: dict[str, Any], *, api_key: str, model: str = "gemini-3.8-flash"
+) -> dict[str, Any]:
+    """Generate the instant-display commentary and risk picks in one AI call."""
+    instructions = (
+        "Türkçe, maç özelinde ve yalnızca verilen JSON'a dayanarak analiz yaz. Oyuncu, sakatlık, "
+        "diziliş veya haber uydurma; veride yoksa belirt. Model olasılıklarını değiştirme, kesinlik "
+        "iddiası ve bahis oranı verme. Maçın profili, form sinyalleri, oyun planları/eşleşmeler, "
+        "kırılma noktaları ve farklı maç senaryolarını içeren kısa ama anlamlı bir Markdown yorum "
+        "oluştur. Ayrıca candidate_markets içinden tam adları seçerek üç risk grubuna 1-2 tahmin "
+        "öner: low daha olası/temkinli; medium dengeli; high daha koşullu/yüksek risk. Her seçim "
+        "için veriye dayalı tek cümle Türkçe gerekçe yaz. Aynı marketi gruplar arasında tekrar etme. "
+        "Market adı veya olasılığı uydurma. Yalnızca şu JSON'u üret: {\"analysis\":\"Markdown metni\","
+        "\"risk_selections\":{\"low\":[{\"market\":\"tam market adı\",\"reason\":\"gerekçe\"}],"
+        "\"medium\":[...],\"high\":[...]}}."
+    )
+    raw = generate_match_analysis(
+        context,
+        api_key=api_key,
+        model=model,
+        instructions_override=instructions,
+        json_mode=True,
+    )
+    try:
+        package = json.loads(raw)
+    except ValueError as exc:
+        raise MatchAnalysisAIError("Yapay zekâ analiz paketini okuyamadı.") from exc
+    analysis = str(package.get("analysis", "")).strip() if isinstance(package, dict) else ""
+    if not analysis:
+        raise MatchAnalysisAIError("Yapay zekâ analiz metni döndürmedi.")
+    package["analysis"] = analysis[:12000]
+    package["risk_selections"] = _validate_risk_selections(
+        package.get("risk_selections", {}),
+        context.get("model", {}).get("candidate_markets", {}),
+    )
+    if not any(package["risk_selections"].values()):
+        raise MatchAnalysisAIError("Yapay zekâ geçerli risk seçimi döndürmedi.")
+    return package
+
+
+def _validate_risk_selections(
+    result: Any, allowed: Any
+) -> dict[str, list[dict[str, str]]]:
     validated: dict[str, list[dict[str, str]]] = {"low": [], "medium": [], "high": []}
     used: set[str] = set()
+    if not isinstance(result, dict) or not isinstance(allowed, dict):
+        return validated
     for profile in validated:
-        items = result.get(profile, []) if isinstance(result, dict) else []
+        items = result.get(profile, [])
         if not isinstance(items, list):
             continue
         for item in items[:2]:
@@ -262,6 +320,4 @@ def generate_match_risk_recommendations(
             if market in allowed and market not in used and reason:
                 validated[profile].append({"market": market, "reason": reason[:300]})
                 used.add(market)
-    if not any(validated.values()):
-        raise MatchAnalysisAIError("Yapay zekâ geçerli risk seçimi döndürmedi.")
     return validated

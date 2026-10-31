@@ -38,7 +38,7 @@ from app.components.data import (
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 # Bump this when forecast logic or the persisted analysis JSON contract changes.
-ANALYSIS_MODEL_VERSION = "form_poisson_v1"
+ANALYSIS_MODEL_VERSION = "form_poisson_ai_v2"
 NON_PLAYABLE_MATCH_STATUSES = {"postponed", "cancelled", "unlisted"}
 
 COUNTRY_NAMES_TR = {
@@ -1334,7 +1334,8 @@ def _cached_analysis_for_match(
 
 
 def render_tactical_match_readout(
-    row: dict[str, Any], history: pd.DataFrame, forecast: dict[str, Any] | None
+    row: dict[str, Any], history: pd.DataFrame, forecast: dict[str, Any] | None,
+    precomputed_risks: dict[str, Any] | None = None,
 ) -> None:
     """Summarize each fixture from its pre-match form and independent goal model."""
     st.markdown("#### Taktik eşleşme ve senaryolar")
@@ -1447,7 +1448,7 @@ def render_tactical_match_readout(
     ])
     candidate_probabilities = {label: chance for label, chance, _ in candidates}
     risk_state_key = f"ai_risk_selections_{int(row['id'])}"
-    if st.button(
+    if precomputed_risks is None and st.button(
         "🧠 Risk seçimlerini yapay zekâ belirlesin",
         key=f"generate_ai_risks_{int(row['id'])}",
         help="Gemini maç verisini ve model olasılıklarını değerlendirerek üç risk profiline seçim yapar.",
@@ -1468,7 +1469,11 @@ def render_tactical_match_readout(
                     )
                 except MatchAnalysisAIError as exc:
                     st.error(str(exc))
-    ai_risks = st.session_state.get(risk_state_key, {})
+    ai_risks = (
+        precomputed_risks
+        if precomputed_risks is not None
+        else st.session_state.get(risk_state_key, {})
+    )
     low, medium, high = st.columns(3)
     for column, title, profile, explanation in (
         (low, "Görece daha olası", "low", "Yapay zekânın temkinli bulduğu, model olasılığı yüksek seçimler:"),
@@ -1629,9 +1634,20 @@ def render_analysis(
                 row, history, [], precomputed=cached_analysis, show_details=False
             )
             st.divider()
-            render_tactical_match_readout(row, history, model_forecast)
+            render_tactical_match_readout(
+                row,
+                history,
+                model_forecast,
+                precomputed_risks=(cached_analysis or {}).get("ai_risk_selections"),
+            )
             if model_forecast is not None:
-                render_ai_match_analysis(row, history, model_forecast, match_id)
+                render_ai_match_analysis(
+                    row,
+                    history,
+                    model_forecast,
+                    match_id,
+                    precomputed_analysis=(cached_analysis or {}).get("ai_analysis"),
+                )
             st.divider()
             render_recent_form(row, history, team_names)
             st.divider()
@@ -1642,6 +1658,7 @@ def render_ai_match_analysis(
     history: pd.DataFrame,
     forecast: dict[str, Any],
     match_id: int,
+    precomputed_analysis: str | None = None,
 ) -> None:
     """Generate an optional, session-cached AI interpretation for one match."""
     home_probability = round(float(forecast["home_win"]), 3)
@@ -1655,6 +1672,10 @@ def render_ai_match_analysis(
         "Google Gemini, uygulamanın maç geçmişi ve Poisson olasılıklarını yorumlar; "
         "hesaplanmış model tahminlerini değiştirmez. Kadro bilgisi yoksa oyuncu veya sakatlık iddiası üretmez."
     )
+    if precomputed_analysis:
+        st.caption("Yapay zekâ destekli maç yorumu gece önceden hazırlandı.")
+        st.markdown(precomputed_analysis)
+        return
     if st.button(
         "🧠 Yapay zekâ analizi oluştur",
         key=f"generate_ai_analysis_{match_id}",

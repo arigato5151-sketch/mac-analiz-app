@@ -14,7 +14,12 @@ from app.main import (
     build_precomputed_match_analysis,
     tune_recent_form_prior,
 )
-from config.settings import get_supabase_admin_settings
+from app.ai_match_analysis import (
+    MatchAnalysisAIError,
+    build_match_analysis_context,
+    generate_match_ai_package,
+)
+from config.settings import get_optional_setting, get_supabase_admin_settings
 from db.db_client import SupabaseRestClient
 
 MATCH_COLUMNS = (
@@ -85,15 +90,32 @@ def collect_match_analysis_cache(
     if reference.tzinfo is None:
         raise ValueError("now must be timezone-aware")
     reference = reference.astimezone(timezone.utc)
+    cache_until = reference + pd.Timedelta(hours=36)
     fixtures = db.select_all(
         "matches",
         columns=MATCH_COLUMNS,
         filters={
             "status": "eq.scheduled",
             "match_date": f"gt.{reference.isoformat()}",
+            "and": f"(match_date.lt.{cache_until.isoformat()})",
         },
         order="match_date.asc,id.asc",
     )
+    team_names = {
+        int(item["id"]): str(item["name"])
+        for item in db.select_all("teams", columns="id,name")
+        if item.get("id") is not None and item.get("name")
+    }
+    league_names = {
+        int(item["id"]): str(item["name"])
+        for item in db.select_all("leagues", columns="id,name")
+        if item.get("id") is not None and item.get("name")
+    }
+    google_api_key = get_optional_setting("GOOGLE_API_KEY")
+    google_model = get_optional_setting("GOOGLE_MODEL", "gemini-3.8-flash")
+    ai_failures = 0
+    if not google_api_key:
+        print("GOOGLE_API_KEY is missing; nightly AI commentary will not be generated.")
     histories: dict[int, pd.DataFrame] = {}
     tuning_by_league: dict[int, dict[str, Any] | None] = {}
     rows: list[dict[str, Any]] = []
@@ -124,10 +146,31 @@ def collect_match_analysis_cache(
             "away_team_id": away_team_id,
             "match_date": match_date,
             "kickoff": match_date,
+            "home_name": team_names.get(home_team_id, f"Ev sahibi {home_team_id}"),
+            "away_name": team_names.get(away_team_id, f"Deplasman {away_team_id}"),
+            "league_name": league_names.get(league_id, ""),
+            "league_label": league_names.get(league_id, ""),
         }
         analysis = build_precomputed_match_analysis(
             row, histories[league_id], tuning_by_league[league_id]
         )
+        if google_api_key and analysis.get("forecast"):
+            try:
+                ai_context = build_match_analysis_context(
+                    row, histories[league_id], analysis["forecast"]
+                )
+                ai_context["model"]["candidate_markets"] = {
+                    str(name): float(probability)
+                    for name, probability in ai_context["model"]["candidate_markets"].items()
+                }
+                ai_package = generate_match_ai_package(
+                    ai_context, api_key=google_api_key, model=google_model
+                )
+                analysis["ai_analysis"] = ai_package["analysis"]
+                analysis["ai_risk_selections"] = ai_package["risk_selections"]
+            except MatchAnalysisAIError as exc:
+                ai_failures += 1
+                print(f"AI precompute failed for match {match_id}: {exc}")
         rows.append(
             {
                 "match_id": match_id,
@@ -161,6 +204,10 @@ def main() -> None:
         json.dumps(
             {
                 "fixtures_cached": len(rows),
+                "ai_analyses_cached": sum(
+                    1 for row in rows if row["analysis_json"].get("ai_analysis")
+                ),
+                "ai_failures": ai_failures,
                 "model_version": ANALYSIS_MODEL_VERSION,
             }
         )

@@ -35,6 +35,11 @@ uygulamanın Secrets ayarına ekleyin. `GEMINI_API_KEY` ve `GEMINI_MODEL` adlar�
 geriye dönük uyumluluk için okunur. Servis rolü ve API anahtarı değerlerini
 herkese açık depoya koymayın.
 
+GitHub Actions gecelik maç önü analizlerini ve yapay zekâ yorumlarını önceden
+üretir. Bunun çalışması için aynı `GOOGLE_API_KEY` değerini depo ayarlarında
+**Settings → Secrets and variables → Actions** altında repository secret olarak
+tanımlayın. Gece önbelleği, takip eden 36 saatte başlayacak maçları hazırlar.
+
 ## Veri akışı
 
 - API-Football fikstür ve sonuçları toplar.
@@ -42,6 +47,9 @@ herkese açık depoya koymayın.
   değerlendirir; daha önce işlenmiş tahminleri atlayarak son 14 günü uzlaştırır.
 - IdDaa günlük bültenindeki maçlar lig, takım adları ve başlama saatiyle
   uygulama fikstürlerine eşleştirilir; oran geçmişine yeni kayıt eklenir.
+- Gece iş akışı Poisson tahminlerini, AI destekli maç yorumunu ve risk profili
+  seçimlerini maç başlamadan Supabase önbelleğine yazar. Maç kartı açılırken bu
+  içerik önceden hazır olduğu için Gemini isteği beklenmez.
 - Eşleşmeyen hedef maç varsa çekim kısmi başarısızlık koduyla biter ve görev
   günlüklerinde sayıları gösterir. Kaydedilmiş maçların tekrar yazılmaması
   için rutin çalıştırmada kısmi sonuç yeniden denenmez. Eşleştirme düzeltmesi
