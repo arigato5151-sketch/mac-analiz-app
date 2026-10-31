@@ -18,6 +18,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.odds_quality import inconsistent_total_market_keys, total_market_key
+from app.market_mapping import is_compound_selection, standard_market_price, total_goals_outcome
 from app.components.data import (
     load_completed_match_history,
     get_db,
@@ -106,10 +108,7 @@ def market_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[st
         selections = []
         for selection in market.get("selections", []):
             try:
-                # IdDaa provides both the internal odd and the value shown to
-                # bettors. Display the latter so the app matches IdDaa's board.
-                display_odd = selection.get("display_odds")
-                odd = float(display_odd if display_odd is not None else selection.get("odds"))
+                odd = standard_market_price(selection)
             except (TypeError, ValueError):
                 continue
             if odd > 1:
@@ -159,7 +158,11 @@ def market_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[st
     return rows
 
 
-def all_market_quote_rows(payload: dict[str, Any], labels: dict[str, str]) -> list[dict[str, Any]]:
+def all_market_quote_rows(
+    payload: dict[str, Any],
+    labels: dict[str, str],
+    inconsistent_keys: set[tuple[str, str, str]] | None = None,
+) -> list[dict[str, Any]]:
     """Build a complete IdDaa odds table, including markets outside model coverage."""
     rows: list[dict[str, Any]] = []
     for market in payload.get("markets", []):
@@ -171,9 +174,8 @@ def all_market_quote_rows(payload: dict[str, Any], labels: dict[str, str]) -> li
             name = f"{name} · {market['line']}"
         selections = []
         for selection in market.get("selections", []):
-            raw_odd = selection.get("display_odds")
             try:
-                odd = float(raw_odd if raw_odd is not None else selection.get("odds"))
+                odd = standard_market_price(selection)
             except (TypeError, ValueError):
                 continue
             if odd > 1:
@@ -181,12 +183,15 @@ def all_market_quote_rows(payload: dict[str, Any], labels: dict[str, str]) -> li
         implied = [1 / odd for _, odd in selections]
         total = sum(implied)
         for (selection_name, odd), probability in zip(selections, implied):
-            rows.append({
+            row = {
                 "Market": name,
                 "Seçim": selection_name,
                 "Oran": f"{odd:.2f}",
                 "Piyasa %": f"%{probability / total * 100:.1f}" if len(selections) > 1 and total else "—",
-            })
+            }
+            if total_market_key(market) in (inconsistent_keys or set()):
+                row["Veri kontrolü"] = "Çizgilerle tutarsız; doğrulanana kadar kullanmayın"
+            rows.append(row)
     return rows
 
 
@@ -948,6 +953,10 @@ def render_model_forecast(
                 label = label.replace(source, target)
             compact_label = label.replace(" ", "")
             label = {"0": "x", "1ve0": "1x", "0ve1": "1x", "0ve2": "x2", "2ve0": "x2", "1ve2": "12", "2ve1": "12"}.get(compact_label, label)
+            if is_compound_selection(label):
+                # A combined outcome such as "Üst ve Yok" is not the pure
+                # "Üst" selection and must never overwrite its quote.
+                continue
             line_value = market.get("line")
             if line_value in (None, "", 0, "0"):
                 match = re.search(r"\d+(?:[.,]\d+)?", f"{market.get('name') or ''} {label}")
@@ -977,9 +986,9 @@ def render_model_forecast(
                     line_key = ""
                 else:
                     half_outcome = "x" if label == "0" else label
-                if half_category != "result" and any(term in label for term in ("ust", "over")):
+                if half_category != "result" and label in {"ust", "over"}:
                     half_outcome = "over"
-                elif half_category != "result" and any(term in label for term in ("alt", "under")):
+                elif half_category != "result" and label in {"alt", "under"}:
                     half_outcome = "under"
                 half_quote_index[(half_number, half_category, line_key, half_outcome)] = {
                     "odds": selection["odds"],
@@ -1013,11 +1022,19 @@ def render_model_forecast(
                 category, line_key = "double_chance", label.replace(" ", "")
             elif label in {"1", "x", "2"}:
                 category, line_key = "result", label
-            elif any(term in market_context for term in ("gol", "goal", "alt/ust", "over/under", "toplam")):
+            elif (
+                any(term in market_context for term in ("gol", "goal", "alt/ust", "over/under", "toplam"))
+                and total_goals_outcome(label) is not None
+            ):
                 category = "total_goals"
             else:
                 continue
-            outcome = "over" if any(term in label for term in ("ust", "over")) else "under" if any(term in label for term in ("alt", "under")) else "yes" if any(term in label for term in ("var", "evet", "yes")) else "no" if any(term in label for term in ("yok", "hayir", "no")) else label
+            outcome = (
+                total_goals_outcome(label)
+                or ("yes" if label in {"var", "evet", "yes"}
+                else "no" if label in {"yok", "hayir", "no"}
+                else label)
+            )
             quote_index[(category, line_key, outcome)] = {
                 "odds": selection["odds"],
                 "market_probability": selection["probability"],
@@ -1443,8 +1460,14 @@ def render_analysis(
             meta.caption(row["league_name"])
             status_col.caption(str(row.get("status", "")).replace("_", " ").title())
             payload = unpack_payload(quote.get("odds")) if quote else {}
+            source_markets = payload.get("markets", []) if quote else []
+            inconsistent_keys = inconsistent_total_market_keys(source_markets)
             markets = market_rows(payload, market_labels) if quote else []
-            displayed_markets = all_market_quote_rows(payload, market_labels) if quote else []
+            if inconsistent_keys:
+                markets = [market for market in markets if total_market_key(market) not in inconsistent_keys]
+            displayed_markets = (
+                all_market_quote_rows(payload, market_labels, inconsistent_keys) if quote else []
+            )
             model_forecast, corner_forecast = render_model_forecast(
                 row, history, markets, precomputed=cached_analysis
             )
@@ -1457,8 +1480,19 @@ def render_analysis(
             if not displayed_markets:
                 st.warning("Oran kaydı var ancak gösterilebilir tam market bulunamadı.")
                 continue
+            if inconsistent_keys:
+                st.error(
+                    "IdDaa toplam gol çizgilerinde birbiriyle çelişen oranlar bulundu. "
+                    "İşaretli oranları model karşılaştırmasında kullanmıyorum; kaynak kaydını doğrulayın."
+                )
             quote_time = pd.to_datetime(quote.get("captured_at"), utc=True, errors="coerce")
             if pd.notna(quote_time):
+                age = pd.Timestamp.now(tz="UTC") - quote_time
+                if age > pd.Timedelta(hours=1):
+                    st.warning(
+                        f"Oran kaydı {age.total_seconds() / 3600:.1f} saatlik; "
+                        "IdDaa’dan yeniden alınmadığı için güncel olmayabilir."
+                    )
                 st.caption(
                     "Son oran kaydı: "
                     f"{quote_time.tz_convert(ISTANBUL).strftime('%d.%m.%Y %H:%M')} (İstanbul)"
