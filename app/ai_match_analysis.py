@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import pandas as pd
@@ -137,28 +138,42 @@ def generate_match_analysis(
         "yüzdeyle yaz; listede olmayan market/olasılık ekleme. Oran, kazanç garantisi "
         "veya kesin sonuç iddiası verme. Sonunda tahminin sınırlarını kısa belirt."
     )
+    request_url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    )
+    request_headers = {
+        "x-goog-api-key": api_key,
+        "Content-Type": "application/json",
+    }
+    request_body = {
+        "system_instruction": {"parts": [{"text": instructions}]},
+        "contents": [{
+            "role": "user",
+            "parts": [{
+                "text": json.dumps(context, ensure_ascii=False, separators=(",", ":"))
+            }],
+        }],
+        "generationConfig": {
+            "maxOutputTokens": 1800,
+            "temperature": 0.7,
+        },
+    }
     try:
-        response = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-            headers={
-                "x-goog-api-key": api_key,
-                "Content-Type": "application/json",
-            },
-            json={
-                "system_instruction": {"parts": [{"text": instructions}]},
-                "contents": [{
-                    "role": "user",
-                    "parts": [{
-                        "text": json.dumps(context, ensure_ascii=False, separators=(",", ":"))
-                    }],
-                }],
-                "generationConfig": {
-                    "maxOutputTokens": 1800,
-                    "temperature": 0.7,
-                },
-            },
-            timeout=60,
-        )
+        for attempt in range(3):
+            response = requests.post(
+                request_url,
+                headers=request_headers,
+                json=request_body,
+                timeout=60,
+            )
+            if response.status_code != 503 or attempt == 2:
+                break
+            retry_after = response.headers.get("Retry-After", "")
+            try:
+                delay = min(max(float(retry_after), 1.0), 8.0)
+            except ValueError:
+                delay = 1.5 * (attempt + 1)
+            time.sleep(delay)
     except requests.RequestException as exc:
         raise MatchAnalysisAIError("Google Gemini API bağlantısı kurulamadı.") from exc
     if not response.ok:
