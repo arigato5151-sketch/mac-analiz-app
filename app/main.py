@@ -1386,9 +1386,9 @@ def render_tactical_match_readout(
     if draw_p >= max(home_p, away_p) - 0.06:
         edge_read = f"Üç sonuç olasılığı birbirine yakın; beraberlik %{draw_p:.0%} ile güçlü bir seçenek. {home_name} için {home_xg:.2f}, {away_name} için {away_xg:.2f} beklenen gol farkı küçük olduğundan duran toplar ve ceza sahası içindeki verim öne çıkabilir."
     elif home_p > away_p:
-        edge_read = f"Model {home_name} tarafını %{home_p:.0f} galibiyet olasılığıyla önde tutuyor. Ev sahibinin beklenen gol üstünlüğü {home_xg - away_xg:+.2f}; {away_name} için en gerçekçi karşılık, savunma arkasına hızlı çıkışlar ve geçişlerde sayısal dengeyi korumak."
+        edge_read = f"Model {home_name} tarafını {home_p:.0%} galibiyet olasılığıyla önde tutuyor. Ev sahibinin beklenen gol üstünlüğü {home_xg - away_xg:+.2f}; {away_name} için en gerçekçi karşılık, savunma arkasına hızlı çıkışlar ve geçişlerde sayısal dengeyi korumak."
     else:
-        edge_read = f"Deplasman tarafı {away_name}, %{away_p:.0f} galibiyet olasılığıyla modelde öne çıkıyor. Bu tablo saha avantajının tek başına yeterli olmadığını gösteriyor; {home_name} için geçiş savunması ve erken baskıdan çıkış kalitesi kritik."
+        edge_read = f"Deplasman tarafı {away_name}, {away_p:.0%} galibiyet olasılığıyla modelde öne çıkıyor. Bu tablo saha avantajının tek başına yeterli olmadığını gösteriyor; {home_name} için geçiş savunması ve erken baskıdan çıkış kalitesi kritik."
     if recent_goal_diff is not None and abs(recent_goal_diff) >= 0.7:
         stronger = home_name if recent_goal_diff > 0 else away_name
         edge_read += f" Son maçlardaki gol atma/yeme farkı da {stronger} lehine ayrışıyor."
