@@ -162,8 +162,21 @@ def generate_match_analysis(
     except requests.RequestException as exc:
         raise MatchAnalysisAIError("Google Gemini API bağlantısı kurulamadı.") from exc
     if not response.ok:
+        # Google returns a structured reason (for example, model not found or
+        # API not enabled). Include that safe diagnostic so configuration
+        # errors can be fixed without exposing request headers or the API key.
+        try:
+            error_payload = response.json().get("error", {})
+            detail = str(error_payload.get("message", "")).strip()
+            status = str(error_payload.get("status", "")).strip()
+        except (ValueError, AttributeError):
+            detail, status = "", ""
+        diagnostic = ": ".join(part for part in (status, detail) if part)
+        if len(diagnostic) > 400:
+            diagnostic = diagnostic[:397] + "..."
+        suffix = f" — {diagnostic}" if diagnostic else ""
         raise MatchAnalysisAIError(
-            f"Google Gemini API isteği başarısız oldu (HTTP {response.status_code})."
+            f"Google Gemini API isteği başarısız oldu (HTTP {response.status_code}){suffix}"
         )
     try:
         payload = response.json()
