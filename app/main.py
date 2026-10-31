@@ -38,7 +38,7 @@ from app.components.data import (
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 # Bump this when forecast logic or the persisted analysis JSON contract changes.
-ANALYSIS_MODEL_VERSION = "form_poisson_ai_v2"
+ANALYSIS_MODEL_VERSION = "form_poisson_ai_v3"
 NON_PLAYABLE_MATCH_STATUSES = {"postponed", "cancelled", "unlisted"}
 
 COUNTRY_NAMES_TR = {
@@ -1428,30 +1428,60 @@ def render_tactical_match_readout(
         (f"Maç sonucu 1 · {home_name}", home_p, f"Model ev sahibine {home_p:.0%} galibiyet olasılığı veriyor."),
         ("Beraberlik", draw_p, f"Beraberlik olasılığı {draw_p:.0%}; iki takımın beklenen golleri {home_xg:.2f}–{away_xg:.2f}."),
         (f"Maç sonucu 2 · {away_name}", away_p, f"Model deplasman galibiyetini {away_p:.0%} hesaplıyor."),
+        ("0,5 gol üst", probability(lambda h, a: h + a >= 1), "Maçta en az bir gol çıkar."),
+        ("0,5 gol alt", probability(lambda h, a: h + a == 0), "Maç golsüz berabere biter."),
         ("1,5 gol üst", probability(lambda h, a: h + a >= 2), f"İki veya daha fazla gol gerekir; beklenen toplam gol {total_xg:.2f}."),
+        ("1,5 gol alt", probability(lambda h, a: h + a <= 1), "Maçta en fazla bir gol çıkar."),
         ("2,5 gol üst", probability(lambda h, a: h + a >= 3), f"En az üç gol gerekir; beklenen toplam gol {total_xg:.2f}."),
         ("2,5 gol alt", probability(lambda h, a: h + a <= 2), "En fazla iki gol çıkması gerekir."),
+        ("3,5 gol üst", probability(lambda h, a: h + a >= 4), "Maçta en az dört gol çıkar."),
         ("3,5 gol alt", probability(lambda h, a: h + a <= 3), "Dört veya daha fazla gol çıkmaması gerekir."),
+        ("4,5 gol üst", probability(lambda h, a: h + a >= 5), "Maçta en az beş gol çıkar."),
+        ("4,5 gol alt", probability(lambda h, a: h + a <= 4), "Maçta en fazla dört gol çıkar."),
         ("Karşılıklı gol · Var", forecast["btts"], f"İki takımın da gol bulma olasılığı {forecast['btts']:.0%}."),
         ("Karşılıklı gol · Yok", btts_no, f"En az bir takımın gol bulamama olasılığı {btts_no:.0%}."),
         (f"{home_name} 0,5 gol üst", probability(lambda h, a: h >= 1), f"Ev sahibinin en az bir gol bulma ihtimali; beklenen gol {home_xg:.2f}."),
+        (f"{home_name} 0,5 gol alt", probability(lambda h, a: h == 0), f"Ev sahibinin gol bulamama olasılığı; beklenen gol {home_xg:.2f}."),
+        (f"{home_name} 1,5 gol üst", probability(lambda h, a: h >= 2), f"Ev sahibinin en az iki gol bulması gerekir; beklenen gol {home_xg:.2f}."),
+        (f"{home_name} 1,5 gol alt", probability(lambda h, a: h <= 1), f"Ev sahibi en fazla bir gol atar; beklenen gol {home_xg:.2f}."),
+        (f"{home_name} 2,5 gol üst", probability(lambda h, a: h >= 3), f"Ev sahibinin en az üç gol bulması gerekir; beklenen gol {home_xg:.2f}."),
         (f"{away_name} 0,5 gol üst", probability(lambda h, a: a >= 1), f"Deplasmanın en az bir gol bulma ihtimali; beklenen gol {away_xg:.2f}."),
+        (f"{away_name} 0,5 gol alt", probability(lambda h, a: a == 0), f"Deplasmanın gol bulamama olasılığı; beklenen gol {away_xg:.2f}."),
+        (f"{away_name} 1,5 gol üst", probability(lambda h, a: a >= 2), f"Deplasmanın en az iki gol bulması gerekir; beklenen gol {away_xg:.2f}."),
+        (f"{away_name} 1,5 gol alt", probability(lambda h, a: a <= 1), f"Deplasman en fazla bir gol atar; beklenen gol {away_xg:.2f}."),
+        (f"{away_name} 2,5 gol üst", probability(lambda h, a: a >= 3), f"Deplasmanın en az üç gol bulması gerekir; beklenen gol {away_xg:.2f}."),
         (f"{home_name} kazanır ve KG Yok", probability(lambda h, a: h > a and a == 0), "Ev sahibinin galibiyetiyle birlikte deplasmanın gol atamaması gerekir."),
         (f"{away_name} kazanır ve KG Yok", probability(lambda h, a: a > h and h == 0), "Deplasman galibiyetiyle birlikte ev sahibinin gol atamaması gerekir."),
         (f"{home_name} kazanır ve 2,5 üst", probability(lambda h, a: h > a and h + a >= 3), "Ev sahibi kazanmalı ve maçta en az üç gol çıkmalı."),
         (f"{away_name} kazanır ve 2,5 üst", probability(lambda h, a: a > h and h + a >= 3), "Deplasman kazanmalı ve maçta en az üç gol çıkmalı."),
+        ("1X ve 1,5 gol üst", probability(lambda h, a: h >= a and h + a >= 2), "Ev sahibi yenilmez ve maçta en az iki gol çıkar."),
+        ("X2 ve 1,5 gol üst", probability(lambda h, a: a >= h and h + a >= 2), "Deplasman yenilmez ve maçta en az iki gol çıkar."),
+        ("1X ve 3,5 gol alt", probability(lambda h, a: h >= a and h + a <= 3), "Ev sahibi yenilmez ve maçta en fazla üç gol çıkar."),
+        ("X2 ve 3,5 gol alt", probability(lambda h, a: a >= h and h + a <= 3), "Deplasman yenilmez ve maçta en fazla üç gol çıkar."),
     ]
     candidates.extend([
         (f"Tam skor {forecast['most_likely_score']}", probability(
             lambda h, a: f"{h}-{a}" == str(forecast["most_likely_score"]).replace("–", "-").replace(":", "-")
         ), "Model matrisinde en yüksek olasılığa sahip tek skor."),
     ])
+    scorelines = sorted(
+        (
+            (float(matrix[h][a]), h, a)
+            for h in range(len(matrix))
+            for a in range(len(matrix[h]))
+        ),
+        reverse=True,
+    )[:5]
+    candidates.extend(
+        (f"Tam skor {h}-{a}", probability(lambda home_goals, away_goals, h=h, a=a: home_goals == h and away_goals == a), "Model skor dağılımında öne çıkan sonuç.")
+        for _, h, a in scorelines
+    )
     candidate_probabilities = {label: chance for label, chance, _ in candidates}
     risk_state_key = f"ai_risk_selections_{int(row['id'])}"
     if precomputed_risks is None and st.button(
         "🧠 Risk seçimlerini yapay zekâ belirlesin",
         key=f"generate_ai_risks_{int(row['id'])}",
-        help="Gemini maç verisini ve model olasılıklarını değerlendirerek üç risk profiline seçim yapar.",
+        help="Gemini model olasılıklarına göre temkinli ve dengeli profiller için farklı marketlerden seçim yapar.",
     ):
         api_key = get_optional_setting("GOOGLE_API_KEY")
         if not api_key:
@@ -1474,11 +1504,10 @@ def render_tactical_match_readout(
         if precomputed_risks is not None
         else st.session_state.get(risk_state_key, {})
     )
-    low, medium, high = st.columns(3)
+    low, medium = st.columns(2)
     for column, title, profile, explanation in (
         (low, "Görece daha olası", "low", "Yapay zekânın temkinli bulduğu, model olasılığı yüksek seçimler:"),
         (medium, "Dengeli risk", "medium", "Yapay zekânın olasılık ve maç senaryosu bakımından dengeli bulduğu seçimler:"),
-        (high, "Daha yüksek risk", "high", "Yapay zekânın daha koşullu ve riskli bulduğu seçimler:"),
     ):
         with column:
             st.markdown(f"**{title}**")
@@ -1721,20 +1750,36 @@ def coupon_market_candidates(row: dict[str, Any], forecast: dict[str, Any]) -> l
         (f"1 · {home}", "Maç sonucu", forecast["home_win"], f"{home} galibiyeti."),
         ("X · Beraberlik", "Maç sonucu", forecast["draw"], "Maç berabere biter."),
         (f"2 · {away}", "Maç sonucu", forecast["away_win"], f"{away} galibiyeti."),
+        ("0,5 gol üst", chance(lambda h, a: h + a >= 1), "Maçta en az bir gol çıkar."),
+        ("0,5 gol alt", chance(lambda h, a: h + a == 0), "Maç golsüz berabere biter."),
         ("1,5 gol üst", "Toplam gol", chance(lambda h, a: h + a >= 2), "Maçta en az iki gol çıkar."),
+        ("1,5 gol alt", "Toplam gol", chance(lambda h, a: h + a <= 1), "Maçta en fazla bir gol çıkar."),
         ("2,5 gol üst", "Toplam gol", chance(lambda h, a: h + a >= 3), "Maçta en az üç gol çıkar."),
         ("2,5 gol alt", "Toplam gol", chance(lambda h, a: h + a <= 2), "Maçta en fazla iki gol çıkar."),
+        ("3,5 gol üst", "Toplam gol", chance(lambda h, a: h + a >= 4), "Maçta en az dört gol çıkar."),
         ("3,5 gol alt", "Toplam gol", chance(lambda h, a: h + a <= 3), "Maçta en fazla üç gol çıkar."),
+        ("4,5 gol üst", "Toplam gol", chance(lambda h, a: h + a >= 5), "Maçta en az beş gol çıkar."),
+        ("4,5 gol alt", "Toplam gol", chance(lambda h, a: h + a <= 4), "Maçta en fazla dört gol çıkar."),
         ("Karşılıklı gol var", "Karşılıklı gol", forecast["btts"], "İki takım da gol atar."),
         ("Karşılıklı gol yok", "Karşılıklı gol", 1 - forecast["btts"], "Takımlardan en az biri gol atamaz."),
         (f"{home} 0,5 gol üst", "Takım golü", chance(lambda h, a: h >= 1), f"{home} en az bir gol atar."),
+        (f"{home} 0,5 gol alt", "Takım golü", chance(lambda h, a: h == 0), f"{home} gol atamaz."),
         (f"{away} 0,5 gol üst", "Takım golü", chance(lambda h, a: a >= 1), f"{away} en az bir gol atar."),
+        (f"{away} 0,5 gol alt", "Takım golü", chance(lambda h, a: a == 0), f"{away} gol atamaz."),
         (f"{home} 1,5 gol üst", "Takım golü", chance(lambda h, a: h >= 2), f"{home} en az iki gol atar."),
+        (f"{home} 1,5 gol alt", "Takım golü", chance(lambda h, a: h <= 1), f"{home} en fazla bir gol atar."),
         (f"{away} 1,5 gol üst", "Takım golü", chance(lambda h, a: a >= 2), f"{away} en az iki gol atar."),
+        (f"{away} 1,5 gol alt", "Takım golü", chance(lambda h, a: a <= 1), f"{away} en fazla bir gol atar."),
+        (f"{home} 2,5 gol üst", "Takım golü", chance(lambda h, a: h >= 3), f"{home} en az üç gol atar."),
+        (f"{away} 2,5 gol üst", "Takım golü", chance(lambda h, a: a >= 3), f"{away} en az üç gol atar."),
         (f"{home} kazanır · KG yok", "Birleşik seçim", chance(lambda h, a: h > a and a == 0), f"{home} kazanır ve {away} gol atamaz."),
         (f"{away} kazanır · KG yok", "Birleşik seçim", chance(lambda h, a: a > h and h == 0), f"{away} kazanır ve {home} gol atamaz."),
         (f"{home} kazanır · 2,5 üst", "Birleşik seçim", chance(lambda h, a: h > a and h + a >= 3), f"{home} kazanır ve toplam gol en az üç olur."),
         (f"{away} kazanır · 2,5 üst", "Birleşik seçim", chance(lambda h, a: a > h and h + a >= 3), f"{away} kazanır ve toplam gol en az üç olur."),
+        ("1X ve 1,5 gol üst", "Birleşik seçim", chance(lambda h, a: h >= a and h + a >= 2), "Ev sahibi yenilmez ve en az iki gol çıkar."),
+        ("X2 ve 1,5 gol üst", "Birleşik seçim", chance(lambda h, a: a >= h and h + a >= 2), "Deplasman yenilmez ve en az iki gol çıkar."),
+        ("1X ve 3,5 gol alt", "Birleşik seçim", chance(lambda h, a: h >= a and h + a <= 3), "Ev sahibi yenilmez ve en fazla üç gol çıkar."),
+        ("X2 ve 3,5 gol alt", "Birleşik seçim", chance(lambda h, a: a >= h and h + a <= 3), "Deplasman yenilmez ve en fazla üç gol çıkar."),
     ]
     for score_h in range(len(matrix)):
         for score_a in range(len(matrix[score_h])):
@@ -1758,7 +1803,7 @@ def render_auto_coupon(
     """Generate a sample coupon from the selected day's pre-match model forecasts."""
     st.markdown(
         "<section class='hero'><div class='hero-kicker'>Model olasılıklarına göre otomatik seçim</div>"
-        "<h1>Otomatik Kupon Oluşturucu</h1><p>Risk profilini ve maç sayısını seç; sistem uygun maç senaryolarını sıralasın.</p></section>",
+        "<h1>Otomatik Kupon Oluşturucu</h1><p>Tahmin profilini ve maç sayısını seç; sistem farklı market türlerinden uygun seçimleri sıralasın.</p></section>",
         unsafe_allow_html=True,
     )
     st.info("Bu bölüm model olasılıklarına göre örnek seçim listesi üretir; bahis sitesine bağlanmaz, gerçek oran veya kazanç vaadi içermez.")
@@ -1786,7 +1831,7 @@ def render_auto_coupon(
 
     c1, c2 = st.columns(2)
     with c1:
-        risk = st.selectbox("Risk profili", ["Daha temkinli", "Dengeli", "Yüksek riskli"], index=1)
+        risk = st.selectbox("Tahmin profili", ["Daha temkinli", "Dengeli"], index=1)
     with c2:
         legs = st.number_input("Kupondaki maç sayısı", min_value=2, max_value=10, value=5, step=1)
 
@@ -1824,11 +1869,8 @@ def render_auto_coupon(
                 eligible = p >= 0.65 and market not in {"Birleşik seçim", "Tam skor"}
                 score = p
             elif risk == "Dengeli":
-                eligible = 0.40 <= p <= 0.72 and market != "Tam skor"
+                eligible = 0.30 <= p <= 0.72 and market != "Tam skor"
                 score = 1 - abs(p - 0.56)
-            else:
-                eligible = 0.12 <= p <= 0.42 and market in {"Maç sonucu", "Toplam gol", "Karşılıklı gol", "Takım golü", "Birleşik seçim", "Tam skor"}
-                score = 1 - abs(p - 0.28) + (0.04 if market in {"Birleşik seçim", "Tam skor"} else 0)
             if eligible:
                 fixture_candidates.append({
                     "match_id": match_id,
@@ -1854,7 +1896,7 @@ def render_auto_coupon(
             break
         best = max(
             eligible_choices,
-            key=lambda item: item["score"] - 0.035 * category_counts.get(item["market"], 0),
+            key=lambda item: item["score"] - 0.08 * category_counts.get(item["market"], 0),
         )
         choices.remove(best)
         selected.append(best)

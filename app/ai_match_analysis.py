@@ -55,29 +55,51 @@ def _model_markets(forecast: dict[str, Any], home: str, away: str) -> dict[str, 
             if predicate(home_goals, away_goals)
         )
 
-    return {
+    markets = {
         "1X": chance(lambda h, a: h >= a),
         "X2": chance(lambda h, a: a >= h),
         "12": chance(lambda h, a: h != a),
         f"Maç sonucu 1 · {home}": float(forecast["home_win"]),
         "Beraberlik": float(forecast["draw"]),
         f"Maç sonucu 2 · {away}": float(forecast["away_win"]),
+        "0,5 gol üst": chance(lambda h, a: h + a >= 1),
+        "0,5 gol alt": chance(lambda h, a: h + a == 0),
         "1,5 gol üst": chance(lambda h, a: h + a >= 2),
+        "1,5 gol alt": chance(lambda h, a: h + a <= 1),
         "2,5 gol üst": chance(lambda h, a: h + a >= 3),
         "2,5 gol alt": chance(lambda h, a: h + a <= 2),
+        "3,5 gol üst": chance(lambda h, a: h + a >= 4),
         "3,5 gol alt": chance(lambda h, a: h + a <= 3),
+        "4,5 gol üst": chance(lambda h, a: h + a >= 5),
+        "4,5 gol alt": chance(lambda h, a: h + a <= 4),
         "Karşılıklı gol · Var": float(forecast["btts"]),
         "Karşılıklı gol · Yok": 1.0 - float(forecast["btts"]),
         f"{home} 0,5 gol üst": chance(lambda h, a: h >= 1),
+        f"{home} 0,5 gol alt": chance(lambda h, a: h == 0),
+        f"{home} 1,5 gol üst": chance(lambda h, a: h >= 2),
+        f"{home} 1,5 gol alt": chance(lambda h, a: h <= 1),
+        f"{home} 2,5 gol üst": chance(lambda h, a: h >= 3),
         f"{away} 0,5 gol üst": chance(lambda h, a: a >= 1),
+        f"{away} 0,5 gol alt": chance(lambda h, a: a == 0),
+        f"{away} 1,5 gol üst": chance(lambda h, a: a >= 2),
+        f"{away} 1,5 gol alt": chance(lambda h, a: a <= 1),
+        f"{away} 2,5 gol üst": chance(lambda h, a: a >= 3),
         f"{home} kazanır ve KG Yok": chance(lambda h, a: h > a and a == 0),
         f"{away} kazanır ve KG Yok": chance(lambda h, a: a > h and h == 0),
         f"{home} kazanır ve 2,5 üst": chance(lambda h, a: h > a and h + a >= 3),
         f"{away} kazanır ve 2,5 üst": chance(lambda h, a: a > h and h + a >= 3),
-        f"Tam skor {forecast['most_likely_score']}": chance(
-            lambda h, a: f"{h}-{a}" == str(forecast["most_likely_score"]).replace("–", "-").replace(":", "-")
-        ),
     }
+    scorelines = sorted(
+        (
+            (float(probability), home_goals, away_goals)
+            for home_goals, score_row in enumerate(matrix)
+            for away_goals, probability in enumerate(score_row)
+        ),
+        reverse=True,
+    )[:5]
+    for probability, home_goals, away_goals in scorelines:
+        markets[f"Tam skor {home_goals}-{away_goals}"] = probability
+    return markets
 
 
 def build_match_analysis_context(
@@ -144,7 +166,7 @@ def generate_match_analysis(
         "Markdown kullan ve şu başlıklarla özgün, maç özelinde bir yorum üret: "
         "Maçın profili; İki takımın form sinyalleri; Olası oyun planları ve eşleşmeler; "
         "Maçın kırılma noktaları; Farklı oyun senaryoları; Model olasılıklarına göre "
-        "düşük/orta/yüksek riskli seçimler. Her seçimde verilen model olasılığını "
+        "temkinli ve dengeli seçimler. Her seçimde verilen model olasılığını "
         "yüzdeyle yaz; listede olmayan market/olasılık ekleme. Oran, kazanç garantisi "
         "veya kesin sonuç iddiası verme. Sonunda tahminin sınırlarını kısa belirt."
     )
@@ -246,17 +268,18 @@ def generate_match_analysis(
 def generate_match_risk_recommendations(
     context: dict[str, Any], *, api_key: str, model: str = "gemini-3.8-flash"
 ) -> dict[str, list[dict[str, str]]]:
-    """Ask Gemini to choose match-specific selections for three risk profiles."""
+    """Ask Gemini to choose varied selections for two moderate risk profiles."""
     allowed = context.get("model", {}).get("candidate_markets", {})
     instructions = (
         "Türkçe futbol tahmin analisti olarak yalnızca verilen maç ve model JSON'una dayan. "
-        "Üç risk profili için market seç: low daha yüksek olasılıklı ve temkinli; medium "
-        "makul olasılık ile getiri dengesinde; high düşük olasılıklı fakat futbol açısından "
-        "tutarlı ve daha koşullu. Sadece candidate_markets içindeki tam market adlarını "
-        "seç; olasılık üretme veya değiştirme. Her profile 1-2 seçim koy, aynı seçimi iki "
-        "profile tekrar etme. Her seçim için maç verisine dayanan tek cümlelik Türkçe "
-        "gerekçe ver. Çıktı yalnızca şu JSON şemasında olsun: {\"low\":[{\"market\":\"...\","
-        "\"reason\":\"...\"}],\"medium\":[...],\"high\":[...]}."
+        "İki risk profili için seçim yap: low temkinli ve yüksek olasılıklı; medium dengeli "
+        "ve orta olasılıklı. Yüksek riskli veya çok düşük olasılıklı seçim üretme. Yalnızca "
+        "candidate_markets içindeki tam market adlarını kullan; olasılık uydurma veya değiştirme. "
+        "Her profile farklı market türlerinden iki seçim ver, aynı türü profilde tekrar etme. "
+        "İki profil arasında aynı marketi tekrarlama. Low seçimleri en az %60, medium seçimleri "
+        "%30-%72 olasılık bandında olsun. Her seçim için maç verisine dayalı kısa Türkçe gerekçe ver. "
+        "İstenen JSON: {\"low\":[{\"market\":\"market adı\",\"reason\":\"kısa gerekçe\"}],"
+        "\"medium\":[{\"market\":\"market adı\",\"reason\":\"kısa gerekçe\"}]} ."
     )
     raw = generate_match_analysis(
         context, api_key=api_key, model=model,
@@ -281,12 +304,13 @@ def generate_match_ai_package(
         "diziliş veya haber uydurma; veride yoksa belirt. Model olasılıklarını değiştirme, kesinlik "
         "iddiası ve bahis oranı verme. Maçın profili, form sinyalleri, oyun planları/eşleşmeler, "
         "kırılma noktaları ve farklı maç senaryolarını içeren kısa ama anlamlı bir Markdown yorum "
-        "oluştur. Ayrıca candidate_markets içinden tam adları seçerek üç risk grubuna 1-2 tahmin "
-        "öner: low daha olası/temkinli; medium dengeli; high daha koşullu/yüksek risk. Her seçim "
-        "için veriye dayalı tek cümle Türkçe gerekçe yaz. Aynı marketi gruplar arasında tekrar etme. "
+        "oluştur. Ayrıca candidate_markets içinden tam adları seçerek iki risk grubuna ikişer tahmin "
+        "öner: low temkinli ve yüksek olasılıklı; medium dengeli ve orta olasılıklı. Yüksek riskli "
+        "seçim üretme. Seçimleri farklı market türlerinden yap, her biri için kısa gerekçe yaz. "
+        "Aynı marketi gruplar arasında tekrar etme. "
         "Market adı veya olasılığı uydurma. Yalnızca şu JSON'u üret: {\"analysis\":\"Markdown metni\","
         "\"risk_selections\":{\"low\":[{\"market\":\"tam market adı\",\"reason\":\"gerekçe\"}],"
-        "\"medium\":[...],\"high\":[...]}}."
+        "\"medium\":[...]}}."
     )
     raw = generate_match_analysis(
         context,
@@ -325,13 +349,13 @@ def generate_match_ai_packages(
         "Olası senaryolar, Risk profillerine göre seçimler. Yorum her maçta o maçın "
         "takım adlarına, formuna ve Poisson olasılıklarına özgü olsun; veri zayıfsa "
         "bunu belirt. Seçimleri yalnızca ilgili maçın candidate_markets listesinden "
-        "seç ve market olasılıklarını değiştirme. Her risk grubuna bir seçim ve kısa "
-        "gerekçe koy: low temkinli, medium dengeli, high daha koşullu. Aynı maçta "
+        "seç ve market olasılıklarını değiştirme. Her risk grubuna farklı türlerden iki seçim "
+        "gerekçe koy: low temkinli, medium dengeli. Yüksek riskli seçim üretme. Aynı maçta "
         "marketleri tekrar etme. Kesinlik veya kazanç garantisi verme. Her girişteki "
         "match_id değerini aynen koru. Yalnızca bu JSON şemasını döndür: "
         "{\"matches\":[{\"match_id\":123,\"analysis\":\"...\","
         "\"risk_selections\":{\"low\":[{\"market\":\"...\",\"reason\":\"...\"}],"
-        "\"medium\":[...],\"high\":[...]}}]}"
+        "\"medium\":[...]}}]}"
     )
     selection_schema = {
         "type": "ARRAY",
@@ -359,9 +383,8 @@ def generate_match_ai_packages(
                             "properties": {
                                 "low": selection_schema,
                                 "medium": selection_schema,
-                                "high": selection_schema,
                             },
-                            "required": ["low", "medium", "high"],
+                            "required": ["low", "medium"],
                         },
                     },
                     "required": ["match_id", "analysis", "risk_selections"],
@@ -414,7 +437,7 @@ def generate_match_ai_packages(
 def _validate_risk_selections(
     result: Any, allowed: Any
 ) -> dict[str, list[dict[str, str]]]:
-    validated: dict[str, list[dict[str, str]]] = {"low": [], "medium": [], "high": []}
+    validated: dict[str, list[dict[str, str]]] = {"low": [], "medium": []}
     used: set[str] = set()
     if not isinstance(result, dict) or not isinstance(allowed, dict):
         return validated
@@ -422,12 +445,46 @@ def _validate_risk_selections(
         items = result.get(profile, [])
         if not isinstance(items, list):
             continue
+        used_families: set[str] = set()
         for item in items[:2]:
             if not isinstance(item, dict):
                 continue
             market = str(item.get("market", "")).strip()
             reason = str(item.get("reason", "")).strip()
-            if market in allowed and market not in used and reason:
+            probability = float(allowed.get(market, -1)) if market in allowed else -1
+            family = _market_family(market)
+            in_band = (
+                probability >= 0.60
+                if profile == "low"
+                else 0.30 <= probability <= 0.72
+            )
+            if (
+                market in allowed
+                and market not in used
+                and family not in used_families
+                and reason
+                and in_band
+            ):
                 validated[profile].append({"market": market, "reason": reason[:300]})
                 used.add(market)
+                used_families.add(family)
     return validated
+
+
+def _market_family(market: str) -> str:
+    label = market.casefold()
+    if label.startswith("tam skor"):
+        return "score"
+    if "karşılıklı gol" in label:
+        return "btts"
+    if "kazanır ve" in label:
+        return "combined"
+    if label in {"1x", "x2", "12"}:
+        return "double_chance"
+    if "gol" in label and any(
+        line in label for line in ("0,5", "1,5", "2,5", "3,5", "4,5")
+    ):
+        if label.startswith(("0,5 ", "1,5 ", "2,5 ", "3,5 ", "4,5 ")):
+            return "total_goals"
+        return "team_goals"
+    return "match_result"
