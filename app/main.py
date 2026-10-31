@@ -32,6 +32,7 @@ from app.components.data import (
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 # Bump this when forecast logic or the persisted analysis JSON contract changes.
 ANALYSIS_MODEL_VERSION = "form_poisson_v1"
+NON_PLAYABLE_MATCH_STATUSES = {"postponed", "cancelled"}
 
 COUNTRY_NAMES_TR = {
     "Argentina": "Arjantin", "Austria": "Avusturya", "Belgium": "Belçika",
@@ -1496,7 +1497,9 @@ def render_analysis(
     matches["league_label"] = matches.apply(lambda row: f"{row['country_name']} · {row['league_name']}" if row["country_name"] else row["league_name"], axis=1)
     matches["kickoff"] = pd.to_datetime(matches["match_date"], utc=True, errors="coerce").dt.tz_convert(ISTANBUL)
     now = pd.Timestamp.now(tz=ISTANBUL)
-    live_or_finished = matches["status"].fillna("").astype(str).str.casefold().isin({"live", "finished"})
+    live_or_finished = matches["status"].fillna("").astype(str).str.casefold().isin(
+        {"live", "finished", *NON_PLAYABLE_MATCH_STATUSES}
+    )
     kickoff_reached = matches["kickoff"].notna() & (matches["kickoff"] <= now)
     matches = matches[~(live_or_finished | kickoff_reached)].copy()
     left, right, third = st.columns([1, 1, 2])
@@ -1676,7 +1679,9 @@ def render_auto_coupon(
     matches["away_name"] = matches["away_team_id"].map(team_names).fillna("Deplasman")
     matches["kickoff"] = pd.to_datetime(matches["match_date"], utc=True, errors="coerce").dt.tz_convert(ISTANBUL)
     now = pd.Timestamp.now(tz=ISTANBUL)
-    status_done = matches["status"].fillna("").astype(str).str.casefold().isin({"live", "finished"})
+    status_done = matches["status"].fillna("").astype(str).str.casefold().isin(
+        {"live", "finished", *NON_PLAYABLE_MATCH_STATUSES}
+    )
     upcoming = matches[~status_done & matches["kickoff"].notna() & (matches["kickoff"] > now)].copy()
     if upcoming.empty:
         st.info("Seçili tarihte henüz başlamamış maç bulunmuyor.")
