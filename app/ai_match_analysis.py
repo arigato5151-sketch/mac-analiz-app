@@ -194,6 +194,10 @@ def generate_match_analysis(
             return generate_match_analysis(
                 context, api_key=api_key, model="gemini-3.8-flash"
             )
+        if response.status_code == 503 and model != "gemini-3.6-flash":
+            return generate_match_analysis(
+                context, api_key=api_key, model="gemini-3.6-flash"
+            )
         diagnostic = ": ".join(part for part in (status, detail) if part)
         if len(diagnostic) > 400:
             diagnostic = diagnostic[:397] + "..."
