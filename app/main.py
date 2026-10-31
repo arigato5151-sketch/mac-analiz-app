@@ -23,7 +23,6 @@ from app.market_mapping import is_compound_selection, standard_market_price, tot
 from app.components.data import (
     load_completed_match_history,
     get_db,
-    load_iddaa_market_labels,
     load_league_match_history,
     load_match_day,
     load_recent_team_matches,
@@ -923,6 +922,7 @@ def render_model_forecast(
     markets: list[dict[str, Any]],
     *,
     precomputed: dict[str, Any] | None = None,
+    show_details: bool = True,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     forecast = (
         precomputed.get("forecast")
@@ -937,6 +937,8 @@ def render_model_forecast(
         if precomputed is not None
         else model_corner_forecast(row, history)
     )
+    if not show_details:
+        return forecast, corners
     # Index quoted selections by market category and line for inline display
     # within the corresponding model tables below.
     quote_index: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -1466,7 +1468,6 @@ def render_analysis(
     teams: pd.DataFrame,
     leagues: pd.DataFrame,
     match_day: date,
-    market_labels: dict[str, str],
 ) -> None:
     matches = pd.DataFrame(matches_data)
     if matches.empty:
@@ -1547,7 +1548,6 @@ def render_analysis(
         return
     for row in filtered.sort_values("kickoff", na_position="last").to_dict("records"):
         match_id = int(row["id"])
-        quote = latest.get(match_id)
         kickoff = row["kickoff"]
         time_text = kickoff.strftime("%H:%M") if pd.notna(kickoff) else "Saat bilgisi yok"
         match_expander = st.expander(
@@ -1595,50 +1595,14 @@ def render_analysis(
             meta, status_col = st.columns([4, 1])
             meta.caption(row["league_name"])
             status_col.caption(str(row.get("status", "")).replace("_", " ").title())
-            payload = unpack_payload(quote.get("odds")) if quote else {}
-            source_markets = payload.get("markets", []) if quote else []
-            inconsistent_keys = inconsistent_total_market_keys(source_markets)
-            markets = market_rows(payload, market_labels) if quote else []
-            if inconsistent_keys:
-                markets = [market for market in markets if total_market_key(market) not in inconsistent_keys]
-            displayed_markets = (
-                all_market_quote_rows(payload, market_labels, inconsistent_keys) if quote else []
-            )
-            model_forecast, corner_forecast = render_model_forecast(
-                row, history, markets, precomputed=cached_analysis
+            model_forecast, _ = render_model_forecast(
+                row, history, [], precomputed=cached_analysis, show_details=False
             )
             st.divider()
             render_tactical_match_readout(row, history, model_forecast)
             st.divider()
             render_recent_form(row, history, team_names)
             st.divider()
-            if not quote:
-                st.warning("Bu maç için oran kaydı yok. Kaynakta bulunmuyor veya maç eşleşmesi henüz yapılamamış olabilir.")
-                continue
-            if not displayed_markets:
-                st.warning("Oran kaydı var ancak gösterilebilir tam market bulunamadı.")
-                continue
-            if inconsistent_keys:
-                st.error(
-                    "IdDaa toplam gol çizgilerinde birbiriyle çelişen oranlar bulundu. "
-                    "İşaretli oranları model karşılaştırmasında kullanmıyorum; kaynak kaydını doğrulayın."
-                )
-            quote_time = pd.to_datetime(quote.get("captured_at"), utc=True, errors="coerce")
-            if pd.notna(quote_time):
-                age = pd.Timestamp.now(tz="UTC") - quote_time
-                if age > pd.Timedelta(hours=1):
-                    st.warning(
-                        f"Oran kaydı {age.total_seconds() / 3600:.1f} saatlik; "
-                        "IdDaa’dan yeniden alınmadığı için güncel olmayabilir."
-                    )
-                st.caption(
-                    "Son oran kaydı: "
-                    f"{quote_time.tz_convert(ISTANBUL).strftime('%d.%m.%Y %H:%M')} (İstanbul)"
-                )
-            else:
-                st.caption("Son oran kaydı zamanı bilinmiyor.")
-            st.markdown("#### IdDaa marketleri ve oranları")
-            st.dataframe(pd.DataFrame(displayed_markets), width="stretch", hide_index=True)
 
 
 def render_archive() -> None:
@@ -1877,7 +1841,6 @@ if __name__ == '__main__':
             load_evaluated_prediction_results.clear()
             load_league_match_history.clear()
             load_recent_team_matches.clear()
-            load_iddaa_market_labels.clear()
             st.rerun()
     try:
         teams, leagues = load_reference_catalog()
@@ -1893,12 +1856,8 @@ if __name__ == '__main__':
     if section in {"⚽  Maç Analizleri", "🧠  Günlük Taktik Analiz"}:
         try:
             match_records, quote_records, analyses = load_match_day(selected_day)
-            try:
-                market_labels = load_iddaa_market_labels()
-            except Exception:
-                market_labels = {}
             render_analysis(
-                match_records, quote_records, analyses, teams, leagues, selected_day, market_labels
+                match_records, quote_records, analyses, teams, leagues, selected_day
             )
         except Exception as exc:
             st.error(f"Maç ve oran verileri yüklenemedi: {exc}")
