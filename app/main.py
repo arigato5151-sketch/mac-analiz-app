@@ -1605,6 +1605,185 @@ def render_analysis(
             st.divider()
 
 
+def coupon_market_candidates(row: dict[str, Any], forecast: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build model-derived single-match selections for the automatic coupon."""
+    matrix = forecast["score_matrix"]
+    home, away = row["home_name"], row["away_name"]
+
+    def chance(predicate: Any) -> float:
+        return sum(
+            matrix[h][a]
+            for h in range(len(matrix))
+            for a in range(len(matrix[h]))
+            if predicate(h, a)
+        )
+
+    candidates = [
+        ("1X", "Çifte şans", chance(lambda h, a: h >= a), "Ev sahibi yenilmez."),
+        ("X2", "Çifte şans", chance(lambda h, a: a >= h), "Deplasman yenilmez."),
+        ("12", "Çifte şans", chance(lambda h, a: h != a), "Maç berabere bitmez."),
+        (f"1 · {home}", "Maç sonucu", forecast["home_win"], f"{home} galibiyeti."),
+        ("X · Beraberlik", "Maç sonucu", forecast["draw"], "Maç berabere biter."),
+        (f"2 · {away}", "Maç sonucu", forecast["away_win"], f"{away} galibiyeti."),
+        ("1,5 gol üst", "Toplam gol", chance(lambda h, a: h + a >= 2), "Maçta en az iki gol çıkar."),
+        ("2,5 gol üst", "Toplam gol", chance(lambda h, a: h + a >= 3), "Maçta en az üç gol çıkar."),
+        ("2,5 gol alt", "Toplam gol", chance(lambda h, a: h + a <= 2), "Maçta en fazla iki gol çıkar."),
+        ("3,5 gol alt", "Toplam gol", chance(lambda h, a: h + a <= 3), "Maçta en fazla üç gol çıkar."),
+        ("Karşılıklı gol var", "Karşılıklı gol", forecast["btts"], "İki takım da gol atar."),
+        ("Karşılıklı gol yok", "Karşılıklı gol", 1 - forecast["btts"], "Takımlardan en az biri gol atamaz."),
+        (f"{home} 0,5 gol üst", "Takım golü", chance(lambda h, a: h >= 1), f"{home} en az bir gol atar."),
+        (f"{away} 0,5 gol üst", "Takım golü", chance(lambda h, a: a >= 1), f"{away} en az bir gol atar."),
+        (f"{home} 1,5 gol üst", "Takım golü", chance(lambda h, a: h >= 2), f"{home} en az iki gol atar."),
+        (f"{away} 1,5 gol üst", "Takım golü", chance(lambda h, a: a >= 2), f"{away} en az iki gol atar."),
+        (f"{home} kazanır · KG yok", "Birleşik seçim", chance(lambda h, a: h > a and a == 0), f"{home} kazanır ve {away} gol atamaz."),
+        (f"{away} kazanır · KG yok", "Birleşik seçim", chance(lambda h, a: a > h and h == 0), f"{away} kazanır ve {home} gol atamaz."),
+        (f"{home} kazanır · 2,5 üst", "Birleşik seçim", chance(lambda h, a: h > a and h + a >= 3), f"{home} kazanır ve toplam gol en az üç olur."),
+        (f"{away} kazanır · 2,5 üst", "Birleşik seçim", chance(lambda h, a: a > h and h + a >= 3), f"{away} kazanır ve toplam gol en az üç olur."),
+    ]
+    for score_h in range(len(matrix)):
+        for score_a in range(len(matrix[score_h])):
+            candidates.append((
+                f"Tam skor {score_h}–{score_a}", "Tam skor", matrix[score_h][score_a],
+                f"Modelin bu kesin skora verdiği olasılık {matrix[score_h][score_a]:.1%}.",
+            ))
+    return [
+        {"selection": label, "market": market, "probability": float(probability), "reason": reason}
+        for label, market, probability, reason in candidates
+        if math.isfinite(float(probability)) and 0 < float(probability) < 1
+    ]
+
+
+def render_auto_coupon(
+    matches_data: list[dict[str, Any]],
+    analyses_data: list[dict[str, Any]],
+    teams: pd.DataFrame,
+    selected_day: date,
+) -> None:
+    """Generate a sample coupon from the selected day's pre-match model forecasts."""
+    st.markdown(
+        "<section class='hero'><div class='hero-kicker'>Model olasılıklarına göre otomatik seçim</div>"
+        "<h1>Otomatik Kupon Oluşturucu</h1><p>Risk profilini ve maç sayısını seç; sistem uygun maç senaryolarını sıralasın.</p></section>",
+        unsafe_allow_html=True,
+    )
+    st.info("Bu bölüm model olasılıklarına göre örnek seçim listesi üretir; bahis sitesine bağlanmaz, gerçek oran veya kazanç vaadi içermez.")
+    matches = pd.DataFrame(matches_data)
+    if matches.empty:
+        st.info(f"{selected_day:%d.%m.%Y} için fikstür bulunamadı.")
+        return
+
+    team_names = dict(zip(teams.get("id", []), teams.get("name", []))) if not teams.empty else {}
+    matches["home_name"] = matches["home_team_id"].map(team_names).fillna("Ev sahibi")
+    matches["away_name"] = matches["away_team_id"].map(team_names).fillna("Deplasman")
+    matches["kickoff"] = pd.to_datetime(matches["match_date"], utc=True, errors="coerce").dt.tz_convert(ISTANBUL)
+    now = pd.Timestamp.now(tz=ISTANBUL)
+    status_done = matches["status"].fillna("").astype(str).str.casefold().isin({"live", "finished"})
+    upcoming = matches[~status_done & matches["kickoff"].notna() & (matches["kickoff"] > now)].copy()
+    if upcoming.empty:
+        st.info("Seçili tarihte henüz başlamamış maç bulunmuyor.")
+        return
+
+    c1, c2 = st.columns(2)
+    with c1:
+        risk = st.selectbox("Risk profili", ["Daha temkinli", "Dengeli", "Yüksek riskli"], index=1)
+    with c2:
+        legs = st.number_input("Kupondaki maç sayısı", min_value=2, max_value=10, value=5, step=1)
+
+    analyses_by_id = {
+        int(record["match_id"]): record
+        for record in analyses_data
+        if record.get("match_id") is not None
+    }
+    league_history: dict[int, pd.DataFrame] = {}
+    fixture_candidates: list[dict[str, Any]] = []
+    for row in upcoming.sort_values("kickoff").to_dict("records"):
+        match_id = int(row["id"])
+        cached = _cached_analysis_for_match(analyses_by_id.get(match_id), row)
+        forecast = cached.get("forecast") if cached else None
+        if forecast is None:
+            league_id = int(row["league_id"])
+            if league_id not in league_history:
+                try:
+                    history = pd.DataFrame(load_league_match_history(league_id))
+                except Exception:
+                    history = pd.DataFrame()
+                if not history.empty:
+                    history["match_date"] = pd.to_datetime(history["match_date"], utc=True, errors="coerce")
+                    for column in ("id", "league_id", "home_team_id", "away_team_id", "home_score", "away_score"):
+                        if column in history:
+                            history[column] = pd.to_numeric(history[column], errors="coerce")
+                league_history[league_id] = history
+            forecast = model_match_forecast(row, league_history[league_id])
+        if forecast is None:
+            continue
+        for candidate in coupon_market_candidates(row, forecast):
+            p = candidate["probability"]
+            market = candidate["market"]
+            if risk == "Daha temkinli":
+                eligible = p >= 0.65 and market not in {"Birleşik seçim", "Tam skor"}
+                score = p
+            elif risk == "Dengeli":
+                eligible = 0.40 <= p <= 0.72 and market != "Tam skor"
+                score = 1 - abs(p - 0.56)
+            else:
+                eligible = 0.12 <= p <= 0.42 and market in {"Maç sonucu", "Toplam gol", "Karşılıklı gol", "Takım golü", "Birleşik seçim", "Tam skor"}
+                score = 1 - abs(p - 0.28) + (0.04 if market in {"Birleşik seçim", "Tam skor"} else 0)
+            if eligible:
+                fixture_candidates.append({
+                    "match_id": match_id,
+                    "match": f"{row['home_name']} – {row['away_name']}",
+                    "kickoff": row["kickoff"],
+                    "score": score,
+                    **candidate,
+                })
+
+    if not fixture_candidates:
+        st.warning(f"{risk} profilinde uygun tahmin üretilemedi. Başka bir risk profili seçmeyi deneyin.")
+        return
+
+    # Choose greedily across all outcomes, allowing at most one pick per match
+    # and mildly favoring market diversity when alternatives are comparable.
+    choices = fixture_candidates.copy()
+    selected: list[dict[str, Any]] = []
+    category_counts: dict[str, int] = {}
+    used_matches: set[int] = set()
+    while choices and len(selected) < int(legs):
+        eligible_choices = [item for item in choices if item["match_id"] not in used_matches]
+        if not eligible_choices:
+            break
+        best = max(
+            eligible_choices,
+            key=lambda item: item["score"] - 0.035 * category_counts.get(item["market"], 0),
+        )
+        choices.remove(best)
+        selected.append(best)
+        used_matches.add(best["match_id"])
+        category_counts[best["market"]] = category_counts.get(best["market"], 0) + 1
+
+    if len(selected) < int(legs):
+        st.warning(f"Bu risk profiline uygun {len(selected)} maç bulundu; kupon bu sayıyla oluşturuldu.")
+    combined_probability = math.prod(item["probability"] for item in selected)
+    a, b, c = st.columns(3)
+    a.metric("Seçilen maç", f"{len(selected)}")
+    b.metric("Ortalama seçim olasılığı", f"%{sum(item['probability'] for item in selected) / len(selected) * 100:.1f}" if selected else "—")
+    c.metric("Birleşik model olasılığı", f"%{combined_probability * 100:.3f}" if selected else "—")
+    st.dataframe(
+        pd.DataFrame([
+            {
+                "Başlama": item["kickoff"].strftime("%H:%M"),
+                "Maç": item["match"],
+                "Seçim": item["selection"],
+                "Model %": item["probability"] * 100,
+                "Gerekçe": item["reason"],
+            }
+            for item in selected
+        ]),
+        width="stretch",
+        hide_index=True,
+        column_config={"Model %": st.column_config.NumberColumn(format="%.1f%%")},
+    )
+    st.caption("Birleşik olasılık, maç sonuçlarının birbirinden bağımsız olduğunu varsayan yaklaşık model çarpımıdır; gerçek oran veya kupon getirisi değildir. Her maçtan en fazla bir seçim alınır.")
+
+
 def render_archive() -> None:
     try:
         matches = pd.DataFrame(load_completed_match_history())
@@ -1849,7 +2028,7 @@ if __name__ == '__main__':
         teams, leagues = pd.DataFrame(), pd.DataFrame()
     section = st.radio(
         "Bölüm",
-        ["⚽  Maç Analizleri", "🧠  Günlük Taktik Analiz", "📊  İstatistik Arşivi", "📈  Tahmin Performansı"],
+        ["⚽  Maç Analizleri", "🧠  Günlük Taktik Analiz", "🎟️  Kupon Oluşturucu", "📊  İstatistik Arşivi", "📈  Tahmin Performansı"],
         horizontal=True,
         label_visibility="collapsed",
     )
@@ -1861,6 +2040,12 @@ if __name__ == '__main__':
             )
         except Exception as exc:
             st.error(f"Maç ve oran verileri yüklenemedi: {exc}")
+    elif section == "🎟️  Kupon Oluşturucu":
+        try:
+            match_records, _, analyses = load_match_day(selected_day)
+            render_auto_coupon(match_records, analyses, teams, selected_day)
+        except Exception as exc:
+            st.error(f"Otomatik kupon verileri hazırlanamadı: {exc}")
     elif section == "📊  İstatistik Arşivi":
         render_archive()
     else:
