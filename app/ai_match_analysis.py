@@ -196,6 +196,34 @@ def _model_markets(forecast: dict[str, Any], home: str, away: str) -> dict[str, 
     return markets
 
 
+def _historical_model_evaluation(forecast: dict[str, Any]) -> dict[str, Any]:
+    """Expose held-out model quality separately from this fixture's forecast."""
+    market_metrics = forecast.get("tuning_market_metrics") or {}
+    return {
+        "held_out_matches": int(forecast.get("tuning_matches") or 0),
+        "result_log_loss": _optional_number(forecast.get("tuning_log_loss")),
+        "baseline_result_log_loss": _optional_number(
+            forecast.get("tuning_baseline_log_loss")
+        ),
+        "markets": {
+            key: {
+                "sample_size": int(value.get("sample_size") or 0),
+                "log_loss": _optional_number(value.get("model_log_loss")),
+                "baseline_log_loss": _optional_number(value.get("baseline_log_loss")),
+                "brier_score": _optional_number(value.get("model_brier_score")),
+                "baseline_brier_score": _optional_number(
+                    value.get("baseline_brier_score")
+                ),
+                "calibration_error": _optional_number(
+                    value.get("model_calibration_error")
+                ),
+            }
+            for key, value in market_metrics.items()
+            if isinstance(value, dict)
+        },
+    }
+
+
 def build_match_analysis_context(
     row: dict[str, Any], history: pd.DataFrame, forecast: dict[str, Any]
 ) -> dict[str, Any]:
@@ -237,6 +265,7 @@ def build_match_analysis_context(
             },
             "candidate_markets": _model_markets(forecast, home, away),
             "league_history_matches": int(forecast.get("history_count", 0)),
+            "historical_model_evaluation": _historical_model_evaluation(forecast),
             "home_recent_summary": _summarize_recent_team_matches(home_recent),
             "away_recent_summary": _summarize_recent_team_matches(away_recent),
             "home_recent_matches": home_recent,
@@ -273,6 +302,11 @@ def generate_match_analysis(
         "sayılarıyla kullan. Bir çıkarımın dayandığı ölçümün örnek sayısı azsa kesin "
         "dille yazma. xG, xA ve korner tek başına pres, topa sahip olma veya diziliş "
         "kanıtı değildir; bunlardan yalnızca sınırlı hücum üretimi çıkarımı yap. "
+        "historical_model_evaluation bu maçın tahmini değil, ayrılmış geçmiş maçlarda "
+        "yapılmış model kontrolüdür. Yalnızca held_out_matches en az 30 ise kısaca "
+        "değin ve sonucu ön değerlendirme olarak nitele; örnek sayısını belirt, düşük "
+        "log-loss/Brier değerinin daha iyi olduğunu unutma ve bu ölçümleri maç olasılığı "
+        "gibi sunma. Örnek azsa performans hükmü verme. "
         "Markdown kullan ve şu başlıklarla özgün, maç özelinde bir yorum üret: "
         "Maçın profili; İki takımın form sinyalleri; Olası oyun planları ve eşleşmeler; "
         "Maçın kırılma noktaları; Farklı oyun senaryoları; Model olasılıklarına göre "
@@ -420,6 +454,10 @@ def generate_match_ai_package(
         "küçükse bunu söyle ve kesin konuşma. xG, xA veya kornerden diziliş, pres ya da "
         "topa sahip olma iddiası çıkarma. Her taktik senaryonun bir veri dayanağını ve "
         "hangi koşulda gerçekleşeceğini açıkla; dayanak yoksa bunu varsayım olarak etiketle. "
+        "historical_model_evaluation yalnızca ayrılmış geçmiş maçlardaki model performansıdır; "
+        "held_out_matches 30'un altındaysa başarı kanıtı olarak kullanma. En az 30 maç varsa "
+        "bunu ön değerlendirme olarak tanımla, sayıyı ve düşük log-loss/Brier'ın anlamını "
+        "kısaca belirt; bu ölçümü bu maçın kazanma olasılığıyla karıştırma. "
         "Maçın profili, form sinyalleri, oyun planları/eşleşmeler, "
         "kırılma noktaları ve farklı maç senaryolarını içeren kısa ama anlamlı bir Markdown yorum "
         "oluştur. Ayrıca candidate_markets içinden tam adları seçerek iki risk grubuna ikişer tahmin "
@@ -470,6 +508,10 @@ def generate_match_ai_packages(
         "örnek sayısı azsa güven düzeyini düşür. Yalnızca xG/xA/kornerden diziliş, pres "
         "veya topa sahip olma iddiası üretme. Taktik senaryoları veriye bağlı koşullu "
         "çıkarım olarak yaz; veri yoksa varsayım olduğunu açıkça belirt. "
+        "historical_model_evaluation bu maça ait değildir, ayrılmış geçmiş değerlendirme "
+        "örneklemidir. En az 30 maç yoksa model güvenilirliği hakkında hüküm verme. Yeterli "
+        "örnek varsa sonucu ön değerlendirme olarak tanımla, sayıyı belirt ve kalite metriğini "
+        "maç olasılığından ayrı tut. "
         "Her maç için 4 kısa başlıklı Markdown yorum yaz: Maç profili, Form ve eşleşme, "
         "Olası senaryolar, Risk profillerine göre seçimler. Yorum her maçta o maçın "
         "takım adlarına, formuna ve Poisson olasılıklarına özgü olsun; veri zayıfsa "
