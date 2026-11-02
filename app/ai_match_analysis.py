@@ -235,6 +235,35 @@ def _historical_model_evaluation(forecast: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _score_distribution_summary(forecast: dict[str, Any]) -> dict[str, Any]:
+    matrix = forecast.get("score_matrix") or []
+    scores = sorted(
+        (
+            (float(probability), home_goals, away_goals)
+            for home_goals, score_row in enumerate(matrix)
+            for away_goals, probability in enumerate(score_row)
+        ),
+        reverse=True,
+    )
+    top_three = scores[:3]
+    result_probs = {
+        "home_win": float(forecast["home_win"]),
+        "draw": float(forecast["draw"]),
+        "away_win": float(forecast["away_win"]),
+    }
+    ranked_results = sorted(result_probs.items(), key=lambda item: item[1], reverse=True)
+    return {
+        "top_exact_scores": [
+            {"score": f"{home_goals}-{away_goals}", "probability": probability}
+            for probability, home_goals, away_goals in scores[:5]
+        ],
+        "top_three_exact_score_mass": sum(item[0] for item in top_three),
+        "most_likely_result": ranked_results[0][0],
+        "most_likely_result_probability": ranked_results[0][1],
+        "result_probability_gap": ranked_results[0][1] - ranked_results[1][1],
+    }
+
+
 def build_match_analysis_context(
     row: dict[str, Any], history: pd.DataFrame, forecast: dict[str, Any]
 ) -> dict[str, Any]:
@@ -282,6 +311,7 @@ def build_match_analysis_context(
                 "over_2_5": float(forecast["over_2_5"]),
                 "both_teams_to_score": float(forecast["btts"]),
             },
+            "score_distribution": _score_distribution_summary(forecast),
             "candidate_markets": _model_markets(forecast, home, away),
             "league_history_matches": int(forecast.get("history_count", 0)),
             "historical_model_evaluation": _historical_model_evaluation(forecast),
@@ -328,6 +358,11 @@ def generate_match_analysis(
         "bu saha ayrımını güçlü form kanıtı sayma. goals_minus_xg pozitifse goller xG'yi "
         "aşmış, negatifse altında kalmıştır; küçük örneklemde bunu sürdürülebilir kalite "
         "diye sunma. "
+        "score_distribution içindeki top_exact_scores tekil tam skor olasılıklarıdır; "
+        "top_three_exact_score_mass ilk üç skorun toplamıdır. En olası tam skorun tek başına "
+        "yüksek olasılıklı olduğunu varsayma. Geniş 1X2 ve gol marketleriyle tek skor "
+        "olasılığını ayır; maç senaryolarını bu dağılım ve olasılık farkına göre kur. "
+        "Dakika veya erken gol gibi zamanlama iddiası üretme; model zamanlama tahmini yapmıyor. "
         "historical_model_evaluation bu maçın tahmini değil, ayrılmış geçmiş maçlarda "
         "yapılmış model kontrolüdür. Yalnızca held_out_matches en az 30 ise kısaca "
         "değin ve sonucu ön değerlendirme olarak nitele; örnek sayısını belirt, düşük "
@@ -484,6 +519,10 @@ def generate_match_ai_package(
         "matches sayısını kontrol et; üçten az maç varsa bu saha ayrımı sınırlıdır. "
         "goals_minus_xg gözlenen gol ile xG farkıdır, sürdürülebilir beceri kanıtı değildir; "
         "az örnekle kesin yorumlama. "
+        "score_distribution içindeki tam skor yüzdeleri tek tek skorların olasılığıdır; "
+        "ilk sıradaki skor kesin veya yüksek olasılıklı demek değildir. Üç skorun toplam "
+        "payını ve geniş maç sonucu/gol olasılıklarını ayır; senaryoları bunlara göre kur. "
+        "Model dakika bazlı olmadığı için erken gol veya belirli dakika senaryosu uydurma. "
         "historical_model_evaluation yalnızca ayrılmış geçmiş maçlardaki model performansıdır; "
         "held_out_matches 30'un altındaysa başarı kanıtı olarak kullanma. En az 30 maç varsa "
         "bunu ön değerlendirme olarak tanımla, sayıyı ve düşük log-loss/Brier'ın anlamını "
@@ -541,6 +580,10 @@ def generate_match_ai_packages(
         "home_venue_summary ev sahibinin, away_venue_summary deplasmanın saha özelindeki "
         "formudur. Üçten az maç varsa örneklemin sınırlı olduğunu belirt. goals_minus_xg "
         "farkını yakın dönem gözlemi olarak yorumla; az örnekle kalıcı hücum becerisi çıkarma. "
+        "score_distribution içindeki tam skor değerleri tekil skor olasılıklarıdır; "
+        "en olası skoru kesin sonuç gibi anlatma. İlk üç skorun toplam payıyla 1X2 ve gol "
+        "olasılıklarını birbirine karıştırma. Model zamanlama üretmediği için dakika/erken gol "
+        "iddiasında bulunma. "
         "historical_model_evaluation bu maça ait değildir, ayrılmış geçmiş değerlendirme "
         "örneklemidir. En az 30 maç yoksa model güvenilirliği hakkında hüküm verme. Yeterli "
         "örnek varsa sonucu ön değerlendirme olarak tanımla, sayıyı belirt ve kalite metriğini "
