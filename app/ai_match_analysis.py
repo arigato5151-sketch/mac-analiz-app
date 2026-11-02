@@ -16,7 +16,8 @@ class MatchAnalysisAIError(RuntimeError):
 
 
 def _recent_team_scores(
-    history: pd.DataFrame, team_id: int, kickoff: pd.Timestamp, league_id: int
+    history: pd.DataFrame, team_id: int, kickoff: pd.Timestamp, league_id: int,
+    venue_filter: str | None = None,
 ) -> list[dict[str, Any]]:
     if history.empty:
         return []
@@ -27,7 +28,12 @@ def _recent_team_scores(
             (history["home_team_id"] == team_id)
             | (history["away_team_id"] == team_id)
         )
-    ].sort_values(["match_date", "id"], ascending=False).head(5)
+    ]
+    if venue_filter == "home":
+        sample = sample[sample["home_team_id"] == team_id]
+    elif venue_filter == "away":
+        sample = sample[sample["away_team_id"] == team_id]
+    sample = sample.sort_values(["match_date", "id"], ascending=False).head(5)
     recent: list[dict[str, Any]] = []
     for match in sample.to_dict("records"):
         is_home = int(match["home_team_id"]) == team_id
@@ -92,6 +98,7 @@ def _summarize_recent_team_matches(matches: list[dict[str, Any]]) -> dict[str, A
         "first_half_goals_against_per_match": "halftime_against",
         "xg_for_per_match": "xg_for",
         "xg_against_per_match": "xg_against",
+        "goals_minus_xg_per_match": "goals_minus_xg",
         "xa_for_per_match": "xa_for",
         "xa_against_per_match": "xa_against",
         "corners_for_per_match": "corners_for",
@@ -121,6 +128,10 @@ def _summarize_recent_team_matches(matches: list[dict[str, Any]]) -> dict[str, A
         ):
             if match.get(key) is not None:
                 values[key].append(float(match[key]))
+        if match.get("xg_for") is not None:
+            values["goals_minus_xg"].append(
+                float(scored) - float(match["xg_for"])
+            )
 
     summary: dict[str, Any] = {
         "matches": len(matches),
@@ -241,6 +252,14 @@ def build_match_analysis_context(
         _recent_team_scores(history, away_id, kickoff, league_id)
         if not pd.isna(kickoff) else []
     )
+    home_venue_recent = (
+        _recent_team_scores(history, home_id, kickoff, league_id, venue_filter="home")
+        if not pd.isna(kickoff) else []
+    )
+    away_venue_recent = (
+        _recent_team_scores(history, away_id, kickoff, league_id, venue_filter="away")
+        if not pd.isna(kickoff) else []
+    )
     return {
         "match": {
             "home": home,
@@ -268,6 +287,8 @@ def build_match_analysis_context(
             "historical_model_evaluation": _historical_model_evaluation(forecast),
             "home_recent_summary": _summarize_recent_team_matches(home_recent),
             "away_recent_summary": _summarize_recent_team_matches(away_recent),
+            "home_venue_summary": _summarize_recent_team_matches(home_venue_recent),
+            "away_venue_summary": _summarize_recent_team_matches(away_venue_recent),
             "home_recent_matches": home_recent,
             "away_recent_matches": away_recent,
         },
@@ -302,6 +323,11 @@ def generate_match_analysis(
         "sayılarıyla kullan. Bir çıkarımın dayandığı ölçümün örnek sayısı azsa kesin "
         "dille yazma. xG, xA ve korner tek başına pres, topa sahip olma veya diziliş "
         "kanıtı değildir; bunlardan yalnızca sınırlı hücum üretimi çıkarımı yap. "
+        "home_venue_summary ev sahibinin son iç saha, away_venue_summary deplasmanın "
+        "son dış saha maçlarını özetler. Örnek sayısını mutlaka dikkate al; üçten azsa "
+        "bu saha ayrımını güçlü form kanıtı sayma. goals_minus_xg pozitifse goller xG'yi "
+        "aşmış, negatifse altında kalmıştır; küçük örneklemde bunu sürdürülebilir kalite "
+        "diye sunma. "
         "historical_model_evaluation bu maçın tahmini değil, ayrılmış geçmiş maçlarda "
         "yapılmış model kontrolüdür. Yalnızca held_out_matches en az 30 ise kısaca "
         "değin ve sonucu ön değerlendirme olarak nitele; örnek sayısını belirt, düşük "
@@ -454,6 +480,10 @@ def generate_match_ai_package(
         "küçükse bunu söyle ve kesin konuşma. xG, xA veya kornerden diziliş, pres ya da "
         "topa sahip olma iddiası çıkarma. Her taktik senaryonun bir veri dayanağını ve "
         "hangi koşulda gerçekleşeceğini açıkla; dayanak yoksa bunu varsayım olarak etiketle. "
+        "home_venue_summary ev sahibinin iç saha, away_venue_summary deplasman formudur. "
+        "matches sayısını kontrol et; üçten az maç varsa bu saha ayrımı sınırlıdır. "
+        "goals_minus_xg gözlenen gol ile xG farkıdır, sürdürülebilir beceri kanıtı değildir; "
+        "az örnekle kesin yorumlama. "
         "historical_model_evaluation yalnızca ayrılmış geçmiş maçlardaki model performansıdır; "
         "held_out_matches 30'un altındaysa başarı kanıtı olarak kullanma. En az 30 maç varsa "
         "bunu ön değerlendirme olarak tanımla, sayıyı ve düşük log-loss/Brier'ın anlamını "
@@ -508,6 +538,9 @@ def generate_match_ai_packages(
         "örnek sayısı azsa güven düzeyini düşür. Yalnızca xG/xA/kornerden diziliş, pres "
         "veya topa sahip olma iddiası üretme. Taktik senaryoları veriye bağlı koşullu "
         "çıkarım olarak yaz; veri yoksa varsayım olduğunu açıkça belirt. "
+        "home_venue_summary ev sahibinin, away_venue_summary deplasmanın saha özelindeki "
+        "formudur. Üçten az maç varsa örneklemin sınırlı olduğunu belirt. goals_minus_xg "
+        "farkını yakın dönem gözlemi olarak yorumla; az örnekle kalıcı hücum becerisi çıkarma. "
         "historical_model_evaluation bu maça ait değildir, ayrılmış geçmiş değerlendirme "
         "örneklemidir. En az 30 maç yoksa model güvenilirliği hakkında hüküm verme. Yeterli "
         "örnek varsa sonucu ön değerlendirme olarak tanımla, sayıyı belirt ve kalite metriğini "
