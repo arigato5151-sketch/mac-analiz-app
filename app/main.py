@@ -38,7 +38,7 @@ from app.components.data import (
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 # Bump this when forecast logic or the persisted analysis JSON contract changes.
-ANALYSIS_MODEL_VERSION = "form_poisson_ai_v6"
+ANALYSIS_MODEL_VERSION = "form_poisson_ai_v7"
 NON_PLAYABLE_MATCH_STATUSES = {"postponed", "cancelled", "unlisted"}
 
 COUNTRY_NAMES_TR = {
@@ -1517,7 +1517,9 @@ def render_tactical_match_readout(
                 st.caption("Bu maç için henüz yapay zekâ seçimi oluşturulmadı.")
             for selection in selections:
                 label = selection["market"]
-                chance = candidate_probabilities.get(label)
+                chance = selection.get(
+                    "model_probability", candidate_probabilities.get(label)
+                )
                 if chance is not None:
                     st.markdown(f"**{label} · %{chance * 100:.1f}**  \n{selection['reason']}")
     st.caption("Senaryolar tahmin garantisi veya bahis tavsiyesi değildir. Birleşik koşulların gerçekleşme olasılığı daha düşüktür; maç önü kadro ve sakatlık bilgileri bu model özetinde yer almaz.")
@@ -1701,6 +1703,22 @@ def render_ai_match_analysis(
         "Google Gemini, uygulamanın maç geçmişi ve Poisson olasılıklarını yorumlar; "
         "hesaplanmış model tahminlerini değiştirmez. Kadro bilgisi yoksa oyuncu veya sakatlık iddiası üretmez."
     )
+    validation_matches = int(forecast.get("tuning_matches") or 0)
+    result_log_loss = forecast.get("tuning_log_loss")
+    baseline_log_loss = forecast.get("tuning_baseline_log_loss")
+    if (
+        validation_matches >= 30
+        and result_log_loss is not None
+        and baseline_log_loss is not None
+    ):
+        st.caption(
+            f"Geçmiş ayrılmış değerlendirme: {validation_matches} maç · "
+            f"log-loss {float(result_log_loss):.3f} (sabit model: "
+            f"{float(baseline_log_loss):.3f}; düşük değer daha iyi). "
+            "Bu ölçüm mevcut maçın sonucunu garanti etmez."
+        )
+    else:
+        st.caption("Modelin geçmiş doğrulama örneği bu maç için güvenilir performans özeti vermeye yetmiyor.")
     if precomputed_analysis:
         st.caption("Yapay zekâ destekli maç yorumu gece önceden hazırlandı.")
         st.markdown(precomputed_analysis)

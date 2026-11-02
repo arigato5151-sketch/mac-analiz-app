@@ -411,7 +411,7 @@ def generate_match_analysis(
 
 def generate_match_risk_recommendations(
     context: dict[str, Any], *, api_key: str, model: str = "gemini-3.8-flash"
-) -> dict[str, list[dict[str, str]]]:
+) -> dict[str, list[dict[str, Any]]]:
     """Ask Gemini to choose varied selections for two moderate risk profiles."""
     allowed = context.get("model", {}).get("candidate_markets", {})
     instructions = (
@@ -603,8 +603,8 @@ def generate_match_ai_packages(
 
 def _validate_risk_selections(
     result: Any, allowed: Any
-) -> dict[str, list[dict[str, str]]]:
-    validated: dict[str, list[dict[str, str]]] = {"low": [], "medium": []}
+) -> dict[str, list[dict[str, Any]]]:
+    validated: dict[str, list[dict[str, Any]]] = {"low": [], "medium": []}
     used: set[str] = set()
     if not isinstance(result, dict) or not isinstance(allowed, dict):
         return validated
@@ -618,7 +618,12 @@ def _validate_risk_selections(
                 continue
             market = str(item.get("market", "")).strip()
             reason = str(item.get("reason", "")).strip()
-            probability = float(allowed.get(market, -1)) if market in allowed else -1
+            try:
+                probability = float(allowed.get(market, -1)) if market in allowed else -1
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(probability) or not 0 <= probability <= 1:
+                continue
             family = _market_family(market)
             in_band = (
                 probability >= 0.60
@@ -632,7 +637,13 @@ def _validate_risk_selections(
                 and reason
                 and in_band
             ):
-                validated[profile].append({"market": market, "reason": reason[:300]})
+                validated[profile].append(
+                    {
+                        "market": market,
+                        "reason": reason[:300],
+                        "model_probability": probability,
+                    }
+                )
                 used.add(market)
                 used_families.add(family)
     return validated
