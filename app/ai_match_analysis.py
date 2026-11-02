@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from typing import Any
 
@@ -33,15 +34,108 @@ def _recent_team_scores(
         scored = int(match["home_score"] if is_home else match["away_score"])
         conceded = int(match["away_score"] if is_home else match["home_score"])
         result = "G" if scored > conceded else "B" if scored == conceded else "M"
+        home_halftime = _optional_number(match.get("home_halftime_score"))
+        away_halftime = _optional_number(match.get("away_halftime_score"))
+        halftime = None
+        if home_halftime is not None and away_halftime is not None:
+            halftime = {
+                "for": int(home_halftime if is_home else away_halftime),
+                "against": int(away_halftime if is_home else home_halftime),
+            }
         recent.append(
             {
                 "date": pd.Timestamp(match["match_date"]).strftime("%Y-%m-%d"),
                 "venue": "iç saha" if is_home else "deplasman",
                 "score_for_against": f"{scored}-{conceded}",
                 "result": result,
+                "halftime_goals": halftime,
+                "xg_for": _optional_number(
+                    match.get("home_xg" if is_home else "away_xg")
+                ),
+                "xg_against": _optional_number(
+                    match.get("away_xg" if is_home else "home_xg")
+                ),
+                "xa_for": _optional_number(
+                    match.get("home_xa" if is_home else "away_xa")
+                ),
+                "xa_against": _optional_number(
+                    match.get("away_xa" if is_home else "home_xa")
+                ),
+                "corners_for": _optional_number(
+                    match.get("home_corners" if is_home else "away_corners")
+                ),
+                "corners_against": _optional_number(
+                    match.get("away_corners" if is_home else "home_corners")
+                ),
             }
         )
     return recent
+
+
+def _optional_number(value: Any) -> float | None:
+    """Convert a stored statistic to a finite number without imputing gaps."""
+    if value is None or pd.isna(value):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _summarize_recent_team_matches(matches: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize only observed values and report each metric's sample count."""
+    metric_keys = {
+        "goals_for_per_match": "scored",
+        "goals_against_per_match": "conceded",
+        "first_half_goals_for_per_match": "halftime_for",
+        "first_half_goals_against_per_match": "halftime_against",
+        "xg_for_per_match": "xg_for",
+        "xg_against_per_match": "xg_against",
+        "xa_for_per_match": "xa_for",
+        "xa_against_per_match": "xa_against",
+        "corners_for_per_match": "corners_for",
+        "corners_against_per_match": "corners_against",
+    }
+    values: dict[str, list[float]] = {key: [] for key in metric_keys.values()}
+    wins = draws = losses = points = 0
+    for match in matches:
+        scored, conceded = (int(part) for part in match["score_for_against"].split("-"))
+        values["scored"].append(float(scored))
+        values["conceded"].append(float(conceded))
+        if match["result"] == "G":
+            wins += 1
+            points += 3
+        elif match["result"] == "B":
+            draws += 1
+            points += 1
+        else:
+            losses += 1
+        halftime = match.get("halftime_goals")
+        if halftime:
+            values["halftime_for"].append(float(halftime["for"]))
+            values["halftime_against"].append(float(halftime["against"]))
+        for key in (
+            "xg_for", "xg_against", "xa_for", "xa_against",
+            "corners_for", "corners_against",
+        ):
+            if match.get(key) is not None:
+                values[key].append(float(match[key]))
+
+    summary: dict[str, Any] = {
+        "matches": len(matches),
+        "wins": wins,
+        "draws": draws,
+        "losses": losses,
+        "points_per_match": points / len(matches) if matches else None,
+    }
+    for output_key, source_key in metric_keys.items():
+        observations = values[source_key]
+        summary[output_key] = (
+            sum(observations) / len(observations) if observations else None
+        )
+        summary[f"{source_key}_sample_size"] = len(observations)
+    return summary
 
 
 def _model_markets(forecast: dict[str, Any], home: str, away: str) -> dict[str, float]:
@@ -111,6 +205,14 @@ def build_match_analysis_context(
     league_id = int(row["league_id"])
     home_id = int(row["home_team_id"])
     away_id = int(row["away_team_id"])
+    home_recent = (
+        _recent_team_scores(history, home_id, kickoff, league_id)
+        if not pd.isna(kickoff) else []
+    )
+    away_recent = (
+        _recent_team_scores(history, away_id, kickoff, league_id)
+        if not pd.isna(kickoff) else []
+    )
     return {
         "match": {
             "home": home,
@@ -135,12 +237,10 @@ def build_match_analysis_context(
             },
             "candidate_markets": _model_markets(forecast, home, away),
             "league_history_matches": int(forecast.get("history_count", 0)),
-            "home_recent_matches": _recent_team_scores(
-                history, home_id, kickoff, league_id
-            ) if not pd.isna(kickoff) else [],
-            "away_recent_matches": _recent_team_scores(
-                history, away_id, kickoff, league_id
-            ) if not pd.isna(kickoff) else [],
+            "home_recent_summary": _summarize_recent_team_matches(home_recent),
+            "away_recent_summary": _summarize_recent_team_matches(away_recent),
+            "home_recent_matches": home_recent,
+            "away_recent_matches": away_recent,
         },
         "available_lineup_or_injury_information": row.get("verified_team_news"),
     }
@@ -163,6 +263,11 @@ def generate_match_analysis(
         "olasılıkları değiştirme. Taktik fikirleri veriyle desteklenen çıkarım veya "
         "koşullu senaryo olarak belirt. Takımın son maçlarında score_for_against "
         "takımın attığı-yediği goldür; G/B/M galibiyet/beraberlik/mağlubiyet demektir. "
+        "home_recent_matches ve away_recent_matches geçmişte gözlenen maçları içerir; "
+        "xG, xA ve korner değerleri yalnızca kaydı bulunan maçlar içindir, null değerleri "
+        "tahmin etme. Özetlerdeki her *_sample_size ilgili ölçümün kaç maçtan geldiğini "
+        "gösterir. Bu geçmiş xG değerlerini modelin beklenen gol tahminiyle karıştırma. "
+        "Form yorumunu bu sayısal örneklere bağla; örneklem küçükse bunu belirt. "
         "Markdown kullan ve şu başlıklarla özgün, maç özelinde bir yorum üret: "
         "Maçın profili; İki takımın form sinyalleri; Olası oyun planları ve eşleşmeler; "
         "Maçın kırılma noktaları; Farklı oyun senaryoları; Model olasılıklarına göre "
@@ -302,7 +407,10 @@ def generate_match_ai_package(
     instructions = (
         "Türkçe, maç özelinde ve yalnızca verilen JSON'a dayanarak analiz yaz. Oyuncu, sakatlık, "
         "diziliş veya haber uydurma; veride yoksa belirt. Model olasılıklarını değiştirme, kesinlik "
-        "iddiası ve bahis oranı verme. Maçın profili, form sinyalleri, oyun planları/eşleşmeler, "
+        "iddiası ve bahis oranı verme. Geçmiş maçlardaki xG, xA, korner ve devre skorları gözlenen "
+        "verilerdir; null değerleri doldurma, özetlerdeki sample_size alanlarıyla veri kapsamını "
+        "kontrol et ve geçmiş xG'yi model beklenen golünden ayrı tut. "
+        "Maçın profili, form sinyalleri, oyun planları/eşleşmeler, "
         "kırılma noktaları ve farklı maç senaryolarını içeren kısa ama anlamlı bir Markdown yorum "
         "oluştur. Ayrıca candidate_markets içinden tam adları seçerek iki risk grubuna ikişer tahmin "
         "öner: low temkinli ve yüksek olasılıklı; medium dengeli ve orta olasılıklı. Yüksek riskli "
@@ -345,6 +453,8 @@ def generate_match_ai_packages(
     instructions = (
         "Türkçe futbol analisti olarak her maçı ayrı değerlendir ve yalnızca verilen "
         "JSON'daki verilere dayan. Oyuncu, sakatlık, diziliş, oran veya haber uydurma. "
+        "Geçmiş xG/xA/korner ve devre skorları gözlemdir; null veriyi uydurma, ilgili "
+        "sample_size alanlarını dikkate al ve geçmiş xG'yi model beklenen golünden ayır. "
         "Her maç için 4 kısa başlıklı Markdown yorum yaz: Maç profili, Form ve eşleşme, "
         "Olası senaryolar, Risk profillerine göre seçimler. Yorum her maçta o maçın "
         "takım adlarına, formuna ve Poisson olasılıklarına özgü olsun; veri zayıfsa "
