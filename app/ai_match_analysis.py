@@ -264,6 +264,46 @@ def _score_distribution_summary(forecast: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _compare_team_summaries(
+    home: dict[str, Any], away: dict[str, Any]
+) -> dict[str, Any]:
+    comparisons = (
+        ("points_per_match", "recent_points_per_match_gap"),
+        ("goals_for_per_match", "recent_goals_for_per_match_gap"),
+        ("goals_against_per_match", "recent_goals_against_per_match_gap"),
+        ("xg_for_per_match", "recent_xg_for_per_match_gap"),
+        ("goals_minus_xg_per_match", "recent_goals_minus_xg_gap"),
+    )
+    result: dict[str, Any] = {}
+    for metric, label in comparisons:
+        home_value = _optional_number(home.get(metric))
+        away_value = _optional_number(away.get(metric))
+        result[label] = {
+            "home": home_value,
+            "away": away_value,
+            "home_minus_away": (
+                home_value - away_value
+                if home_value is not None and away_value is not None
+                else None
+            ),
+            "home_sample_size": int(home.get("matches") or 0)
+            if metric in {
+                "points_per_match",
+                "goals_for_per_match",
+                "goals_against_per_match",
+            }
+            else int(home.get(f"{metric.removesuffix('_per_match')}_sample_size") or 0),
+            "away_sample_size": int(away.get("matches") or 0)
+            if metric in {
+                "points_per_match",
+                "goals_for_per_match",
+                "goals_against_per_match",
+            }
+            else int(away.get(f"{metric.removesuffix('_per_match')}_sample_size") or 0),
+        }
+    return result
+
+
 def build_match_analysis_context(
     row: dict[str, Any], history: pd.DataFrame, forecast: dict[str, Any]
 ) -> dict[str, Any]:
@@ -289,6 +329,10 @@ def build_match_analysis_context(
         _recent_team_scores(history, away_id, kickoff, league_id, venue_filter="away")
         if not pd.isna(kickoff) else []
     )
+    home_summary = _summarize_recent_team_matches(home_recent)
+    away_summary = _summarize_recent_team_matches(away_recent)
+    home_venue_summary = _summarize_recent_team_matches(home_venue_recent)
+    away_venue_summary = _summarize_recent_team_matches(away_venue_recent)
     return {
         "match": {
             "home": home,
@@ -315,10 +359,24 @@ def build_match_analysis_context(
             "candidate_markets": _model_markets(forecast, home, away),
             "league_history_matches": int(forecast.get("history_count", 0)),
             "historical_model_evaluation": _historical_model_evaluation(forecast),
-            "home_recent_summary": _summarize_recent_team_matches(home_recent),
-            "away_recent_summary": _summarize_recent_team_matches(away_recent),
-            "home_venue_summary": _summarize_recent_team_matches(home_venue_recent),
-            "away_venue_summary": _summarize_recent_team_matches(away_venue_recent),
+            "home_recent_summary": home_summary,
+            "away_recent_summary": away_summary,
+            "home_venue_summary": home_venue_summary,
+            "away_venue_summary": away_venue_summary,
+            "recent_form_comparisons": _compare_team_summaries(
+                home_summary, away_summary
+            ),
+            "venue_form_comparisons": _compare_team_summaries(
+                home_venue_summary, away_venue_summary
+            ),
+            "expected_goals_comparison": {
+                "home": float(forecast["expected_home"]),
+                "away": float(forecast["expected_away"]),
+                "home_minus_away": float(forecast["expected_home"])
+                - float(forecast["expected_away"]),
+                "total": float(forecast["expected_home"])
+                + float(forecast["expected_away"]),
+            },
             "home_recent_matches": home_recent,
             "away_recent_matches": away_recent,
         },
@@ -363,6 +421,11 @@ def generate_match_analysis(
         "yüksek olasılıklı olduğunu varsayma. Geniş 1X2 ve gol marketleriyle tek skor "
         "olasılığını ayır; maç senaryolarını bu dağılım ve olasılık farkına göre kur. "
         "Dakika veya erken gol gibi zamanlama iddiası üretme; model zamanlama tahmini yapmıyor. "
+        "recent_form_comparisons ve venue_form_comparisons içindeki home_minus_away farkı "
+        "ev sahibi eksi deplasmandır; null farkı hesaplama. En belirgin iki farklılaşan "
+        "sayısal sinyali seçip takım isimleri ve örnek sayılarıyla açıkla. Her maçta aynı "
+        "genel giriş ve klişe senaryoları tekrarlama; veri desteklemiyorsa favori veya oyun "
+        "kontrolü iddiası kurma. "
         "historical_model_evaluation bu maçın tahmini değil, ayrılmış geçmiş maçlarda "
         "yapılmış model kontrolüdür. Yalnızca held_out_matches en az 30 ise kısaca "
         "değin ve sonucu ön değerlendirme olarak nitele; örnek sayısını belirt, düşük "
@@ -523,6 +586,10 @@ def generate_match_ai_package(
         "ilk sıradaki skor kesin veya yüksek olasılıklı demek değildir. Üç skorun toplam "
         "payını ve geniş maç sonucu/gol olasılıklarını ayır; senaryoları bunlara göre kur. "
         "Model dakika bazlı olmadığı için erken gol veya belirli dakika senaryosu uydurma. "
+        "recent_form_comparisons ve venue_form_comparisons farkları ev sahibi eksi "
+        "deplasmandır. Null veya yetersiz örnekli veriyi yorumlama. Her maçta en ayırt edici "
+        "iki sinyali seçip isimler ve örnek sayılarıyla anlat; genel futbol klişelerini ve "
+        "verinin desteklemediği favori/oyun kontrolü iddialarını kullanma. "
         "historical_model_evaluation yalnızca ayrılmış geçmiş maçlardaki model performansıdır; "
         "held_out_matches 30'un altındaysa başarı kanıtı olarak kullanma. En az 30 maç varsa "
         "bunu ön değerlendirme olarak tanımla, sayıyı ve düşük log-loss/Brier'ın anlamını "
@@ -583,7 +650,10 @@ def generate_match_ai_packages(
         "score_distribution içindeki tam skor değerleri tekil skor olasılıklarıdır; "
         "en olası skoru kesin sonuç gibi anlatma. İlk üç skorun toplam payıyla 1X2 ve gol "
         "olasılıklarını birbirine karıştırma. Model zamanlama üretmediği için dakika/erken gol "
-        "iddiasında bulunma. "
+        "iddiasında bulunma. recent_form_comparisons ve venue_form_comparisons içindeki "
+        "farklar ev sahibi eksi deplasmandır; null değerleri yorumlama. O maçta en belirgin "
+        "iki sayısal farkı takım adları ve örnek sayılarıyla vurgula. Her maç için aynı genel "
+        "girişleri tekrarlama ve istatistik desteklemediğinde baskın taraf iddiası kurma. "
         "historical_model_evaluation bu maça ait değildir, ayrılmış geçmiş değerlendirme "
         "örneklemidir. En az 30 maç yoksa model güvenilirliği hakkında hüküm verme. Yeterli "
         "örnek varsa sonucu ön değerlendirme olarak tanımla, sayıyı belirt ve kalite metriğini "

@@ -82,7 +82,7 @@ def load_league_match_history(league_id: int) -> list[dict[str, Any]]:
         columns=(
             "id,league_id,home_team_id,away_team_id,match_date,status,"
             "home_score,away_score,home_halftime_score,away_halftime_score,"
-            "home_corners,away_corners"
+            "home_xg,away_xg,home_xa,away_xa,home_corners,away_corners"
         ),
         filters={
             "status": "eq.finished",
