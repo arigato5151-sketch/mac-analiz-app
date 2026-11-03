@@ -144,11 +144,10 @@ def collect_match_analysis_cache(
                 cached.get("model_version") == ANALYSIS_MODEL_VERSION
                 and isinstance(cached_analysis, dict)
                 and cached_analysis.get("ai_analysis")
-                and cached_analysis.get("ai_risk_selections")
             ):
                 cached_ai[int(cached["match_id"])] = {
                     "analysis": cached_analysis["ai_analysis"],
-                    "risk_selections": cached_analysis["ai_risk_selections"],
+                    "risk_selections": cached_analysis.get("ai_risk_selections") or {},
                 }
     team_names = {
         int(item["id"]): str(item["name"])

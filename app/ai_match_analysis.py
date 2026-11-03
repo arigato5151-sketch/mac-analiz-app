@@ -848,11 +848,10 @@ def generate_match_ai_packages(
             item.get("risk_selections", {}),
             context.get("model", {}).get("candidate_markets", {}),
         )
-        if any(selections.values()):
-            packages[match_id] = {
-                "analysis": analysis[:12000],
-                "risk_selections": selections,
-            }
+        packages[match_id] = {
+            "analysis": analysis[:12000],
+            "risk_selections": selections,
+        }
     if not packages:
         raise MatchAnalysisAIError("Yapay zekâ geçerli maç paketi döndürmedi.")
     return packages

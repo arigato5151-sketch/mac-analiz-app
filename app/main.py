@@ -1514,7 +1514,10 @@ def render_tactical_match_readout(
             st.caption(explanation)
             selections = ai_risks.get(profile, [])
             if not selections:
-                st.caption("Bu maç için henüz yapay zekâ seçimi oluşturulmadı.")
+                if precomputed_risks is not None:
+                    st.caption("Bu profil için doğrulanmış bir AI seçimi üretilemedi.")
+                else:
+                    st.caption("Bu maç için henüz yapay zekâ seçimi oluşturulmadı.")
             for selection in selections:
                 label = selection["market"]
                 chance = selection.get(
