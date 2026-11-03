@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -17,6 +18,8 @@ ISTANBUL = ZoneInfo("Europe/Istanbul")
 MATCH_LOOKBACK = timedelta(minutes=15)
 MATCH_LOOKAHEAD = timedelta(minutes=55)
 MAX_KICKOFF_DIFFERENCE = timedelta(hours=2)
+PREVIOUS_MATCH_LOOKAHEAD = timedelta(days=7)
+MAX_PREVIOUS_MATCHES_PER_BACKFILL = 12
 NON_PLAYABLE_STATUSES = {"PST", "CANC", "ABD", "AWD", "WO"}
 
 
@@ -273,12 +276,225 @@ def sync_upcoming_lineups(
     }
 
 
+def sync_previous_match_lineups(
+    api: ApiFootballClient,
+    db: SupabaseRestClient,
+    *,
+    now: datetime | None = None,
+    max_matches: int = MAX_PREVIOUS_MATCHES_PER_BACKFILL,
+) -> dict[str, int]:
+    """Backfill each upcoming team's latest prior-match lineup, with a strict API cap."""
+    if max_matches < 1:
+        raise ValueError("max_matches must be positive")
+    reference = now or datetime.now(timezone.utc)
+    if reference.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    reference = reference.astimezone(timezone.utc)
+    future_limit = (reference + PREVIOUS_MATCH_LOOKAHEAD).isoformat()
+    upcoming = db.select_all(
+        "matches",
+        columns="id,league_id,home_team_id,away_team_id,match_date",
+        filters={
+            "status": "eq.scheduled",
+            "and": f"(match_date.gte.{reference.isoformat()},match_date.lte.{future_limit})",
+        },
+        order="match_date.asc,id.asc",
+    )
+    if not upcoming:
+        return {"upcoming_matches_scanned": 0, "previous_matches_found": 0, "mapped": 0, "lineups_saved": 0}
+
+    team_ids = sorted(
+        {
+            int(team_id)
+            for match in upcoming
+            for team_id in (match["home_team_id"], match["away_team_id"])
+        }
+    )
+    team_filter = ",".join(map(str, team_ids))
+    history = db.select_all(
+        "matches",
+        columns="id,league_id,home_team_id,away_team_id,match_date,status,home_score,away_score",
+        filters={
+            "status": "eq.finished",
+            "home_score": "not.is.null",
+            "away_score": "not.is.null",
+            "match_date": f"lt.{future_limit}",
+            "or": f"(home_team_id.in.({team_filter}),away_team_id.in.({team_filter}))",
+        },
+        order="match_date.desc,id.desc",
+    )
+    history_by_team: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    history_by_id: dict[int, dict[str, Any]] = {}
+    for match in history:
+        match_id = int(match["id"])
+        history_by_id[match_id] = match
+        for team_id in (int(match["home_team_id"]), int(match["away_team_id"])):
+            if team_id in team_ids:
+                history_by_team[team_id].append(match)
+
+    targets: dict[int, set[int]] = defaultdict(set)
+    target_priority: dict[int, datetime] = {}
+    for fixture in upcoming:
+        kickoff = _as_utc(fixture.get("match_date"))
+        if kickoff is None:
+            continue
+        for team_id in (int(fixture["home_team_id"]), int(fixture["away_team_id"])):
+            previous = next(
+                (
+                    item
+                    for item in history_by_team.get(team_id, [])
+                    if (match_date := _as_utc(item.get("match_date"))) is not None
+                    and match_date < kickoff
+                ),
+                None,
+            )
+            if previous is None:
+                continue
+            previous_id = int(previous["id"])
+            targets[previous_id].add(team_id)
+            target_priority[previous_id] = min(
+                target_priority.get(previous_id, kickoff), kickoff
+            )
+
+    if not targets:
+        return {
+            "upcoming_matches_scanned": len(upcoming),
+            "previous_matches_found": 0,
+            "mapped": 0,
+            "lineups_saved": 0,
+        }
+
+    previous_ids = sorted(targets)
+    existing = db.select_all(
+        "fixture_lineups",
+        columns="match_id,team_id,starters",
+        filters={"match_id": f"in.({','.join(map(str, previous_ids))})"},
+        order="match_id.asc,team_id.asc",
+    )
+    existing_team_ids = {
+        (int(item["match_id"]), int(item["team_id"]))
+        for item in existing
+        if isinstance(item.get("starters"), list) and len(item["starters"]) >= 11
+    }
+    candidates = [
+        match_id
+        for match_id, needed_teams in targets.items()
+        if any((match_id, team_id) not in existing_team_ids for team_id in needed_teams)
+    ]
+    candidates.sort(key=lambda match_id: (target_priority[match_id], -int(match_id)))
+    candidates = candidates[:max_matches]
+    if not candidates:
+        return {
+            "upcoming_matches_scanned": len(upcoming),
+            "previous_matches_found": len(targets),
+            "mapped": 0,
+            "lineups_saved": 0,
+        }
+
+    target_matches = [history_by_id[match_id] for match_id in candidates]
+    target_team_ids = sorted(
+        {
+            int(team_id)
+            for match_id in candidates
+            for team_id in (
+                history_by_id[match_id]["home_team_id"],
+                history_by_id[match_id]["away_team_id"],
+            )
+        }
+    )
+    team_names = {
+        int(team["id"]): str(team["name"])
+        for team in db.select_all(
+            "teams",
+            columns="id,name",
+            filters={"id": f"in.({','.join(map(str, target_team_ids))})"},
+        )
+    }
+    fixtures_by_day: dict[str, list[dict[str, Any]]] = {}
+    competition_days: dict[tuple[int, str], list[dict[str, Any]]] = defaultdict(list)
+    for match in target_matches:
+        kickoff = _as_utc(match.get("match_date"))
+        league_id = int(match["league_id"])
+        if kickoff is None or league_id not in LEAGUES_BY_ID:
+            continue
+        local_day = kickoff.astimezone(ISTANBUL).date().isoformat()
+        key = (league_id, local_day)
+        if local_day not in fixtures_by_day:
+            try:
+                fixtures_by_day[local_day] = api.get(
+                    "fixtures", {"date": local_day, "timezone": "Europe/Istanbul"}
+                )
+            except Exception as exc:
+                print(f"Previous fixture lookup skipped for date={local_day}: {type(exc).__name__}")
+                fixtures_by_day[local_day] = []
+        competition_days[key] = [
+            fixture
+            for fixture in fixtures_by_day[local_day]
+            if (fixture.get("league") or {}).get("id") == league_id
+        ]
+
+    resolved = _unique_fixture_matches(target_matches, competition_days, team_names)
+    saved = 0
+    attempted = 0
+    for match_id in candidates:
+        fixture = resolved.get(match_id)
+        if fixture is None:
+            continue
+        missing_teams = targets[match_id] - {
+            team_id for existing_match_id, team_id in existing_team_ids
+            if existing_match_id == match_id
+        }
+        if not missing_teams:
+            continue
+        attempted += 1
+        try:
+            payload = api.get(
+                "fixtures/lineups", {"fixture": int(fixture["fixture"]["id"])}
+            )
+        except Exception as exc:
+            print(f"Previous lineup request skipped for match_id={match_id}: {type(exc).__name__}")
+            continue
+        rows = _extract_lineup_rows(
+            payload,
+            history_by_id[match_id],
+            team_names,
+            confirmed_at=reference.isoformat(),
+        )
+        rows = [row for row in rows if int(row["team_id"]) in missing_teams]
+        if not rows:
+            continue
+        try:
+            db.upsert("fixture_lineups", rows, on_conflict="match_id,team_id")
+        except DatabaseError as exc:
+            print(f"Previous lineup save skipped for match_id={match_id}: {type(exc).__name__}")
+            continue
+        saved += len(rows)
+
+    return {
+        "upcoming_matches_scanned": len(upcoming),
+        "previous_matches_found": len(targets),
+        "previous_matches_attempted": attempted,
+        "mapped": len(resolved),
+        "lineups_saved": saved,
+    }
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--backfill-previous",
+        action="store_true",
+        help="Fetch a capped set of prior-match lineups for upcoming teams",
+    )
+    args = parser.parse_args()
     settings = get_settings()
     api = ApiFootballClient(settings.api_football_key)
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     summary = sync_upcoming_lineups(api, db)
-    print({**summary, **api.diagnostics()})
+    output: dict[str, Any] = {"upcoming": summary}
+    if args.backfill_previous:
+        output["previous_match_backfill"] = sync_previous_match_lineups(api, db)
+    print({**output, **api.diagnostics()})
 
 
 if __name__ == "__main__":

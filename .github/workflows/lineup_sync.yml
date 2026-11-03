@@ -30,6 +30,13 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m data_pipeline.fetch_lineups
+      - name: Backfill recent teams' previous-match lineups on manual runs
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python -m data_pipeline.fetch_lineups --backfill-previous
       - name: Refresh AI analysis when lineup or feedback data changed
         if: success()
         env:
