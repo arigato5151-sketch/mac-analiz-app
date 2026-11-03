@@ -18,8 +18,10 @@ from app.main import (
 from app.ai_match_analysis import (
     MatchAnalysisAIError,
     build_match_analysis_context,
+    confirmed_lineup_context,
     generate_match_ai_packages,
     previous_match_ids_for_fixture,
+    previous_lineup_context,
 )
 from config.settings import get_optional_setting, get_supabase_admin_settings
 from db.db_client import DatabaseError, SupabaseRestClient
@@ -132,6 +134,30 @@ def _load_commentary_feedback_summary(
     }
 
 
+def _commentary_lineup_revision(row: dict[str, Any]) -> str:
+    """Hash lineup content while ignoring polling timestamps."""
+    sources = (
+        confirmed_lineup_context(row),
+        previous_lineup_context(row),
+    )
+    normalized = []
+    for source in sources:
+        teams = []
+        for team in (source or {}).get("teams", []):
+            teams.append(
+                {
+                    key: team.get(key)
+                    for key in (
+                        "team", "formation", "coach", "starters", "substitutes",
+                        "previous_match_id", "previous_match_date", "previous_competition",
+                    )
+                }
+            )
+        normalized.append(teams)
+    payload = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def collect_match_analysis_cache(
     db: SupabaseRestClient, *, now: datetime | None = None
 ) -> list[dict[str, Any]]:
@@ -203,6 +229,7 @@ def collect_match_analysis_cache(
                 cached_ai[int(cached["match_id"])] = {
                     "analysis": cached_analysis["ai_analysis"],
                     "risk_selections": cached_analysis.get("ai_risk_selections") or {},
+                    "lineup_revision": cached_analysis.get("commentary_lineup_revision"),
                 }
     team_names = {
         int(item["id"]): str(item["name"])
@@ -318,7 +345,11 @@ def collect_match_analysis_cache(
         )
         if google_api_key and analysis.get("forecast"):
             analysis_by_match[match_id] = analysis
-            if match_id in cached_ai:
+            lineup_revision = _commentary_lineup_revision(row)
+            if (
+                match_id in cached_ai
+                and cached_ai[match_id].get("lineup_revision") == lineup_revision
+            ):
                 ai_package = cached_ai[match_id]
                 analysis["ai_analysis"] = ai_package["analysis"]
                 analysis["ai_risk_selections"] = ai_package["risk_selections"]
@@ -337,6 +368,7 @@ def collect_match_analysis_cache(
                 }
                 ai_contexts.append(ai_context)
             analysis["commentary_feedback_revision"] = feedback_revision
+            analysis["commentary_lineup_revision"] = lineup_revision
         cache_row = {
                 "match_id": match_id,
                 "league_id": league_id,
