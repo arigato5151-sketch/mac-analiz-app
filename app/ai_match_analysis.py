@@ -587,6 +587,7 @@ def previous_lineup_context(row: dict[str, Any]) -> dict[str, Any] | None:
 def build_match_analysis_context(
     row: dict[str, Any], history: pd.DataFrame, forecast: dict[str, Any],
     half_forecasts: dict[str, Any] | None = None,
+    commentary_quality_feedback: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     home = str(row.get("home_name") or "Ev sahibi")
     away = str(row.get("away_name") or "Deplasman")
@@ -668,6 +669,7 @@ def build_match_analysis_context(
         },
         "confirmed_lineups": confirmed_lineup_context(row),
         "likely_lineups_from_previous_match": previous_lineup_context(row),
+        "commentary_quality_feedback": commentary_quality_feedback,
         "available_lineup_or_injury_information": row.get("verified_team_news"),
     }
 
@@ -694,6 +696,10 @@ def generate_match_analysis(
         "diziliş ve oyuncu adlarını kesinleşmiş bilgi olarak kullan; iki kadro alanı da "
         "boşsa oyuncu kadrosu hakkında çıkarım yapma. Önceki maç bilgisi bugünkü sakatlık "
         "ve cezaları göstermez. "
+        "commentary_quality_feedback en az beş kullanıcının son 30 günlük toplu yorumudur. "
+        "Yalnızca issue_counts içindeki belirgin yazım/format eğilimlerini iyileştirmek için "
+        "kullan; bunu maç verisi, takım bilgisi veya tahmin sinyali gibi sunma. Örnek sayısını "
+        "göz önünde tut, tekil sorunları genelleme. Alan null ise geri bildirime göre uyarlama yapma. "
         "açıkça söyle. İstatistiksel olasılıkları kesinlik gibi sunma; verilen "
         "olasılıkları değiştirme. Taktik fikirleri veriyle desteklenen çıkarım veya "
         "koşullu senaryo olarak belirt. Takımın son maçlarında score_for_against "
@@ -881,6 +887,9 @@ def generate_match_ai_package(
         "likely_lineups_from_previous_match her takımın önceki maç kadrosudur; mevcut maçın "
         "kesin kadrosu gibi sunma ve sakatlık, ceza veya rotasyonla değişebileceğini belirt. "
         "Kesin kadrosu bulunmayan taraf için bunu tahmini referans olarak kullan. "
+        "commentary_quality_feedback varsa en az beş kullanıcının son 30 günlük toplu "
+        "geri bildirimidir. Yalnızca yorumun açıklığını/genellik düzeyini geliştirmek için "
+        "kullan; maç olgusu veya tahmin dayanağı sayma. Az sayıdaki etiketleri genelleme. "
         "Model olasılıklarını değiştirme, kesinlik "
         "iddiası ve bahis oranı verme. Geçmiş maçlardaki xG, xA, korner, şut, isabetli şut, "
         "topa sahip olma ve devre skorları gözlenen "
@@ -962,6 +971,9 @@ def generate_match_ai_packages(
         "likely_lineups_from_previous_match her takımın kendi son maçındaki kadrodur; "
         "bugünkü kesin kadro diye anlatma, sakatlık/ceza/rotasyonla değişebileceğini söyle. "
         "Mevcut kadro eksikse önceki maç kadrosunu yalnız o takım için tahmini referans yap. "
+        "commentary_quality_feedback varsa bu en az beş kullanıcının son 30 günlük toplu "
+        "geri bildirimidir. Yalnızca anlatım biçimini iyileştir; maç verisini veya tahmini "
+        "değiştiren bir girdi değildir. Tekil etiketleri genelleme. "
         "Geçmiş xG/xA/korner/şut/isabetli şut/topa sahip olma ve devre skorları gözlemdir; null veriyi uydurma, ilgili "
         "sample_size alanlarını dikkate al ve geçmiş xG'yi model beklenen golünden ayır. "
         "Her takımın formunu mümkün olduğunda son maç G/B/M toplamı ve maç başı puanıyla; "

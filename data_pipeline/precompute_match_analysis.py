@@ -97,6 +97,40 @@ def _load_league_history(db: SupabaseRestClient, league_id: int) -> pd.DataFrame
     return history.dropna(subset=["match_date"])
 
 
+def _load_commentary_feedback_summary(
+    db: SupabaseRestClient, *, now: datetime
+) -> dict[str, Any] | None:
+    """Aggregate recent anonymous feedback without loading identities or comment text."""
+    since = (now - pd.Timedelta(days=30)).isoformat()
+    try:
+        feedback = db.select_all(
+            "ai_analysis_feedback",
+            columns="helpful,issue_codes",
+            filters={"created_at": f"gte.{since}"},
+            order="created_at.desc,id.desc",
+        )
+    except DatabaseError as exc:
+        print(f"AI commentary feedback lookup skipped: {type(exc).__name__}")
+        return None
+    if len(feedback) < 5:
+        return None
+    helpful_count = sum(bool(row.get("helpful")) for row in feedback)
+    issue_counts: dict[str, int] = {}
+    allowed = {"generic", "missing_data", "unclear_reasoning", "data_error"}
+    for row in feedback:
+        codes = row.get("issue_codes") or []
+        if not isinstance(codes, list):
+            continue
+        for code in set(codes) & allowed:
+            issue_counts[code] = issue_counts.get(code, 0) + 1
+    return {
+        "period_days": 30,
+        "sample_size": len(feedback),
+        "helpful_rate": helpful_count / len(feedback),
+        "issue_counts": issue_counts,
+    }
+
+
 def collect_match_analysis_cache(
     db: SupabaseRestClient, *, now: datetime | None = None
 ) -> list[dict[str, Any]]:
@@ -171,6 +205,12 @@ def collect_match_analysis_cache(
     }
     google_api_key = get_optional_setting("GOOGLE_API_KEY")
     google_model = get_optional_setting("GOOGLE_MODEL", "gemini-3.8-flash")
+    commentary_feedback = _load_commentary_feedback_summary(db, now=reference)
+    if commentary_feedback:
+        print(
+            "Recent AI commentary feedback summary: "
+            f"{commentary_feedback['sample_size']} votes; aggregate style guidance enabled."
+        )
     ai_failures = 0
     if not google_api_key:
         print("GOOGLE_API_KEY is missing; nightly AI commentary will not be generated.")
@@ -258,6 +298,7 @@ def collect_match_analysis_cache(
                     histories[league_id],
                     analysis["forecast"],
                     half_forecasts=analysis.get("halves"),
+                    commentary_quality_feedback=commentary_feedback,
                 )
                 ai_context["match_id"] = match_id
                 ai_context["model"]["candidate_markets"] = {

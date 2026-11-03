@@ -26,6 +26,8 @@ Migration `044_match_shot_possession_history.sql` adds nullable API-Football tot
 
 Migration `045_ai_analysis_feedback.sql` creates an insert-only, anonymous feedback table for AI comment ratings. The UI submits only the match, model version, a SHA-256 hash of the rendered comment, a random Streamlit-session UUID, a helpful/unhelpful vote, and fixed issue codes. Public roles cannot read feedback or store comment text or personal details; service-role access is reserved for aggregate quality review.
 
+Nightly analysis may use the previous 30 days of feedback as style guidance only after at least five votes are present. The pipeline passes aggregate helpful rate and fixed issue-code counts; it does not expose match IDs, session IDs, hashes, or comment text to Gemini. Feedback cannot alter model probabilities or match facts.
+
 The `Confirmed lineups refresh` workflow polls imminent fixtures. It resolves the IdDaa match to an API-Football fixture only when the competition, both home/away team names, kickoff window, and one-to-one candidate check all agree; ambiguous or partial lineups are skipped. API-Football documents lineups as typically appearing 20–40 minutes before kickoff, with competition-dependent coverage, so missing lineups are normal and are never inferred.
 
 The pinned checksums in `tests/fixtures/migration_checksums.json` protect migration source files from accidental edits in local CI. When adding a new migration, add its controller checksum to that fixture; never replace an applied migration's checksum. The production ledger comparison remains authoritative for deployed migrations: changing an applied file makes `--verify-production` report that version in `mismatched` and exit unsuccessfully.
