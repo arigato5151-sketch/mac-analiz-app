@@ -304,6 +304,47 @@ def _compare_team_summaries(
     return result
 
 
+def _recent_team_trend(matches: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compare the latest three results with the preceding two, when available."""
+    if len(matches) < 5:
+        return {"available": False, "matches": len(matches)}
+    recent = _summarize_recent_team_matches(matches[:3])
+    earlier = _summarize_recent_team_matches(matches[3:5])
+    metrics = (
+        "points_per_match",
+        "goals_for_per_match",
+        "goals_against_per_match",
+        "xg_for_per_match",
+        "xg_against_per_match",
+    )
+    sample_keys = {
+        "points_per_match": "matches",
+        "goals_for_per_match": "scored_sample_size",
+        "goals_against_per_match": "conceded_sample_size",
+        "xg_for_per_match": "xg_for_sample_size",
+        "xg_against_per_match": "xg_against_sample_size",
+    }
+    changes = {}
+    for metric in metrics:
+        recent_value = _optional_number(recent.get(metric))
+        earlier_value = _optional_number(earlier.get(metric))
+        changes[metric] = {
+            "recent_minus_earlier": (
+                recent_value - earlier_value
+                if recent_value is not None and earlier_value is not None
+                else None
+            ),
+            "recent_sample_size": int(recent.get(sample_keys[metric]) or 0),
+            "earlier_sample_size": int(earlier.get(sample_keys[metric]) or 0),
+        }
+    return {
+        "available": True,
+        "recent_window": recent,
+        "earlier_window": earlier,
+        "changes": changes,
+    }
+
+
 def build_match_analysis_context(
     row: dict[str, Any], history: pd.DataFrame, forecast: dict[str, Any]
 ) -> dict[str, Any]:
@@ -361,6 +402,8 @@ def build_match_analysis_context(
             "historical_model_evaluation": _historical_model_evaluation(forecast),
             "home_recent_summary": home_summary,
             "away_recent_summary": away_summary,
+            "home_recent_trend": _recent_team_trend(home_recent),
+            "away_recent_trend": _recent_team_trend(away_recent),
             "home_venue_summary": home_venue_summary,
             "away_venue_summary": away_venue_summary,
             "recent_form_comparisons": _compare_team_summaries(
@@ -426,6 +469,9 @@ def generate_match_analysis(
         "sayısal sinyali seçip takım isimleri ve örnek sayılarıyla açıkla. Her maçta aynı "
         "genel giriş ve klişe senaryoları tekrarlama; veri desteklemiyorsa favori veya oyun "
         "kontrolü iddiası kurma. "
+        "home_recent_trend ve away_recent_trend varsa son 3 maç ile önceki 2 maçın "
+        "değişimini gösterir. Yalnızca available true ise trendden söz et; örneklemler "
+        "küçük olduğundan bunu kısa dönem sinyali diye nitele, kesin eğilim sayma. "
         "historical_model_evaluation bu maçın tahmini değil, ayrılmış geçmiş maçlarda "
         "yapılmış model kontrolüdür. Yalnızca held_out_matches en az 30 ise kısaca "
         "değin ve sonucu ön değerlendirme olarak nitele; örnek sayısını belirt, düşük "
@@ -590,6 +636,9 @@ def generate_match_ai_package(
         "deplasmandır. Null veya yetersiz örnekli veriyi yorumlama. Her maçta en ayırt edici "
         "iki sinyali seçip isimler ve örnek sayılarıyla anlat; genel futbol klişelerini ve "
         "verinin desteklemediği favori/oyun kontrolü iddialarını kullanma. "
+        "home_recent_trend ve away_recent_trend içindeki değişim son 3 maçı önceki 2 "
+        "maçla karşılaştırır. available false ise trend çıkarma; true olsa bile küçük "
+        "örneklem nedeniyle yalnızca kısa dönem işareti olarak aktar. "
         "historical_model_evaluation yalnızca ayrılmış geçmiş maçlardaki model performansıdır; "
         "held_out_matches 30'un altındaysa başarı kanıtı olarak kullanma. En az 30 maç varsa "
         "bunu ön değerlendirme olarak tanımla, sayıyı ve düşük log-loss/Brier'ın anlamını "
@@ -654,6 +703,9 @@ def generate_match_ai_packages(
         "farklar ev sahibi eksi deplasmandır; null değerleri yorumlama. O maçta en belirgin "
         "iki sayısal farkı takım adları ve örnek sayılarıyla vurgula. Her maç için aynı genel "
         "girişleri tekrarlama ve istatistik desteklemediğinde baskın taraf iddiası kurma. "
+        "home_recent_trend ve away_recent_trend son 3 maçı önceki 2 maçla karşılaştırır. "
+        "Yalnızca available true ise trend kullan; sonucu küçük örneklemli kısa dönem "
+        "sinyali olarak niteler, kesin eğilim diye sunma. "
         "historical_model_evaluation bu maça ait değildir, ayrılmış geçmiş değerlendirme "
         "örneklemidir. En az 30 maç yoksa model güvenilirliği hakkında hüküm verme. Yeterli "
         "örnek varsa sonucu ön değerlendirme olarak tanımla, sayıyı belirt ve kalite metriğini "
