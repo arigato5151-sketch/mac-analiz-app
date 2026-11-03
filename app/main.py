@@ -1694,6 +1694,9 @@ def render_analysis(
             model_forecast, _ = render_model_forecast(
                 row, history, [], precomputed=cached_analysis, show_details=False
             )
+            render_match_data_coverage(
+                row, history, cached_analysis, model_forecast
+            )
             st.divider()
             render_tactical_match_readout(
                 row,
@@ -1713,6 +1716,141 @@ def render_analysis(
             st.divider()
             render_recent_form(row, history, team_names)
             st.divider()
+
+
+def render_match_data_coverage(
+    row: dict[str, Any],
+    history: pd.DataFrame,
+    precomputed: dict[str, Any] | None,
+    forecast: dict[str, Any] | None,
+) -> None:
+    """Show observed sample sizes and data recency for each match card."""
+    kickoff = pd.to_datetime(
+        row.get("kickoff") or row.get("match_date"), utc=True, errors="coerce"
+    )
+    if pd.isna(kickoff):
+        return
+    teams = (
+        (int(row["home_team_id"]), str(row.get("home_name") or "Ev sahibi")),
+        (int(row["away_team_id"]), str(row.get("away_name") or "Deplasman")),
+    )
+    metric_columns = {
+        "Devre skoru": ("home_halftime_score", "away_halftime_score"),
+        "xG": ("home_xg", "away_xg"),
+        "xA": ("home_xa", "away_xa"),
+        "Korner": ("home_corners", "away_corners"),
+        "Şut": ("home_shots", "away_shots"),
+        "İsabetli şut": ("home_shots_on_target", "away_shots_on_target"),
+        "Topa sahip olma": ("home_possession", "away_possession"),
+    }
+    if history.empty:
+        prior = pd.DataFrame(
+            columns=[
+                "id", "league_id", "match_date", "home_team_id", "away_team_id",
+                *[column for pair in metric_columns.values() for column in pair],
+            ]
+        )
+    else:
+        prior = history[
+            (pd.to_numeric(history.get("league_id"), errors="coerce") == int(row["league_id"]))
+            & (pd.to_datetime(history.get("match_date"), utc=True, errors="coerce") < kickoff)
+        ]
+    rows = []
+    latest_dates: list[tuple[str, pd.Timestamp]] = []
+    for team_id, team_name in teams:
+        team_history = prior[
+            (pd.to_numeric(prior.get("home_team_id"), errors="coerce") == team_id)
+            | (pd.to_numeric(prior.get("away_team_id"), errors="coerce") == team_id)
+        ].sort_values(["match_date", "id"], ascending=False).head(5)
+        recent_count = len(team_history)
+        latest_match = (
+            pd.to_datetime(team_history.iloc[0].get("match_date"), utc=True, errors="coerce")
+            if recent_count else pd.NaT
+        )
+        if pd.notna(latest_match):
+            latest_dates.append((team_name, latest_match))
+        coverage = {
+            "Skor": recent_count,
+            "Devre skoru": 0,
+            "xG": 0,
+            "xA": 0,
+            "Korner": 0,
+            "Şut": 0,
+            "İsabetli şut": 0,
+            "Topa sahip olma": 0,
+        }
+        for match in team_history.to_dict("records"):
+            is_home = int(match.get("home_team_id", -1)) == team_id
+            if (
+                _optional_data_number(match.get("home_halftime_score")) is not None
+                and _optional_data_number(match.get("away_halftime_score")) is not None
+            ):
+                coverage["Devre skoru"] += 1
+            for label, (home_column, away_column) in metric_columns.items():
+                if label == "Devre skoru":
+                    continue
+                column = home_column if is_home else away_column
+                if _optional_data_number(match.get(column)) is not None:
+                    coverage[label] += 1
+        rows.append(
+            {
+                "Takım": team_name,
+                "Son 5 tamamlanmış maç": f"{recent_count}/5",
+                "Skor": f"{coverage['Skor']}/{recent_count}" if recent_count else "0/0",
+                "Devre": f"{coverage['Devre skoru']}/{recent_count}" if recent_count else "0/0",
+                "xG": f"{coverage['xG']}/{recent_count}" if recent_count else "0/0",
+                "xA": f"{coverage['xA']}/{recent_count}" if recent_count else "0/0",
+                "Korner": f"{coverage['Korner']}/{recent_count}" if recent_count else "0/0",
+                "Şut": f"{coverage['Şut']}/{recent_count}" if recent_count else "0/0",
+                "İsabetli şut": f"{coverage['İsabetli şut']}/{recent_count}" if recent_count else "0/0",
+                "Topa sahip olma": f"{coverage['Topa sahip olma']}/{recent_count}" if recent_count else "0/0",
+            }
+        )
+    with st.expander("Veri kapsamı ve güncelliği", expanded=False):
+        st.caption("Her ölçüm, ilgili takımın son 5 tamamlanmış maçındaki gerçek kayıt sayısını gösterir; eksik veriler doldurulmaz.")
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        model_history = int((forecast or {}).get("history_count") or 0)
+        st.caption(f"Maç sonu Poisson modeli: {model_history} geçmiş lig maçı.")
+        halves = (precomputed or {}).get("halves") or {}
+        for half, label in ((1, "İlk yarı"), (2, "İkinci yarı")):
+            half_forecast = halves.get(str(half))
+            if precomputed is None:
+                half_forecast = model_half_forecast(row, history, half=half)
+            if half_forecast:
+                sample = int(half_forecast.get("history_count") or 0)
+                st.caption(
+                    f"{label} tahmini: {sample} geçmiş devre skoru · 20 kayıt eşiği sağlandı."
+                )
+            else:
+                st.caption(
+                    f"{label} tahmini üretilemedi · modelin 20 geçmiş devre skoru eşiği karşılanmadı."
+                )
+        recent_history_dates = [match_date for _, match_date in latest_dates]
+        if recent_history_dates:
+            latest = max(recent_history_dates).tz_convert(ISTANBUL)
+            age_days = max(0, int((kickoff - latest.tz_convert("UTC")).total_seconds() // 86400))
+            st.caption(
+                f"Takımların son tamamlanmış maçlarından en günceli: "
+                f"{latest:%d.%m.%Y %H:%M} TSI · maç gününe göre {age_days} gün önce."
+            )
+        else:
+            st.caption("Bu eşleşme için maç öncesi tamamlanmış takım geçmişi bulunamadı.")
+        lineup_context = confirmed_lineup_context(row)
+        projected_context = previous_lineup_context(row)
+        confirmed_count = len((lineup_context or {}).get("teams", []))
+        projected_count = len((projected_context or {}).get("teams", []))
+        st.caption(
+            f"Kadro kapsamı: {confirmed_count}/2 bu maç için doğrulanmış · "
+            f"{projected_count}/2 önceki maçtan tahmin edilebilen takım."
+        )
+
+
+def _optional_data_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
 
 
 def render_confirmed_lineups(row: dict[str, Any]) -> None:
