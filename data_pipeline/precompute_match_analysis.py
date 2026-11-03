@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from datetime import date, datetime, timezone
@@ -150,6 +151,15 @@ def collect_match_analysis_cache(
         },
         order="match_date.asc,id.asc",
     )
+    commentary_feedback = _load_commentary_feedback_summary(db, now=reference)
+    feedback_revision = hashlib.sha256(
+        json.dumps(commentary_feedback, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    if commentary_feedback:
+        print(
+            "Recent AI commentary feedback summary: "
+            f"{commentary_feedback['sample_size']} votes; aggregate style guidance enabled."
+        )
     cached_ai: dict[int, dict[str, Any]] = {}
     fixture_ids = [str(item["id"]) for item in fixtures if item.get("id") is not None]
     lineups_by_match: dict[int, list[dict[str, Any]]] = {}
@@ -188,6 +198,7 @@ def collect_match_analysis_cache(
                 cached.get("model_version") == ANALYSIS_MODEL_VERSION
                 and isinstance(cached_analysis, dict)
                 and cached_analysis.get("ai_analysis")
+                and cached_analysis.get("commentary_feedback_revision") == feedback_revision
             ):
                 cached_ai[int(cached["match_id"])] = {
                     "analysis": cached_analysis["ai_analysis"],
@@ -205,12 +216,6 @@ def collect_match_analysis_cache(
     }
     google_api_key = get_optional_setting("GOOGLE_API_KEY")
     google_model = get_optional_setting("GOOGLE_MODEL", "gemini-3.8-flash")
-    commentary_feedback = _load_commentary_feedback_summary(db, now=reference)
-    if commentary_feedback:
-        print(
-            "Recent AI commentary feedback summary: "
-            f"{commentary_feedback['sample_size']} votes; aggregate style guidance enabled."
-        )
     ai_failures = 0
     if not google_api_key:
         print("GOOGLE_API_KEY is missing; nightly AI commentary will not be generated.")
@@ -331,6 +336,7 @@ def collect_match_analysis_cache(
                     for name, probability in ai_context["model"]["candidate_markets"].items()
                 }
                 ai_contexts.append(ai_context)
+            analysis["commentary_feedback_revision"] = feedback_revision
         cache_row = {
                 "match_id": match_id,
                 "league_id": league_id,

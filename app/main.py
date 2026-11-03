@@ -46,7 +46,7 @@ from app.components.data import (
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 # Bump this when forecast logic or the persisted analysis JSON contract changes.
-ANALYSIS_MODEL_VERSION = "form_poisson_ai_v16"
+ANALYSIS_MODEL_VERSION = "form_poisson_ai_v17"
 NON_PLAYABLE_MATCH_STATUSES = {"postponed", "cancelled", "unlisted"}
 
 COUNTRY_NAMES_TR = {
