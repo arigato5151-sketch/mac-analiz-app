@@ -254,8 +254,27 @@ def collect_match_analysis_cache(
             "fixture_lineups": lineups_by_match.get(match_id, []),
         }
         try:
+            prior_matches = db.select(
+                "matches",
+                columns=(
+                    "id,league_id,home_team_id,away_team_id,match_date,status,"
+                    "home_score,away_score"
+                ),
+                filters={
+                    "status": "eq.finished",
+                    "home_score": "not.is.null",
+                    "away_score": "not.is.null",
+                    "match_date": f"lt.{match_date.isoformat()}",
+                    "or": (
+                        f"(home_team_id.in.({home_team_id},{away_team_id}),"
+                        f"away_team_id.in.({home_team_id},{away_team_id}))"
+                    ),
+                },
+                limit=100,
+                order="match_date.desc,id.desc",
+            )
             prior_match_ids = previous_match_ids_for_fixture(
-                row, histories[league_id]
+                row, pd.DataFrame(prior_matches)
             )
             prior_lineups = []
             if prior_match_ids:
@@ -271,12 +290,18 @@ def collect_match_analysis_cache(
                 )
             prior_dates = {
                 int(item["id"]): pd.to_datetime(item["match_date"], utc=True).isoformat()
-                for item in histories[league_id].to_dict("records")
+                for item in prior_matches
                 if item.get("id") is not None and item.get("match_date") is not None
+            }
+            prior_competitions = {
+                int(item["id"]): league_names.get(int(item["league_id"]))
+                for item in prior_matches
+                if item.get("id") is not None and item.get("league_id") is not None
             }
             row["previous_fixture_lineups"] = [
                 lineup | {
-                    "previous_match_date": prior_dates.get(int(lineup["match_id"]))
+                    "previous_match_date": prior_dates.get(int(lineup["match_id"])),
+                    "previous_competition": prior_competitions.get(int(lineup["match_id"])),
                 }
                 for lineup in prior_lineups
             ]

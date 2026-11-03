@@ -82,6 +82,37 @@ def load_fixture_lineups_for_matches(
     )
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def load_previous_team_match_history(
+    team_ids: tuple[int, ...], before: str
+) -> list[dict[str, Any]]:
+    """Load a small cross-competition window for each team's latest prior match."""
+    normalized_ids = tuple(sorted({int(team_id) for team_id in team_ids}))
+    before_utc = pd.to_datetime(before, utc=True, errors="coerce")
+    if not normalized_ids or pd.isna(before_utc):
+        return []
+    db = get_db()
+    return db.select(
+        "matches",
+        columns=(
+            "id,league_id,home_team_id,away_team_id,match_date,status,"
+            "home_score,away_score"
+        ),
+        filters={
+            "status": "eq.finished",
+            "home_score": "not.is.null",
+            "away_score": "not.is.null",
+            "match_date": f"lt.{before_utc.isoformat()}",
+            "or": (
+                f"(home_team_id.in.({','.join(map(str, normalized_ids))}),"
+                f"away_team_id.in.({','.join(map(str, normalized_ids))}))"
+            ),
+        },
+        limit=100,
+        order="match_date.desc,id.desc",
+    )
+
+
 @st.cache_data(ttl=900, show_spinner="Maç istatistikleri yükleniyor…")
 def load_completed_match_history() -> list[dict[str, Any]]:
     """Read all completed history for the statistics archive."""

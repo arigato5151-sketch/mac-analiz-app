@@ -39,6 +39,7 @@ from app.components.data import (
     load_match_day,
     load_recent_team_matches,
     load_fixture_lineups_for_matches,
+    load_previous_team_match_history,
     load_reference_catalog,
     submit_ai_analysis_feedback,
 )
@@ -1669,18 +1670,30 @@ def render_analysis(
                     st.warning(f"Geçmiş maçlar yüklenemedi; model tahmini ve form analizi gösterilemiyor: {exc}")
                 st.caption("Bu maçın gece analiz önbelleği yok; geçmiş ve tahmin şimdi hazırlanıyor.")
             try:
-                prior_match_ids = previous_match_ids_for_fixture(row, history)
+                prior_matches = load_previous_team_match_history(
+                    (int(row["home_team_id"]), int(row["away_team_id"])),
+                    row["kickoff"].isoformat(),
+                )
+                prior_match_ids = previous_match_ids_for_fixture(
+                    row, pd.DataFrame(prior_matches)
+                )
                 prior_lineups = load_fixture_lineups_for_matches(
                     tuple(prior_match_ids.values())
                 )
                 prior_dates = {
                     int(item["id"]): pd.to_datetime(item["match_date"], utc=True).isoformat()
-                    for item in history.to_dict("records")
+                    for item in prior_matches
                     if item.get("id") is not None and item.get("match_date") is not None
+                }
+                prior_competitions = {
+                    int(item["id"]): league_names.get(int(item["league_id"]))
+                    for item in prior_matches
+                    if item.get("id") is not None and item.get("league_id") is not None
                 }
                 row["previous_fixture_lineups"] = [
                     lineup | {
-                        "previous_match_date": prior_dates.get(int(lineup["match_id"]))
+                        "previous_match_date": prior_dates.get(int(lineup["match_id"])),
+                        "previous_competition": prior_competitions.get(int(lineup["match_id"])),
                     }
                     for lineup in prior_lineups
                 ]
@@ -1897,7 +1910,9 @@ def render_confirmed_lineups(row: dict[str, Any]) -> None:
             )
             if pd.notna(previous_date):
                 st.caption(
-                    f"Kaynak: bir önceki maç · {previous_date.tz_convert(ISTANBUL).strftime('%d.%m.%Y')}"
+                    "Kaynak: bir önceki maç"
+                    + (f" · {lineup['previous_competition']}" if lineup.get("previous_competition") else "")
+                    + f" · {previous_date.tz_convert(ISTANBUL).strftime('%d.%m.%Y')}"
                 )
 
 

@@ -471,17 +471,13 @@ def confirmed_lineup_context(row: dict[str, Any]) -> dict[str, Any] | None:
 def previous_match_ids_for_fixture(
     row: dict[str, Any], history: pd.DataFrame
 ) -> dict[int, int]:
-    """Return each side's latest completed fixture ID before kickoff."""
+    """Return each side's latest completed fixture ID before kickoff, any league."""
     if history.empty:
         return {}
     kickoff = pd.to_datetime(
         row.get("kickoff") or row.get("match_date"), utc=True, errors="coerce"
     )
     if pd.isna(kickoff):
-        return {}
-    try:
-        league_id = int(row["league_id"])
-    except (KeyError, TypeError, ValueError):
         return {}
     result: dict[int, int] = {}
     for team_key in ("home_team_id", "away_team_id"):
@@ -490,8 +486,7 @@ def previous_match_ids_for_fixture(
         except (KeyError, TypeError, ValueError):
             continue
         sample = history[
-            (pd.to_numeric(history["league_id"], errors="coerce") == league_id)
-            & (pd.to_datetime(history["match_date"], utc=True, errors="coerce") < kickoff)
+            (pd.to_datetime(history["match_date"], utc=True, errors="coerce") < kickoff)
             & (
                 (pd.to_numeric(history["home_team_id"], errors="coerce") == team_id)
                 | (pd.to_numeric(history["away_team_id"], errors="coerce") == team_id)
@@ -579,6 +574,7 @@ def previous_lineup_context(row: dict[str, Any]) -> dict[str, Any] | None:
                 "substitutes": lineup["substitutes"][:30],
                 "previous_match_id": int(lineup["match_id"]),
                 "previous_match_date": previous_kickoff.isoformat(),
+                "previous_competition": lineup.get("previous_competition"),
             }
         )
     return {"source": "previous_match_projection", "teams": teams}
