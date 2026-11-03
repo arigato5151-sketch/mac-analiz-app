@@ -25,6 +25,7 @@ from app.market_mapping import is_compound_selection, standard_market_price, tot
 from app.ai_match_analysis import (
     MatchAnalysisAIError,
     build_match_analysis_context,
+    confirmed_lineup_context,
     generate_match_analysis,
     generate_match_risk_recommendations,
 )
@@ -1667,6 +1668,7 @@ def render_analysis(
             meta, status_col = st.columns([4, 1])
             meta.caption(row["league_name"])
             status_col.caption(str(row.get("status", "")).replace("_", " ").title())
+            render_confirmed_lineups(row)
             model_forecast, _ = render_model_forecast(
                 row, history, [], precomputed=cached_analysis, show_details=False
             )
@@ -1689,6 +1691,27 @@ def render_analysis(
             st.divider()
             render_recent_form(row, history, team_names)
             st.divider()
+
+
+def render_confirmed_lineups(row: dict[str, Any]) -> None:
+    """Show verified starters captured before kickoff, when provider data exists."""
+    context = confirmed_lineup_context(row)
+    if not context:
+        return
+    with st.expander("Kesinleşen ilk 11 ve yedekler", expanded=False):
+        for lineup in context["teams"]:
+            st.markdown(f"**{lineup['team']}** · {lineup.get('formation') or 'Diziliş bilgisi yok'}")
+            starters = lineup.get("starters") or []
+            substitutes = lineup.get("substitutes") or []
+            starter_names = [str(player.get("name") or "") for player in starters if isinstance(player, dict)]
+            substitute_names = [str(player.get("name") or "") for player in substitutes if isinstance(player, dict)]
+            st.write("İlk 11: " + (", ".join(name for name in starter_names if name) or "Veri yok"))
+            if substitute_names:
+                st.write("Yedekler: " + ", ".join(name for name in substitute_names if name))
+            confirmed_at = pd.to_datetime(lineup.get("confirmed_at"), utc=True, errors="coerce")
+            if pd.notna(confirmed_at):
+                local_time = confirmed_at.tz_convert(ISTANBUL).strftime("%d.%m.%Y %H:%M")
+                st.caption(f"API-Football · {local_time} TSI itibarıyla doğrulandı")
 
 
 def render_ai_match_analysis(

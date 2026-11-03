@@ -416,7 +416,7 @@ def _recent_team_trend(matches: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _confirmed_lineup_context(row: dict[str, Any]) -> dict[str, Any] | None:
+def confirmed_lineup_context(row: dict[str, Any]) -> dict[str, Any] | None:
     records = row.get("fixture_lineups") or []
     if isinstance(records, str):
         try:
@@ -550,7 +550,7 @@ def build_match_analysis_context(
             "home_recent_matches": home_recent,
             "away_recent_matches": away_recent,
         },
-        "confirmed_lineups": _confirmed_lineup_context(row),
+        "confirmed_lineups": confirmed_lineup_context(row),
         "available_lineup_or_injury_information": row.get("verified_team_news"),
     }
 
