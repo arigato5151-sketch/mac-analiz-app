@@ -29,7 +29,8 @@ def load_completed_match_history() -> list[dict[str, Any]]:
         columns=(
             "id,league_id,home_team_id,away_team_id,match_date,status,"
             "home_score,away_score,home_halftime_score,away_halftime_score,home_xg,away_xg,home_xa,away_xa,"
-            "home_corners,away_corners"
+            "home_corners,away_corners,home_shots,away_shots,home_shots_on_target,away_shots_on_target,"
+            "home_possession,away_possession"
         ),
         filters={
             "status": "eq.finished",
@@ -49,7 +50,10 @@ def load_recent_team_matches(
     if pd.isna(before_utc):
         return []
     before_filter = before_utc.isoformat()
-    columns = "id,home_team_id,away_team_id,match_date,home_score,away_score,home_xg,away_xg"
+    columns = (
+        "id,home_team_id,away_team_id,match_date,home_score,away_score,home_xg,away_xg,"
+        "home_shots,away_shots,home_shots_on_target,away_shots_on_target,home_possession,away_possession"
+    )
     team_matches: dict[int, dict[int, dict[str, Any]]] = {}
     for team_id in sorted({int(value) for value in team_ids}):
         rows = get_db().select(
@@ -83,6 +87,7 @@ def load_league_match_history(league_id: int) -> list[dict[str, Any]]:
             "id,league_id,home_team_id,away_team_id,match_date,status,"
             "home_score,away_score,home_halftime_score,away_halftime_score,"
             "home_xg,away_xg,home_xa,away_xa,home_corners,away_corners"
+            ",home_shots,away_shots,home_shots_on_target,away_shots_on_target,home_possession,away_possession"
         ),
         filters={
             "status": "eq.finished",

@@ -20,6 +20,11 @@ EXPECTED_GOALS_STAT_TYPES = frozenset({"expected_goals", "xg"})
 EXPECTED_ASSISTS_STAT_TYPES = frozenset(
     {"expected_assists", "expected_assist", "xa", "x_a"}
 )
+TACTICAL_STAT_TYPES = {
+    "shots": frozenset({"total_shots", "shots"}),
+    "shots_on_target": frozenset({"shots_on_goal", "shots_on_target"}),
+    "possession": frozenset({"ball_possession", "possession"}),
+}
 STALE_ACTIVE_GRACE = timedelta(hours=4)
 MAX_STALE_ACTIVE_RECONCILIATIONS = 4
 MAX_EXPECTED_METRIC_REQUESTS_PER_RUN = 2
@@ -33,7 +38,7 @@ def _statistic_key(value: object) -> str:
 def _non_negative_float(value: object) -> float | None:
     """Return a valid provider metric or ignore unavailable/non-numeric values."""
     try:
-        parsed = float(str(value).replace(",", "."))
+        parsed = float(str(value).replace("%", "").replace(",", ".").strip())
     except (TypeError, ValueError):
         return None
     return parsed if parsed >= 0 else None
@@ -266,8 +271,8 @@ def extract_expected_metrics(
     *,
     home_team_id: int,
     away_team_id: int,
-) -> dict[str, float | None]:
-    """Read provider xG/xA statistics for both teams without inventing missing xA.
+) -> dict[str, float | int | None]:
+    """Read expected and basic tactical statistics without filling missing values.
 
     API-Football availability differs by competition and plan. Missing expected-assist
     statistics are intentionally preserved as ``None`` rather than inferred from
@@ -286,16 +291,24 @@ def extract_expected_metrics(
                 else "xa" if kind in EXPECTED_ASSISTS_STAT_TYPES else None
             )
             if metric is None:
+                metric = next(
+                    (name for name, labels in TACTICAL_STAT_TYPES.items() if kind in labels),
+                    None,
+                )
+            if metric is None:
                 continue
             value = _non_negative_float(stat.get("value"))
+            if metric == "possession" and value is not None and value > 100:
+                value = None
             if value is not None:
-                values.setdefault(int(team_id), {})[metric] = value
+                values.setdefault(int(team_id), {})[metric] = (
+                    int(value) if metric in {"shots", "shots_on_target"} else value
+                )
 
     return {
-        "home_xg": values.get(home_team_id, {}).get("xg"),
-        "away_xg": values.get(away_team_id, {}).get("xg"),
-        "home_xa": values.get(home_team_id, {}).get("xa"),
-        "away_xa": values.get(away_team_id, {}).get("xa"),
+        f"{side}_{metric}": values.get(team_id, {}).get(metric)
+        for side, team_id in (("home", home_team_id), ("away", away_team_id))
+        for metric in ("xg", "xa", "shots", "shots_on_target", "possession")
     }
 
 
@@ -338,7 +351,8 @@ def sync_recent_expected_metrics(
         "matches",
         columns=(
             "id,home_team_id,away_team_id,home_xg,away_xg,home_xa,away_xa,"
-            "expected_metrics_checked_at,home_corners,away_corners"
+            "expected_metrics_checked_at,home_corners,away_corners,home_shots,away_shots,"
+            "home_shots_on_target,away_shots_on_target,home_possession,away_possession"
         ),
         filters={
             "status": "eq.finished",
@@ -351,7 +365,11 @@ def sync_recent_expected_metrics(
         checked_at = match.get("expected_metrics_checked_at")
         already_complete = all(
             match.get(column) is not None
-            for column in ("home_xg", "away_xg", "home_xa", "away_xa", "home_corners", "away_corners")
+            for column in (
+                "home_xg", "away_xg", "home_xa", "away_xa", "home_corners", "away_corners",
+                "home_shots", "away_shots", "home_shots_on_target", "away_shots_on_target",
+                "home_possession", "away_possession",
+            )
         )
         # Avoid paying an API request every run when a competition does not expose xA.
         recently_checked = checked_at is not None and datetime.fromisoformat(

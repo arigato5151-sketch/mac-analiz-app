@@ -73,6 +73,24 @@ def _recent_team_scores(
                 "corners_against": _optional_number(
                     match.get("away_corners" if is_home else "home_corners")
                 ),
+                "shots_for": _optional_number(
+                    match.get("home_shots" if is_home else "away_shots")
+                ),
+                "shots_against": _optional_number(
+                    match.get("away_shots" if is_home else "home_shots")
+                ),
+                "shots_on_target_for": _optional_number(
+                    match.get("home_shots_on_target" if is_home else "away_shots_on_target")
+                ),
+                "shots_on_target_against": _optional_number(
+                    match.get("away_shots_on_target" if is_home else "home_shots_on_target")
+                ),
+                "possession_for": _optional_number(
+                    match.get("home_possession" if is_home else "away_possession")
+                ),
+                "possession_against": _optional_number(
+                    match.get("away_possession" if is_home else "home_possession")
+                ),
             }
         )
     return recent
@@ -103,6 +121,12 @@ def _summarize_recent_team_matches(matches: list[dict[str, Any]]) -> dict[str, A
         "xa_against_per_match": "xa_against",
         "corners_for_per_match": "corners_for",
         "corners_against_per_match": "corners_against",
+        "shots_for_per_match": "shots_for",
+        "shots_against_per_match": "shots_against",
+        "shots_on_target_for_per_match": "shots_on_target_for",
+        "shots_on_target_against_per_match": "shots_on_target_against",
+        "possession_for_percent": "possession_for",
+        "possession_against_percent": "possession_against",
     }
     values: dict[str, list[float]] = {key: [] for key in metric_keys.values()}
     wins = draws = losses = points = 0
@@ -124,7 +148,9 @@ def _summarize_recent_team_matches(matches: list[dict[str, Any]]) -> dict[str, A
             values["halftime_against"].append(float(halftime["against"]))
         for key in (
             "xg_for", "xg_against", "xa_for", "xa_against",
-            "corners_for", "corners_against",
+            "corners_for", "corners_against", "shots_for", "shots_against",
+            "shots_on_target_for", "shots_on_target_against", "possession_for",
+            "possession_against",
         ):
             if match.get(key) is not None:
                 values[key].append(float(match[key]))
@@ -315,6 +341,9 @@ def _compare_team_summaries(
         ("goals_against_per_match", "recent_goals_against_per_match_gap"),
         ("xg_for_per_match", "recent_xg_for_per_match_gap"),
         ("goals_minus_xg_per_match", "recent_goals_minus_xg_gap"),
+        ("shots_for_per_match", "recent_shots_for_per_match_gap"),
+        ("shots_on_target_for_per_match", "recent_shots_on_target_for_per_match_gap"),
+        ("possession_for_percent", "recent_possession_for_gap"),
     )
     result: dict[str, Any] = {}
     for metric, label in comparisons:
@@ -547,15 +576,17 @@ def generate_match_analysis(
         "koşullu senaryo olarak belirt. Takımın son maçlarında score_for_against "
         "takımın attığı-yediği goldür; G/B/M galibiyet/beraberlik/mağlubiyet demektir. "
         "home_recent_matches ve away_recent_matches geçmişte gözlenen maçları içerir; "
-        "xG, xA ve korner değerleri yalnızca kaydı bulunan maçlar içindir, null değerleri "
+        "xG, xA, korner, şut, isabetli şut ve topa sahip olma değerleri yalnızca kaydı bulunan maçlar içindir, null değerleri "
         "tahmin etme. Özetlerdeki her *_sample_size ilgili ölçümün kaç maçtan geldiğini "
         "gösterir. Bu geçmiş xG değerlerini modelin beklenen gol tahminiyle karıştırma. "
         "Form yorumunu bu sayısal örneklere bağla; örneklem küçükse bunu belirt. "
         "Mümkün olduğunda form bölümünde son maçların G/B/M sayısını ve maç başı puanı; "
         "hücum-savunma bölümünde atılan/yenen gol ortalamasını ve mevcutsa xG farkını "
         "sayılarıyla kullan. Bir çıkarımın dayandığı ölçümün örnek sayısı azsa kesin "
-        "dille yazma. xG, xA ve korner tek başına pres, topa sahip olma veya diziliş "
-        "kanıtı değildir; bunlardan yalnızca sınırlı hücum üretimi çıkarımı yap. "
+        "dille yazma. xG, xA, korner, şut, isabetli şut ve topa sahip olma tek başına "
+        "pres veya diziliş kanıtı değildir. Şut verisi hücum hacmini, isabetli şutlar "
+        "kaleyi bulan denemeleri; possession ise yalnızca ölçülen maçlardaki topa sahip "
+        "olma payını gösterir. Bu ölçümleri ve örnek sayılarını açıkça ayır. "
         "home_venue_summary ev sahibinin son iç saha, away_venue_summary deplasmanın "
         "son dış saha maçlarını özetler. Örnek sayısını mutlaka dikkate al; üçten azsa "
         "bu saha ayrımını güçlü form kanıtı sayma. goals_minus_xg pozitifse goller xG'yi "
@@ -725,13 +756,15 @@ def generate_match_ai_package(
         "Türkçe, maç özelinde ve yalnızca verilen JSON'a dayanarak analiz yaz. Oyuncu, sakatlık, "
         "diziliş veya haber uydurma; confirmed_lineups varsa yalnızca oradaki bilgileri kullan, "
         "boşsa kadro/sakatlık yorumu yapma. Model olasılıklarını değiştirme, kesinlik "
-        "iddiası ve bahis oranı verme. Geçmiş maçlardaki xG, xA, korner ve devre skorları gözlenen "
+        "iddiası ve bahis oranı verme. Geçmiş maçlardaki xG, xA, korner, şut, isabetli şut, "
+        "topa sahip olma ve devre skorları gözlenen "
         "verilerdir; null değerleri doldurma, özetlerdeki sample_size alanlarıyla veri kapsamını "
         "kontrol et ve geçmiş xG'yi model beklenen golünden ayrı tut. "
         "Form ve üretim yorumlarında mümkünse son maç G/B/M toplamını, maç başı puanı, "
         "gol ortalamasını ve mevcut xG ortalamasını somut rakamlarla belirt. Örneklem "
-        "küçükse bunu söyle ve kesin konuşma. xG, xA veya kornerden diziliş, pres ya da "
-        "topa sahip olma iddiası çıkarma. Her taktik senaryonun bir veri dayanağını ve "
+        "küçükse bunu söyle ve kesin konuşma. Şutlar hücum hacmini, isabetli şutlar kaleyi "
+        "bulan denemeleri, possession yalnızca ölçülen maçların topa sahip olma oranını "
+        "gösterir. Bu ölçülerden diziliş veya pres çıkarma; her taktik senaryonun veri dayanağını ve "
         "hangi koşulda gerçekleşeceğini açıkla; dayanak yoksa bunu varsayım olarak etiketle. "
         "home_venue_summary ev sahibinin iç saha, away_venue_summary deplasman formudur. "
         "matches sayısını kontrol et; üçten az maç varsa bu saha ayrımı sınırlıdır. "
@@ -801,12 +834,13 @@ def generate_match_ai_packages(
         "JSON'daki verilere dayan. Oyuncu, sakatlık, diziliş, oran veya haber uydurma. "
         "confirmed_lineups alanında kayıt varsa yalnızca oradaki teknik direktör, diziliş "
         "ve oyuncu adlarını kullan; boşsa kadro/sakatlık hakkında yorum yapma. "
-        "Geçmiş xG/xA/korner ve devre skorları gözlemdir; null veriyi uydurma, ilgili "
+        "Geçmiş xG/xA/korner/şut/isabetli şut/topa sahip olma ve devre skorları gözlemdir; null veriyi uydurma, ilgili "
         "sample_size alanlarını dikkate al ve geçmiş xG'yi model beklenen golünden ayır. "
         "Her takımın formunu mümkün olduğunda son maç G/B/M toplamı ve maç başı puanıyla; "
         "hücum üretimini gol ve mevcut xG ortalamalarıyla açıkla. Bu istatistiklerin "
-        "örnek sayısı azsa güven düzeyini düşür. Yalnızca xG/xA/kornerden diziliş, pres "
-        "veya topa sahip olma iddiası üretme. Taktik senaryoları veriye bağlı koşullu "
+        "örnek sayısı azsa güven düzeyini düşür. Şutlar hücum hacmi, isabetli şutlar kaleyi "
+        "bulan denemeler, possession ölçülen maçların topa sahip olma oranıdır; bunlardan "
+        "diziliş veya pres çıkarma. Taktik senaryoları veriye bağlı koşullu "
         "çıkarım olarak yaz; veri yoksa varsayım olduğunu açıkça belirt. "
         "home_venue_summary ev sahibinin, away_venue_summary deplasmanın saha özelindeki "
         "formudur. Üçten az maç varsa örneklemin sınırlı olduğunu belirt. goals_minus_xg "

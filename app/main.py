@@ -38,7 +38,7 @@ from app.components.data import (
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 # Bump this when forecast logic or the persisted analysis JSON contract changes.
-ANALYSIS_MODEL_VERSION = "form_poisson_ai_v13"
+ANALYSIS_MODEL_VERSION = "form_poisson_ai_v14"
 NON_PLAYABLE_MATCH_STATUSES = {"postponed", "cancelled", "unlisted"}
 
 COUNTRY_NAMES_TR = {
@@ -1635,7 +1635,7 @@ def render_analysis(
                 history = pd.DataFrame(cached_analysis["history"])
                 if not history.empty:
                     history["match_date"] = pd.to_datetime(history["match_date"], utc=True, errors="coerce")
-                    for column in ("id", "league_id", "home_team_id", "away_team_id", "home_score", "away_score", "home_halftime_score", "away_halftime_score", "home_corners", "away_corners"):
+                    for column in ("id", "league_id", "home_team_id", "away_team_id", "home_score", "away_score", "home_halftime_score", "away_halftime_score", "home_corners", "away_corners", "home_shots", "away_shots", "home_shots_on_target", "away_shots_on_target", "home_possession", "away_possession"):
                         if column in history:
                             history[column] = pd.to_numeric(history[column], errors="coerce")
                 st.caption(f"Analiz gece önceden hesaplandı · {cached_record.get('calculated_at', '')}")
@@ -1655,7 +1655,7 @@ def render_analysis(
                     if not history.empty:
                         history["match_date"] = pd.to_datetime(history["match_date"], utc=True, errors="coerce")
                         history = history[history["match_date"] < row["kickoff"]].copy()
-                        for column in ("id", "league_id", "home_team_id", "away_team_id", "home_score", "away_score", "home_halftime_score", "away_halftime_score", "home_corners", "away_corners"):
+                        for column in ("id", "league_id", "home_team_id", "away_team_id", "home_score", "away_score", "home_halftime_score", "away_halftime_score", "home_corners", "away_corners", "home_shots", "away_shots", "home_shots_on_target", "away_shots_on_target", "home_possession", "away_possession"):
                             if column in history:
                                 history[column] = pd.to_numeric(history[column], errors="coerce")
                 except Exception as exc:
@@ -1985,8 +1985,8 @@ def render_archive() -> None:
     if query.strip():
         q = query.casefold().strip()
         matches = matches[matches["Ev sahibi"].fillna("").str.casefold().str.contains(q) | matches["Deplasman"].fillna("").str.casefold().str.contains(q)]
-    columns = ["Tarih", "Ülke", "Lig", "Ev sahibi", "Skor", "Deplasman", "home_xg", "away_xg", "home_xa", "away_xa", "home_corners", "away_corners"]
-    labels = {"home_xg": "Ev xG", "away_xg": "Dep xG", "home_xa": "Ev xA", "away_xa": "Dep xA", "home_corners": "Ev korner", "away_corners": "Dep korner"}
+    columns = ["Tarih", "Ülke", "Lig", "Ev sahibi", "Skor", "Deplasman", "home_xg", "away_xg", "home_xa", "away_xa", "home_corners", "away_corners", "home_shots", "away_shots", "home_shots_on_target", "away_shots_on_target", "home_possession", "away_possession"]
+    labels = {"home_xg": "Ev xG", "away_xg": "Dep xG", "home_xa": "Ev xA", "away_xa": "Dep xA", "home_corners": "Ev korner", "away_corners": "Dep korner", "home_shots": "Ev şut", "away_shots": "Dep şut", "home_shots_on_target": "Ev isabetli şut", "away_shots_on_target": "Dep isabetli şut", "home_possession": "Ev topa sahip olma %", "away_possession": "Dep topa sahip olma %"}
     matches = matches.sort_values("Tarih", ascending=False)
     page_size = 200
     page_count = max(1, math.ceil(len(matches) / page_size))

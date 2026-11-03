@@ -22,6 +22,8 @@ COMMIT;
 
 To refresh the repository migration manifest, run `python -m db.migrations --manifest`.
 
+Migration `044_match_shot_possession_history.sql` adds nullable API-Football total shots, shots on target, and possession fields to `matches`. `data_pipeline.fetch_results` fills them alongside xG/xA and corners when provider statistics are available; existing rows are populated gradually by the recent finished-match statistics sync. The AI commentary reports each measure only for matches with an observation and includes its sample size.
+
 The pinned checksums in `tests/fixtures/migration_checksums.json` protect migration source files from accidental edits in local CI. When adding a new migration, add its controller checksum to that fixture; never replace an applied migration's checksum. The production ledger comparison remains authoritative for deployed migrations: changing an applied file makes `--verify-production` report that version in `mismatched` and exit unsuccessfully.
 
 ## Nightly match analysis cache
