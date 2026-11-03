@@ -83,6 +83,8 @@ def _load_league_history(db: SupabaseRestClient, league_id: int) -> pd.DataFrame
         history["match_date"], utc=True, errors="coerce"
     )
     for column in NUMERIC_HISTORY_COLUMNS:
+        if column not in history:
+            history[column] = pd.NA
         history[column] = pd.to_numeric(history[column], errors="coerce")
     return history.dropna(subset=["match_date"])
 
