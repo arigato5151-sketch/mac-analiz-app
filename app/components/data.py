@@ -21,6 +21,49 @@ def get_db() -> PublicSupabaseRestClient:
     return PublicSupabaseRestClient(settings.supabase_url, settings.supabase_anon_key)
 
 
+def submit_ai_analysis_feedback(
+    *,
+    match_id: int,
+    model_version: str,
+    analysis_hash: str,
+    session_id: str,
+    helpful: bool,
+    issue_codes: list[str],
+) -> None:
+    """Submit a minimal anonymous rating through the public insert-only API."""
+    settings = get_public_supabase_settings()
+    headers = {
+        "apikey": settings.supabase_anon_key,
+        "Content-Type": "application/json",
+        "Prefer": "resolution=ignore-duplicates,return=minimal",
+    }
+    if settings.supabase_anon_key.count(".") == 2:
+        headers["Authorization"] = f"Bearer {settings.supabase_anon_key}"
+    try:
+        response = requests.post(
+            f"{settings.supabase_url}/rest/v1/ai_analysis_feedback",
+            params={
+                "on_conflict": "match_id,model_version,analysis_hash,session_id"
+            },
+            headers=headers,
+            json={
+                "match_id": int(match_id),
+                "model_version": model_version,
+                "analysis_hash": analysis_hash,
+                "session_id": session_id,
+                "helpful": bool(helpful),
+                "issue_codes": issue_codes,
+            },
+            timeout=settings.request_timeout_seconds,
+        )
+    except requests.RequestException as exc:
+        raise DatabaseError("AI yorum geri bildirimi gönderilemedi.") from exc
+    if not response.ok:
+        raise DatabaseError(
+            f"AI yorum geri bildirimi kaydedilemedi (HTTP {response.status_code})."
+        )
+
+
 @st.cache_data(ttl=900, show_spinner="Maç istatistikleri yükleniyor…")
 def load_completed_match_history() -> list[dict[str, Any]]:
     """Read all completed history for the statistics archive."""

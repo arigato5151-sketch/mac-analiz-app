@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -9,6 +10,7 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -34,6 +36,7 @@ from app.components.data import (
     load_match_day,
     load_recent_team_matches,
     load_reference_catalog,
+    submit_ai_analysis_feedback,
 )
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
@@ -1727,36 +1730,92 @@ def render_ai_match_analysis(
     if precomputed_analysis:
         st.caption("Yapay zekâ destekli maç yorumu gece önceden hazırlandı.")
         st.markdown(precomputed_analysis)
+        analysis_text = precomputed_analysis
+    else:
+        if st.button(
+            "🧠 Yapay zekâ analizi oluştur",
+            key=f"generate_ai_analysis_{match_id}",
+            help="Bu maç için bir Google Gemini API isteği gönderir.",
+        ):
+            api_key = get_optional_setting("GOOGLE_API_KEY")
+            if not api_key:
+                st.warning(
+                    "AI yorumu için GOOGLE_API_KEY ayarlanmalı (.env veya Streamlit secrets)."
+                )
+            else:
+                half_forecasts = precomputed_halves or {
+                    str(half): model_half_forecast(row, history, half=half)
+                    for half in (1, 2)
+                }
+                context = build_match_analysis_context(
+                    row, history, forecast, half_forecasts=half_forecasts
+                )
+                model = get_optional_setting("GOOGLE_MODEL", "gemini-3.8-flash")
+                with st.spinner("Maç verileri yorumlanıyor…"):
+                    try:
+                        st.session_state[state_key] = generate_match_analysis(
+                            context, api_key=api_key, model=model
+                        )
+                    except MatchAnalysisAIError as exc:
+                        st.error(str(exc))
+        analysis_text = st.session_state.get(state_key)
+    if analysis_text:
+        if not precomputed_analysis:
+            st.markdown(analysis_text)
+        render_ai_analysis_feedback(match_id, analysis_text)
+
+
+def render_ai_analysis_feedback(match_id: int, analysis: str) -> None:
+    """Collect a minimal anonymous usefulness rating for one exact AI comment."""
+    analysis_hash = hashlib.sha256(analysis.encode("utf-8")).hexdigest()
+    state_key = f"ai_feedback_submitted_{match_id}_{analysis_hash[:12]}"
+    if st.session_state.get(state_key):
+        st.caption("Bu yorum için geri bildirimin alındı. Teşekkürler.")
         return
-    if st.button(
-        "🧠 Yapay zekâ analizi oluştur",
-        key=f"generate_ai_analysis_{match_id}",
-        help="Bu maç için bir Google Gemini API isteği gönderir.",
-    ):
-        api_key = get_optional_setting("GOOGLE_API_KEY")
-        if not api_key:
-            st.warning(
-                "AI yorumu için GOOGLE_API_KEY ayarlanmalı (.env veya Streamlit secrets)."
-            )
-        else:
-            half_forecasts = precomputed_halves or {
-                str(half): model_half_forecast(row, history, half=half)
-                for half in (1, 2)
-            }
-            context = build_match_analysis_context(
-                row, history, forecast, half_forecasts=half_forecasts
-            )
-            model = get_optional_setting("GOOGLE_MODEL", "gemini-3.8-flash")
-            with st.spinner("Maç verileri yorumlanıyor…"):
-                try:
-                    st.session_state[state_key] = generate_match_analysis(
-                        context, api_key=api_key, model=model
-                    )
-                except MatchAnalysisAIError as exc:
-                    st.error(str(exc))
-    analysis = st.session_state.get(state_key)
-    if analysis:
-        st.markdown(analysis)
+    st.caption("Yalnızca oy ve seçtiğin sorun etiketleri kaydedilir; yorum metni ve kişisel bilgi gönderilmez.")
+    with st.form(f"ai_feedback_form_{match_id}_{analysis_hash[:12]}"):
+        rating = st.radio(
+            "Bu yorum bu maçı anlamana yardımcı oldu mu?",
+            options=["Evet", "Geliştirilmeli"],
+            index=None,
+            horizontal=True,
+        )
+        issue_labels = {
+            "generic": "Yorum fazla genel veya tekrarlı",
+            "missing_data": "Önemli veri eksik",
+            "unclear_reasoning": "Tahmin gerekçesi belirsiz",
+            "data_error": "Bir istatistik hatalı görünüyor",
+        }
+        selected_labels = st.multiselect(
+            "İstersen sorun başlığını seç",
+            options=list(issue_labels.values()),
+        )
+        submitted = st.form_submit_button("Geri bildirimi gönder")
+    if not submitted:
+        return
+    if rating is None:
+        st.warning("Göndermeden önce yorumun yararlı olup olmadığını seç.")
+        return
+    session_id = st.session_state.setdefault(
+        "ai_feedback_session_id", str(uuid4())
+    )
+    issue_codes = [
+        code for code, label in issue_labels.items() if label in selected_labels
+    ]
+    try:
+        submit_ai_analysis_feedback(
+            match_id=match_id,
+            model_version=ANALYSIS_MODEL_VERSION,
+            analysis_hash=analysis_hash,
+            session_id=session_id,
+            helpful=rating == "Evet",
+            issue_codes=issue_codes,
+        )
+    except Exception as exc:
+        st.error(f"Geri bildirim kaydedilemedi: {exc}")
+        return
+    st.session_state[state_key] = True
+    st.success("Geri bildirimin alındı. Teşekkürler.")
 
 
 def coupon_market_candidates(row: dict[str, Any], forecast: dict[str, Any]) -> list[dict[str, Any]]:
