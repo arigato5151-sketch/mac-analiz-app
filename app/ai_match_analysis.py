@@ -468,6 +468,122 @@ def confirmed_lineup_context(row: dict[str, Any]) -> dict[str, Any] | None:
     return {"source": "fixture_lineups", "teams": available} if available else None
 
 
+def previous_match_ids_for_fixture(
+    row: dict[str, Any], history: pd.DataFrame
+) -> dict[int, int]:
+    """Return each side's latest completed fixture ID before kickoff."""
+    if history.empty:
+        return {}
+    kickoff = pd.to_datetime(
+        row.get("kickoff") or row.get("match_date"), utc=True, errors="coerce"
+    )
+    if pd.isna(kickoff):
+        return {}
+    try:
+        league_id = int(row["league_id"])
+    except (KeyError, TypeError, ValueError):
+        return {}
+    result: dict[int, int] = {}
+    for team_key in ("home_team_id", "away_team_id"):
+        try:
+            team_id = int(row[team_key])
+        except (KeyError, TypeError, ValueError):
+            continue
+        sample = history[
+            (pd.to_numeric(history["league_id"], errors="coerce") == league_id)
+            & (pd.to_datetime(history["match_date"], utc=True, errors="coerce") < kickoff)
+            & (
+                (pd.to_numeric(history["home_team_id"], errors="coerce") == team_id)
+                | (pd.to_numeric(history["away_team_id"], errors="coerce") == team_id)
+            )
+        ].sort_values(["match_date", "id"], ascending=False)
+        if not sample.empty:
+            try:
+                result[team_id] = int(sample.iloc[0]["id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+    return result
+
+
+def previous_lineup_context(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Project likely starters/bench from each team's own immediately prior match."""
+    records = row.get("previous_fixture_lineups") or []
+    if isinstance(records, str):
+        try:
+            records = json.loads(records)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(records, list):
+        return None
+    kickoff = pd.to_datetime(
+        row.get("kickoff") or row.get("match_date"), utc=True, errors="coerce"
+    )
+    if pd.isna(kickoff):
+        return None
+    team_names = {
+        int(row["home_team_id"]): str(row.get("home_name") or "Ev sahibi"),
+        int(row["away_team_id"]): str(row.get("away_name") or "Deplasman"),
+    }
+    completed = confirmed_lineup_context(row)
+    confirmed_teams = {
+        str(item["team"]) for item in (completed or {}).get("teams", [])
+    }
+    selected: dict[int, tuple[pd.Timestamp, dict[str, Any]]] = {}
+    for lineup in records:
+        if not isinstance(lineup, dict):
+            continue
+        try:
+            team_id = int(lineup["team_id"])
+            previous_kickoff = pd.to_datetime(
+                lineup.get("previous_match_date"), utc=True, errors="coerce"
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (
+            team_id not in team_names
+            or team_names[team_id] in confirmed_teams
+            or pd.isna(previous_kickoff)
+            or previous_kickoff >= kickoff
+        ):
+            continue
+        starters = lineup.get("starters") or []
+        substitutes = lineup.get("substitutes") or []
+        if isinstance(starters, str):
+            try:
+                starters = json.loads(starters)
+            except json.JSONDecodeError:
+                starters = []
+        if isinstance(substitutes, str):
+            try:
+                substitutes = json.loads(substitutes)
+            except json.JSONDecodeError:
+                substitutes = []
+        if not isinstance(starters, list) or len(starters) < 11:
+            continue
+        prior = selected.get(team_id)
+        if prior is None or previous_kickoff > prior[0]:
+            selected[team_id] = (previous_kickoff, lineup | {
+                "starters": starters,
+                "substitutes": substitutes if isinstance(substitutes, list) else [],
+            })
+    if not selected:
+        return None
+    teams = []
+    for team_id, (previous_kickoff, lineup) in selected.items():
+        teams.append(
+            {
+                "team": team_names[team_id],
+                "formation": lineup.get("formation"),
+                "coach": lineup.get("coach_name"),
+                "starters": lineup["starters"][:20],
+                "substitutes": lineup["substitutes"][:30],
+                "previous_match_id": int(lineup["match_id"]),
+                "previous_match_date": previous_kickoff.isoformat(),
+            }
+        )
+    return {"source": "previous_match_projection", "teams": teams}
+
+
 def build_match_analysis_context(
     row: dict[str, Any], history: pd.DataFrame, forecast: dict[str, Any],
     half_forecasts: dict[str, Any] | None = None,
@@ -551,6 +667,7 @@ def build_match_analysis_context(
             "away_recent_matches": away_recent,
         },
         "confirmed_lineups": confirmed_lineup_context(row),
+        "likely_lineups_from_previous_match": previous_lineup_context(row),
         "available_lineup_or_injury_information": row.get("verified_team_news"),
     }
 
@@ -568,9 +685,15 @@ def generate_match_analysis(
         "Bir futbol analisti gibi Türkçe yaz. Verilen JSON, maç ve model hakkında "
         "kullanılabilecek tek bilgi kaynağıdır. Oyuncu, sakatlık, diziliş, teknik "
         "direktör, canlı haber, oran veya form bilgisi uydurma. Veri eksikse bunu "
+        "confirmed_lineups mevcut maçta API-Football'ın doğruladığı kadrodur; yalnızca "
+        "buradaki kadroya kesinleşmiş de. likely_lineups_from_previous_match ise her takımın "
+        "son maçındaki ilk 11 ve yedeklerden oluşturulmuş tahmini referanstır; bugünkü kadro "
+        "olduğunu iddia etme, sakatlık/ceza/rotasyon nedeniyle değişebileceğini belirt. Mevcut "
+        "maçta bir takımın kesin kadrosu yoksa önceki maç kadrosunu yalnız o takım için kullan. "
         "confirmed_lineups alanında kayıt varsa yalnızca oradaki teknik direktör, "
-        "diziliş ve oyuncu adlarını kesinleşmiş bilgi olarak kullan; alan boşsa kadro "
-        "ve sakatlıklar hakkında çıkarım yapma. "
+        "diziliş ve oyuncu adlarını kesinleşmiş bilgi olarak kullan; iki kadro alanı da "
+        "boşsa oyuncu kadrosu hakkında çıkarım yapma. Önceki maç bilgisi bugünkü sakatlık "
+        "ve cezaları göstermez. "
         "açıkça söyle. İstatistiksel olasılıkları kesinlik gibi sunma; verilen "
         "olasılıkları değiştirme. Taktik fikirleri veriyle desteklenen çıkarım veya "
         "koşullu senaryo olarak belirt. Takımın son maçlarında score_for_against "
@@ -754,8 +877,11 @@ def generate_match_ai_package(
     """Generate the instant-display commentary and risk picks in one AI call."""
     instructions = (
         "Türkçe, maç özelinde ve yalnızca verilen JSON'a dayanarak analiz yaz. Oyuncu, sakatlık, "
-        "diziliş veya haber uydurma; confirmed_lineups varsa yalnızca oradaki bilgileri kullan, "
-        "boşsa kadro/sakatlık yorumu yapma. Model olasılıklarını değiştirme, kesinlik "
+        "diziliş veya haber uydurma; confirmed_lineups varsa yalnızca onu kesin kadro say. "
+        "likely_lineups_from_previous_match her takımın önceki maç kadrosudur; mevcut maçın "
+        "kesin kadrosu gibi sunma ve sakatlık, ceza veya rotasyonla değişebileceğini belirt. "
+        "Kesin kadrosu bulunmayan taraf için bunu tahmini referans olarak kullan. "
+        "Model olasılıklarını değiştirme, kesinlik "
         "iddiası ve bahis oranı verme. Geçmiş maçlardaki xG, xA, korner, şut, isabetli şut, "
         "topa sahip olma ve devre skorları gözlenen "
         "verilerdir; null değerleri doldurma, özetlerdeki sample_size alanlarıyla veri kapsamını "
@@ -832,8 +958,10 @@ def generate_match_ai_packages(
     instructions = (
         "Türkçe futbol analisti olarak her maçı ayrı değerlendir ve yalnızca verilen "
         "JSON'daki verilere dayan. Oyuncu, sakatlık, diziliş, oran veya haber uydurma. "
-        "confirmed_lineups alanında kayıt varsa yalnızca oradaki teknik direktör, diziliş "
-        "ve oyuncu adlarını kullan; boşsa kadro/sakatlık hakkında yorum yapma. "
+        "confirmed_lineups mevcut maçın doğrulanmış kadrosudur. "
+        "likely_lineups_from_previous_match her takımın kendi son maçındaki kadrodur; "
+        "bugünkü kesin kadro diye anlatma, sakatlık/ceza/rotasyonla değişebileceğini söyle. "
+        "Mevcut kadro eksikse önceki maç kadrosunu yalnız o takım için tahmini referans yap. "
         "Geçmiş xG/xA/korner/şut/isabetli şut/topa sahip olma ve devre skorları gözlemdir; null veriyi uydurma, ilgili "
         "sample_size alanlarını dikkate al ve geçmiş xG'yi model beklenen golünden ayır. "
         "Her takımın formunu mümkün olduğunda son maç G/B/M toplamı ve maç başı puanıyla; "

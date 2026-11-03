@@ -64,6 +64,24 @@ def submit_ai_analysis_feedback(
         )
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def load_fixture_lineups_for_matches(
+    match_ids: tuple[int, ...],
+) -> list[dict[str, Any]]:
+    """Load saved official lineups for a small set of historical fixtures."""
+    normalized_ids = tuple(sorted({int(match_id) for match_id in match_ids}))
+    if not normalized_ids:
+        return []
+    return get_db().select_all(
+        "fixture_lineups",
+        columns=(
+            "match_id,team_id,formation,coach_name,starters,substitutes,confirmed_at"
+        ),
+        filters={"match_id": f"in.({','.join(map(str, normalized_ids))})"},
+        order="match_id.asc,team_id.asc",
+    )
+
+
 @st.cache_data(ttl=900, show_spinner="Maç istatistikleri yükleniyor…")
 def load_completed_match_history() -> list[dict[str, Any]]:
     """Read all completed history for the statistics archive."""

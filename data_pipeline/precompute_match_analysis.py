@@ -18,6 +18,7 @@ from app.ai_match_analysis import (
     MatchAnalysisAIError,
     build_match_analysis_context,
     generate_match_ai_packages,
+    previous_match_ids_for_fixture,
 )
 from config.settings import get_optional_setting, get_supabase_admin_settings
 from db.db_client import DatabaseError, SupabaseRestClient
@@ -212,6 +213,36 @@ def collect_match_analysis_cache(
             "league_label": league_names.get(league_id, ""),
             "fixture_lineups": lineups_by_match.get(match_id, []),
         }
+        try:
+            prior_match_ids = previous_match_ids_for_fixture(
+                row, histories[league_id]
+            )
+            prior_lineups = []
+            if prior_match_ids:
+                prior_lineups = db.select_all(
+                    "fixture_lineups",
+                    columns=(
+                        "match_id,team_id,formation,coach_name,starters,substitutes,confirmed_at"
+                    ),
+                    filters={
+                        "match_id": f"in.({','.join(map(str, sorted(set(prior_match_ids.values()))))})"
+                    },
+                    order="match_id.asc,team_id.asc",
+                )
+            prior_dates = {
+                int(item["id"]): pd.to_datetime(item["match_date"], utc=True).isoformat()
+                for item in histories[league_id].to_dict("records")
+                if item.get("id") is not None and item.get("match_date") is not None
+            }
+            row["previous_fixture_lineups"] = [
+                lineup | {
+                    "previous_match_date": prior_dates.get(int(lineup["match_id"]))
+                }
+                for lineup in prior_lineups
+            ]
+        except DatabaseError as exc:
+            print(f"Previous lineup lookup skipped for match_id={match_id}: {type(exc).__name__}")
+            row["previous_fixture_lineups"] = []
         analysis = build_precomputed_match_analysis(
             row, histories[league_id], tuning_by_league[league_id]
         )

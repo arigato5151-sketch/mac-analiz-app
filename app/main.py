@@ -28,6 +28,8 @@ from app.ai_match_analysis import (
     confirmed_lineup_context,
     generate_match_analysis,
     generate_match_risk_recommendations,
+    previous_lineup_context,
+    previous_match_ids_for_fixture,
 )
 from config.settings import get_optional_setting
 from app.components.data import (
@@ -36,13 +38,14 @@ from app.components.data import (
     load_league_match_history,
     load_match_day,
     load_recent_team_matches,
+    load_fixture_lineups_for_matches,
     load_reference_catalog,
     submit_ai_analysis_feedback,
 )
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 # Bump this when forecast logic or the persisted analysis JSON contract changes.
-ANALYSIS_MODEL_VERSION = "form_poisson_ai_v14"
+ANALYSIS_MODEL_VERSION = "form_poisson_ai_v15"
 NON_PLAYABLE_MATCH_STATUSES = {"postponed", "cancelled", "unlisted"}
 
 COUNTRY_NAMES_TR = {
@@ -1665,6 +1668,25 @@ def render_analysis(
                 except Exception as exc:
                     st.warning(f"Geçmiş maçlar yüklenemedi; model tahmini ve form analizi gösterilemiyor: {exc}")
                 st.caption("Bu maçın gece analiz önbelleği yok; geçmiş ve tahmin şimdi hazırlanıyor.")
+            try:
+                prior_match_ids = previous_match_ids_for_fixture(row, history)
+                prior_lineups = load_fixture_lineups_for_matches(
+                    tuple(prior_match_ids.values())
+                )
+                prior_dates = {
+                    int(item["id"]): pd.to_datetime(item["match_date"], utc=True).isoformat()
+                    for item in history.to_dict("records")
+                    if item.get("id") is not None and item.get("match_date") is not None
+                }
+                row["previous_fixture_lineups"] = [
+                    lineup | {
+                        "previous_match_date": prior_dates.get(int(lineup["match_id"]))
+                    }
+                    for lineup in prior_lineups
+                ]
+            except Exception as exc:
+                row["previous_fixture_lineups"] = []
+                st.caption(f"Önceki maç kadro verisi alınamadı: {exc}")
             meta, status_col = st.columns([4, 1])
             meta.caption(row["league_name"])
             status_col.caption(str(row.get("status", "")).replace("_", " ").title())
@@ -1694,12 +1716,32 @@ def render_analysis(
 
 
 def render_confirmed_lineups(row: dict[str, Any]) -> None:
-    """Show verified starters captured before kickoff, when provider data exists."""
-    context = confirmed_lineup_context(row)
-    if not context:
+    """Show official lineups or clearly labeled previous-match projections."""
+    confirmed = confirmed_lineup_context(row)
+    projected = previous_lineup_context(row)
+    teams = [
+        (lineup, "confirmed")
+        for lineup in (confirmed or {}).get("teams", [])
+    ] + [
+        (lineup, "previous")
+        for lineup in (projected or {}).get("teams", [])
+    ]
+    if not teams:
         return
-    with st.expander("Kesinleşen ilk 11 ve yedekler", expanded=False):
-        for lineup in context["teams"]:
+    source_label = (
+        "Kesinleşen kadrolar ve önceki maçtan tahmin"
+        if confirmed and projected
+        else "Kesinleşen kadrolar"
+        if confirmed
+        else "Önceki maçtan tahmini kadro"
+    )
+    with st.expander(source_label, expanded=False):
+        if projected:
+            st.caption(
+                "Önceki maçtan alınan liste bugünkü kesin kadro değildir; sakatlık, ceza "
+                "ve rotasyon nedeniyle değişebilir."
+            )
+        for lineup, source in teams:
             st.markdown(f"**{lineup['team']}** · {lineup.get('formation') or 'Diziliş bilgisi yok'}")
             starters = lineup.get("starters") or []
             substitutes = lineup.get("substitutes") or []
@@ -1709,9 +1751,16 @@ def render_confirmed_lineups(row: dict[str, Any]) -> None:
             if substitute_names:
                 st.write("Yedekler: " + ", ".join(name for name in substitute_names if name))
             confirmed_at = pd.to_datetime(lineup.get("confirmed_at"), utc=True, errors="coerce")
-            if pd.notna(confirmed_at):
+            if source == "confirmed" and pd.notna(confirmed_at):
                 local_time = confirmed_at.tz_convert(ISTANBUL).strftime("%d.%m.%Y %H:%M")
                 st.caption(f"API-Football · {local_time} TSI itibarıyla doğrulandı")
+            previous_date = pd.to_datetime(
+                lineup.get("previous_match_date"), utc=True, errors="coerce"
+            )
+            if pd.notna(previous_date):
+                st.caption(
+                    f"Kaynak: bir önceki maç · {previous_date.tz_convert(ISTANBUL).strftime('%d.%m.%Y')}"
+                )
 
 
 def render_ai_match_analysis(
