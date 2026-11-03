@@ -46,7 +46,7 @@ from app.components.data import (
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 # Bump this when forecast logic or the persisted analysis JSON contract changes.
-ANALYSIS_MODEL_VERSION = "form_poisson_ai_v18"
+ANALYSIS_MODEL_VERSION = "form_poisson_ai_v19"
 NON_PLAYABLE_MATCH_STATUSES = {"postponed", "cancelled", "unlisted"}
 
 COUNTRY_NAMES_TR = {
@@ -1870,6 +1870,11 @@ def render_confirmed_lineups(row: dict[str, Any]) -> None:
     """Show official lineups or clearly labeled previous-match projections."""
     confirmed = confirmed_lineup_context(row)
     projected = previous_lineup_context(row)
+    previous_reference = previous_lineup_context(row, include_confirmed=True)
+    previous_by_team = {
+        lineup["team"]: lineup
+        for lineup in (previous_reference or {}).get("teams", [])
+    }
     teams = [
         (lineup, "confirmed")
         for lineup in (confirmed or {}).get("teams", [])
@@ -1905,6 +1910,41 @@ def render_confirmed_lineups(row: dict[str, Any]) -> None:
             if source == "confirmed" and pd.notna(confirmed_at):
                 local_time = confirmed_at.tz_convert(ISTANBUL).strftime("%d.%m.%Y %H:%M")
                 st.caption(f"API-Football · {local_time} TSI itibarıyla doğrulandı")
+            if source == "confirmed" and lineup["team"] in previous_by_team:
+                previous_starters = previous_by_team[lineup["team"]].get("starters") or []
+
+                def player_identity(player: dict[str, Any]) -> str:
+                    player_id = player.get("id")
+                    return f"id:{player_id}" if player_id is not None else str(
+                        player.get("name") or ""
+                    ).strip().casefold()
+
+                previous_by_identity = {
+                    player_identity(player): str(player.get("name") or "")
+                    for player in previous_starters
+                    if isinstance(player, dict) and player_identity(player)
+                }
+                current_by_identity = {
+                    player_identity(player): str(player.get("name") or "")
+                    for player in starters
+                    if isinstance(player, dict) and player_identity(player)
+                }
+                no_longer_starting = [
+                    name
+                    for identity, name in previous_by_identity.items()
+                    if identity not in current_by_identity
+                ]
+                newly_starting = [
+                    name
+                    for identity, name in current_by_identity.items()
+                    if identity not in previous_by_identity
+                ]
+                if no_longer_starting or newly_starting:
+                    st.caption("İlk 11 değişikliği, bir önceki maça göre:")
+                    if no_longer_starting:
+                        st.write("Önceki ilk 11'den bu kez başlamayan: " + ", ".join(no_longer_starting))
+                    if newly_starting:
+                        st.write("Bu maçta başlayan, önceki ilk 11'de olmayan: " + ", ".join(newly_starting))
             previous_date = pd.to_datetime(
                 lineup.get("previous_match_date"), utc=True, errors="coerce"
             )

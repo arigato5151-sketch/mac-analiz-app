@@ -139,6 +139,7 @@ def _commentary_lineup_revision(row: dict[str, Any]) -> str:
     sources = (
         confirmed_lineup_context(row),
         previous_lineup_context(row),
+        previous_lineup_context(row, include_confirmed=True),
     )
     normalized = []
     for source in sources:

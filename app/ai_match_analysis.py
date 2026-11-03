@@ -500,7 +500,9 @@ def previous_match_ids_for_fixture(
     return result
 
 
-def previous_lineup_context(row: dict[str, Any]) -> dict[str, Any] | None:
+def previous_lineup_context(
+    row: dict[str, Any], *, include_confirmed: bool = False
+) -> dict[str, Any] | None:
     """Project likely starters/bench from each team's own immediately prior match."""
     records = row.get("previous_fixture_lineups") or []
     if isinstance(records, str):
@@ -536,7 +538,7 @@ def previous_lineup_context(row: dict[str, Any]) -> dict[str, Any] | None:
             continue
         if (
             team_id not in team_names
-            or team_names[team_id] in confirmed_teams
+            or (not include_confirmed and team_names[team_id] in confirmed_teams)
             or pd.isna(previous_kickoff)
             or previous_kickoff >= kickoff
         ):
@@ -665,6 +667,9 @@ def build_match_analysis_context(
         },
         "confirmed_lineups": confirmed_lineup_context(row),
         "likely_lineups_from_previous_match": previous_lineup_context(row),
+        "previous_match_lineup_reference": previous_lineup_context(
+            row, include_confirmed=True
+        ),
         "commentary_quality_feedback": commentary_quality_feedback,
         "available_lineup_or_injury_information": row.get("verified_team_news"),
     }
@@ -688,6 +693,9 @@ def generate_match_analysis(
         "son maçındaki ilk 11 ve yedeklerden oluşturulmuş tahmini referanstır; bugünkü kadro "
         "olduğunu iddia etme, sakatlık/ceza/rotasyon nedeniyle değişebileceğini belirt. Mevcut "
         "maçta bir takımın kesin kadrosu yoksa önceki maç kadrosunu yalnız o takım için kullan. "
+        "previous_match_lineup_reference her takımın son maçındaki kadrodur; mevcut kesin "
+        "kadroyla aynı anda varsa ilk 11 değişikliklerini sayısal isim eşleşmesi olarak belirt, "
+        "oyuncunun yokluğuna sakatlık veya ceza nedeni uydurma. "
         "confirmed_lineups alanında kayıt varsa yalnızca oradaki teknik direktör, "
         "diziliş ve oyuncu adlarını kesinleşmiş bilgi olarak kullan; iki kadro alanı da "
         "boşsa oyuncu kadrosu hakkında çıkarım yapma. Önceki maç bilgisi bugünkü sakatlık "
@@ -883,6 +891,8 @@ def generate_match_ai_package(
         "likely_lineups_from_previous_match her takımın önceki maç kadrosudur; mevcut maçın "
         "kesin kadrosu gibi sunma ve sakatlık, ceza veya rotasyonla değişebileceğini belirt. "
         "Kesin kadrosu bulunmayan taraf için bunu tahmini referans olarak kullan. "
+        "previous_match_lineup_reference ve mevcut doğrulanmış ilk 11 birlikte varsa değişen "
+        "isimleri yalnızca kadro farkı olarak belirt; sakatlık veya ceza çıkarımı yapma. "
         "commentary_quality_feedback varsa en az beş kullanıcının son 30 günlük toplu "
         "geri bildirimidir. Yalnızca yorumun açıklığını/genellik düzeyini geliştirmek için "
         "kullan; maç olgusu veya tahmin dayanağı sayma. Az sayıdaki etiketleri genelleme. "
@@ -967,6 +977,8 @@ def generate_match_ai_packages(
         "likely_lineups_from_previous_match her takımın kendi son maçındaki kadrodur; "
         "bugünkü kesin kadro diye anlatma, sakatlık/ceza/rotasyonla değişebileceğini söyle. "
         "Mevcut kadro eksikse önceki maç kadrosunu yalnız o takım için tahmini referans yap. "
+        "previous_match_lineup_reference ile confirmed_lineups birlikte varsa ilk 11 "
+        "değişikliklerini kadro farkı olarak özetle; değişikliklerin sebebini uydurma. "
         "commentary_quality_feedback varsa bu en az beş kullanıcının son 30 günlük toplu "
         "geri bildirimidir. Yalnızca anlatım biçimini iyileştir; maç verisini veya tahmini "
         "değiştiren bir girdi değildir. Tekil etiketleri genelleme. "
