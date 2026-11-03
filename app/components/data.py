@@ -167,6 +167,34 @@ def load_match_day(
             # Keep the app usable while the cache migration is rolling out.
             analyses = []
             break
+    lineups_by_match: dict[int, list[dict[str, Any]]] = {}
+    for offset in range(0, len(match_ids), 100):
+        chunk = match_ids[offset : offset + 100]
+        if not chunk:
+            continue
+        try:
+            lineup_rows = db.select_all(
+                "fixture_lineups",
+                columns=(
+                    "match_id,team_id,formation,coach_name,starters,substitutes,confirmed_at"
+                ),
+                filters={"match_id": f"in.({','.join(map(str, chunk))})"},
+                order="match_id.asc,team_id.asc",
+            )
+        except DatabaseError:
+            # Keep fixture cards available if the optional lineup table is absent.
+            lineups_by_match = {}
+            break
+        for lineup in lineup_rows:
+            try:
+                lineups_by_match.setdefault(int(lineup["match_id"]), []).append(lineup)
+            except (KeyError, TypeError, ValueError):
+                continue
+    for match in matches:
+        try:
+            match["fixture_lineups"] = lineups_by_match.get(int(match["id"]), [])
+        except (KeyError, TypeError, ValueError):
+            match["fixture_lineups"] = []
     return matches, quotes, analyses
 
 

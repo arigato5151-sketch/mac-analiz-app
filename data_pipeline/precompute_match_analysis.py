@@ -20,7 +20,7 @@ from app.ai_match_analysis import (
     generate_match_ai_packages,
 )
 from config.settings import get_optional_setting, get_supabase_admin_settings
-from db.db_client import SupabaseRestClient
+from db.db_client import DatabaseError, SupabaseRestClient
 
 MATCH_COLUMNS = (
     "id,league_id,home_team_id,away_team_id,match_date,status"
@@ -108,6 +108,29 @@ def collect_match_analysis_cache(
     )
     cached_ai: dict[int, dict[str, Any]] = {}
     fixture_ids = [str(item["id"]) for item in fixtures if item.get("id") is not None]
+    lineups_by_match: dict[int, list[dict[str, Any]]] = {}
+    for offset in range(0, len(fixture_ids), 100):
+        chunk = fixture_ids[offset : offset + 100]
+        if not chunk:
+            continue
+        try:
+            lineup_rows = db.select_all(
+                "fixture_lineups",
+                columns=(
+                    "match_id,team_id,formation,coach_name,starters,substitutes,confirmed_at"
+                ),
+                filters={"match_id": f"in.({','.join(chunk)})"},
+                order="match_id.asc,team_id.asc",
+            )
+        except DatabaseError as exc:
+            print(f"Confirmed lineup lookup skipped: {type(exc).__name__}")
+            lineups_by_match = {}
+            break
+        for lineup in lineup_rows:
+            try:
+                lineups_by_match.setdefault(int(lineup["match_id"]), []).append(lineup)
+            except (KeyError, TypeError, ValueError):
+                continue
     for offset in range(0, len(fixture_ids), 100):
         cached_rows = db.select_all(
             "match_analysis_cache",
@@ -179,6 +202,7 @@ def collect_match_analysis_cache(
             "away_name": team_names.get(away_team_id, f"Deplasman {away_team_id}"),
             "league_name": league_names.get(league_id, ""),
             "league_label": league_names.get(league_id, ""),
+            "fixture_lineups": lineups_by_match.get(match_id, []),
         }
         analysis = build_precomputed_match_analysis(
             row, histories[league_id], tuning_by_league[league_id]

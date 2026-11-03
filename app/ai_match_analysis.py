@@ -345,6 +345,58 @@ def _recent_team_trend(matches: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _confirmed_lineup_context(row: dict[str, Any]) -> dict[str, Any] | None:
+    records = row.get("fixture_lineups") or []
+    if isinstance(records, str):
+        try:
+            records = json.loads(records)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(records, list):
+        return None
+    kickoff = pd.to_datetime(row.get("kickoff") or row.get("match_date"), utc=True, errors="coerce")
+    if pd.isna(kickoff):
+        return None
+    team_names = {
+        int(row["home_team_id"]): str(row.get("home_name") or "Ev sahibi"),
+        int(row["away_team_id"]): str(row.get("away_name") or "Deplasman"),
+    }
+    available = []
+    for lineup in records:
+        if not isinstance(lineup, dict):
+            continue
+        try:
+            team_id = int(lineup["team_id"])
+            confirmed_at = pd.to_datetime(lineup.get("confirmed_at"), utc=True, errors="coerce")
+        except (KeyError, TypeError, ValueError):
+            continue
+        if team_id not in team_names or pd.isna(confirmed_at) or confirmed_at >= kickoff:
+            continue
+        starters = lineup.get("starters") or []
+        substitutes = lineup.get("substitutes") or []
+        if isinstance(starters, str):
+            try:
+                starters = json.loads(starters)
+            except json.JSONDecodeError:
+                starters = []
+        if isinstance(substitutes, str):
+            try:
+                substitutes = json.loads(substitutes)
+            except json.JSONDecodeError:
+                substitutes = []
+        available.append(
+            {
+                "team": team_names[team_id],
+                "formation": lineup.get("formation"),
+                "coach": lineup.get("coach_name"),
+                "starters": starters[:20] if isinstance(starters, list) else [],
+                "substitutes": substitutes[:20] if isinstance(substitutes, list) else [],
+                "confirmed_at": confirmed_at.isoformat(),
+            }
+        )
+    return {"source": "fixture_lineups", "teams": available} if available else None
+
+
 def build_match_analysis_context(
     row: dict[str, Any], history: pd.DataFrame, forecast: dict[str, Any]
 ) -> dict[str, Any]:
@@ -423,6 +475,7 @@ def build_match_analysis_context(
             "home_recent_matches": home_recent,
             "away_recent_matches": away_recent,
         },
+        "confirmed_lineups": _confirmed_lineup_context(row),
         "available_lineup_or_injury_information": row.get("verified_team_news"),
     }
 
@@ -440,6 +493,9 @@ def generate_match_analysis(
         "Bir futbol analisti gibi Türkçe yaz. Verilen JSON, maç ve model hakkında "
         "kullanılabilecek tek bilgi kaynağıdır. Oyuncu, sakatlık, diziliş, teknik "
         "direktör, canlı haber, oran veya form bilgisi uydurma. Veri eksikse bunu "
+        "confirmed_lineups alanında kayıt varsa yalnızca oradaki teknik direktör, "
+        "diziliş ve oyuncu adlarını kesinleşmiş bilgi olarak kullan; alan boşsa kadro "
+        "ve sakatlıklar hakkında çıkarım yapma. "
         "açıkça söyle. İstatistiksel olasılıkları kesinlik gibi sunma; verilen "
         "olasılıkları değiştirme. Taktik fikirleri veriyle desteklenen çıkarım veya "
         "koşullu senaryo olarak belirt. Takımın son maçlarında score_for_against "
@@ -615,7 +671,8 @@ def generate_match_ai_package(
     """Generate the instant-display commentary and risk picks in one AI call."""
     instructions = (
         "Türkçe, maç özelinde ve yalnızca verilen JSON'a dayanarak analiz yaz. Oyuncu, sakatlık, "
-        "diziliş veya haber uydurma; veride yoksa belirt. Model olasılıklarını değiştirme, kesinlik "
+        "diziliş veya haber uydurma; confirmed_lineups varsa yalnızca oradaki bilgileri kullan, "
+        "boşsa kadro/sakatlık yorumu yapma. Model olasılıklarını değiştirme, kesinlik "
         "iddiası ve bahis oranı verme. Geçmiş maçlardaki xG, xA, korner ve devre skorları gözlenen "
         "verilerdir; null değerleri doldurma, özetlerdeki sample_size alanlarıyla veri kapsamını "
         "kontrol et ve geçmiş xG'yi model beklenen golünden ayrı tut. "
@@ -686,6 +743,8 @@ def generate_match_ai_packages(
     instructions = (
         "Türkçe futbol analisti olarak her maçı ayrı değerlendir ve yalnızca verilen "
         "JSON'daki verilere dayan. Oyuncu, sakatlık, diziliş, oran veya haber uydurma. "
+        "confirmed_lineups alanında kayıt varsa yalnızca oradaki teknik direktör, diziliş "
+        "ve oyuncu adlarını kullan; boşsa kadro/sakatlık hakkında yorum yapma. "
         "Geçmiş xG/xA/korner ve devre skorları gözlemdir; null veriyi uydurma, ilgili "
         "sample_size alanlarını dikkate al ve geçmiş xG'yi model beklenen golünden ayır. "
         "Her takımın formunu mümkün olduğunda son maç G/B/M toplamı ve maç başı puanıyla; "
