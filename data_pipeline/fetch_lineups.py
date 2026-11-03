@@ -425,7 +425,10 @@ def sync_previous_match_lineups(
                     "fixtures", {"date": local_day, "timezone": "Europe/Istanbul"}
                 )
             except Exception as exc:
-                print(f"Previous fixture lookup skipped for date={local_day}: {type(exc).__name__}")
+                print(
+                    "Previous fixture lookup skipped for "
+                    f"date={local_day}: {type(exc).__name__}: {str(exc)[:300]}"
+                )
                 fixtures_by_day[local_day] = []
         competition_days[key] = [
             fixture
