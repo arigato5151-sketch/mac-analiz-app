@@ -216,7 +216,10 @@ def collect_match_analysis_cache(
                 analysis["ai_risk_selections"] = ai_package["risk_selections"]
             else:
                 ai_context = build_match_analysis_context(
-                    row, histories[league_id], analysis["forecast"]
+                    row,
+                    histories[league_id],
+                    analysis["forecast"],
+                    half_forecasts=analysis.get("halves"),
                 )
                 ai_context["match_id"] = match_id
                 ai_context["model"]["candidate_markets"] = {

@@ -264,6 +264,48 @@ def _score_distribution_summary(forecast: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _period_forecast_context(
+    forecasts: dict[str, Any] | None,
+    home: str,
+    away: str,
+) -> dict[str, Any]:
+    periods: dict[str, Any] = {}
+    for key, label in (("1", "first_half"), ("2", "second_half")):
+        forecast = (forecasts or {}).get(key)
+        if not isinstance(forecast, dict):
+            periods[label] = None
+            continue
+        matrix = forecast.get("score_matrix") or []
+        scores = sorted(
+            (
+                (float(probability), home_goals, away_goals)
+                for home_goals, score_row in enumerate(matrix)
+                for away_goals, probability in enumerate(score_row)
+            ),
+            reverse=True,
+        )
+        periods[label] = {
+            "expected_goals": {
+                home: float(forecast["expected_home"]),
+                away: float(forecast["expected_away"]),
+            },
+            "probabilities": {
+                "home_win": float(forecast["home_win"]),
+                "draw": float(forecast["draw"]),
+                "away_win": float(forecast["away_win"]),
+                "both_teams_to_score": float(forecast["btts"]),
+            },
+            "history_matches": int(forecast.get("history_count", 0)),
+            "home_recent_sample": int(forecast.get("home_sample", 0)),
+            "away_recent_sample": int(forecast.get("away_sample", 0)),
+            "most_likely_score": (
+                f"{scores[0][1]}-{scores[0][2]}" if scores else None
+            ),
+            "most_likely_score_probability": scores[0][0] if scores else None,
+        }
+    return periods
+
+
 def _compare_team_summaries(
     home: dict[str, Any], away: dict[str, Any]
 ) -> dict[str, Any]:
@@ -398,7 +440,8 @@ def _confirmed_lineup_context(row: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def build_match_analysis_context(
-    row: dict[str, Any], history: pd.DataFrame, forecast: dict[str, Any]
+    row: dict[str, Any], history: pd.DataFrame, forecast: dict[str, Any],
+    half_forecasts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     home = str(row.get("home_name") or "Ev sahibi")
     away = str(row.get("away_name") or "Deplasman")
@@ -449,6 +492,9 @@ def build_match_analysis_context(
                 "both_teams_to_score": float(forecast["btts"]),
             },
             "score_distribution": _score_distribution_summary(forecast),
+            "period_forecasts": _period_forecast_context(
+                half_forecasts, home, away
+            ),
             "candidate_markets": _model_markets(forecast, home, away),
             "league_history_matches": int(forecast.get("history_count", 0)),
             "historical_model_evaluation": _historical_model_evaluation(forecast),
@@ -519,6 +565,12 @@ def generate_match_analysis(
         "top_three_exact_score_mass ilk üç skorun toplamıdır. En olası tam skorun tek başına "
         "yüksek olasılıklı olduğunu varsayma. Geniş 1X2 ve gol marketleriyle tek skor "
         "olasılığını ayır; maç senaryolarını bu dağılım ve olasılık farkına göre kur. "
+        "period_forecasts varsa first_half ve second_half ayrı dönem Poisson tahminleridir. "
+        "Beklenen goller ve skor bu dönemde atılması beklenen gollerdir; second_half tam "
+        "maç skoru veya devre arasından sonra kalan skor değildir. most_likely_score tekil "
+        "dönem skorudur, kesin sonuç gibi sunma. history_matches ile home_recent_sample ve "
+        "away_recent_sample değerlerini veri kapsamı olarak dikkate al. Bir dönem null ise "
+        "o dönem için tahmin yoktur; geçmiş devre skorlarıyla karıştırma veya doldurma. "
         "Dakika veya erken gol gibi zamanlama iddiası üretme; model zamanlama tahmini yapmıyor. "
         "recent_form_comparisons ve venue_form_comparisons içindeki home_minus_away farkı "
         "ev sahibi eksi deplasmandır; null farkı hesaplama. En belirgin iki farklılaşan "
@@ -685,6 +737,10 @@ def generate_match_ai_package(
         "matches sayısını kontrol et; üçten az maç varsa bu saha ayrımı sınırlıdır. "
         "goals_minus_xg gözlenen gol ile xG farkıdır, sürdürülebilir beceri kanıtı değildir; "
         "az örnekle kesin yorumlama. "
+        "period_forecasts varsa first_half ve second_half ayrı dönem tahminleridir; "
+        "second_half yalnızca ikinci devredeki golleri gösterir, tam maç skoru veya kalan "
+        "skor değildir. history_matches ve takım örnek sayılarını dikkate al; null dönem "
+        "tahmin yok demektir ve geçmiş devre skorlarıyla karıştırılmaz. "
         "score_distribution içindeki tam skor yüzdeleri tek tek skorların olasılığıdır; "
         "ilk sıradaki skor kesin veya yüksek olasılıklı demek değildir. Üç skorun toplam "
         "payını ve geniş maç sonucu/gol olasılıklarını ayır; senaryoları bunlara göre kur. "
@@ -757,7 +813,10 @@ def generate_match_ai_packages(
         "farkını yakın dönem gözlemi olarak yorumla; az örnekle kalıcı hücum becerisi çıkarma. "
         "score_distribution içindeki tam skor değerleri tekil skor olasılıklarıdır; "
         "en olası skoru kesin sonuç gibi anlatma. İlk üç skorun toplam payıyla 1X2 ve gol "
-        "olasılıklarını birbirine karıştırma. Model zamanlama üretmediği için dakika/erken gol "
+        "olasılıklarını birbirine karıştırma. period_forecasts varsa first_half ve "
+        "second_half ayrı dönem tahminleridir; second_half yalnızca ikinci devre gollerini "
+        "gösterir. history_matches ve takım örnek sayılarını dikkate al; null ise tahmin yoktur "
+        "ve geçmiş devre skorlarıyla karıştırılmaz. Model zamanlama üretmediği için dakika/erken gol "
         "iddiasında bulunma. recent_form_comparisons ve venue_form_comparisons içindeki "
         "farklar ev sahibi eksi deplasmandır; null değerleri yorumlama. O maçta en belirgin "
         "iki sayısal farkı takım adları ve örnek sayılarıyla vurgula. Her maç için aynı genel "

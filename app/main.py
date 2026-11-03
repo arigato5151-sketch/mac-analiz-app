@@ -38,7 +38,7 @@ from app.components.data import (
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 # Bump this when forecast logic or the persisted analysis JSON contract changes.
-ANALYSIS_MODEL_VERSION = "form_poisson_ai_v12"
+ANALYSIS_MODEL_VERSION = "form_poisson_ai_v13"
 NON_PLAYABLE_MATCH_STATUSES = {"postponed", "cancelled", "unlisted"}
 
 COUNTRY_NAMES_TR = {
@@ -1681,6 +1681,7 @@ def render_analysis(
                     model_forecast,
                     match_id,
                     precomputed_analysis=(cached_analysis or {}).get("ai_analysis"),
+                    precomputed_halves=(cached_analysis or {}).get("halves"),
                 )
             st.divider()
             render_recent_form(row, history, team_names)
@@ -1693,6 +1694,7 @@ def render_ai_match_analysis(
     forecast: dict[str, Any],
     match_id: int,
     precomputed_analysis: str | None = None,
+    precomputed_halves: dict[str, Any] | None = None,
 ) -> None:
     """Generate an optional, session-cached AI interpretation for one match."""
     home_probability = round(float(forecast["home_win"]), 3)
@@ -1737,7 +1739,13 @@ def render_ai_match_analysis(
                 "AI yorumu için GOOGLE_API_KEY ayarlanmalı (.env veya Streamlit secrets)."
             )
         else:
-            context = build_match_analysis_context(row, history, forecast)
+            half_forecasts = precomputed_halves or {
+                str(half): model_half_forecast(row, history, half=half)
+                for half in (1, 2)
+            }
+            context = build_match_analysis_context(
+                row, history, forecast, half_forecasts=half_forecasts
+            )
             model = get_optional_setting("GOOGLE_MODEL", "gemini-3.8-flash")
             with st.spinner("Maç verileri yorumlanıyor…"):
                 try:
