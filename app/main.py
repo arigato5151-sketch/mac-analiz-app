@@ -28,6 +28,7 @@ from app.ai_match_analysis import (
     confirmed_lineup_context,
     generate_match_analysis,
     generate_match_risk_recommendations,
+    iddaa_odds_revision,
     previous_lineup_context,
     previous_match_ids_for_fixture,
 )
@@ -46,7 +47,7 @@ from app.components.data import (
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 # Bump this when forecast logic or the persisted analysis JSON contract changes.
-ANALYSIS_MODEL_VERSION = "form_poisson_ai_v19"
+ANALYSIS_MODEL_VERSION = "form_poisson_ai_v20"
 NON_PLAYABLE_MATCH_STATUSES = {"postponed", "cancelled", "unlisted"}
 
 COUNTRY_NAMES_TR = {
@@ -1625,6 +1626,7 @@ def render_analysis(
         return
     for row in filtered.sort_values("kickoff", na_position="last").to_dict("records"):
         match_id = int(row["id"])
+        row["iddaa_odds_quote"] = latest.get(match_id)
         kickoff = row["kickoff"]
         time_text = kickoff.strftime("%H:%M") if pd.notna(kickoff) else "Saat bilgisi yok"
         match_expander = st.expander(
@@ -1638,6 +1640,15 @@ def render_analysis(
         with match_expander:
             cached_record = analyses_by_id.get(match_id)
             cached_analysis = _cached_analysis_for_match(cached_record, row)
+            odds_revision = iddaa_odds_revision(row.get("iddaa_odds_quote"))
+            commentary_has_current_odds = (
+                cached_analysis is not None
+                and cached_analysis.get("commentary_odds_revision") == odds_revision
+            )
+            if cached_analysis is not None and not commentary_has_current_odds:
+                st.caption(
+                    "Oranlar gece yorumundan sonra değişmiş; aşağıdaki AI yorumu güncel oranları içermiyor."
+                )
             history = pd.DataFrame()
             if cached_analysis is not None:
                 history = pd.DataFrame(cached_analysis["history"])
@@ -1715,7 +1726,11 @@ def render_analysis(
                 row,
                 history,
                 model_forecast,
-                precomputed_risks=(cached_analysis or {}).get("ai_risk_selections"),
+                precomputed_risks=(
+                    (cached_analysis or {}).get("ai_risk_selections")
+                    if commentary_has_current_odds
+                    else None
+                ),
             )
             if model_forecast is not None:
                 render_ai_match_analysis(
@@ -1723,7 +1738,11 @@ def render_analysis(
                     history,
                     model_forecast,
                     match_id,
-                    precomputed_analysis=(cached_analysis or {}).get("ai_analysis"),
+                    precomputed_analysis=(
+                        (cached_analysis or {}).get("ai_analysis")
+                        if commentary_has_current_odds
+                        else None
+                    ),
                     precomputed_halves=(cached_analysis or {}).get("halves"),
                 )
             st.divider()
@@ -2013,7 +2032,8 @@ def render_ai_match_analysis(
                     for half in (1, 2)
                 }
                 context = build_match_analysis_context(
-                    row, history, forecast, half_forecasts=half_forecasts
+                    row, history, forecast, half_forecasts=half_forecasts,
+                    odds_quote=row.get("iddaa_odds_quote"),
                 )
                 model = get_optional_setting("GOOGLE_MODEL", "gemini-3.8-flash")
                 with st.spinner("Maç verileri yorumlanıyor…"):

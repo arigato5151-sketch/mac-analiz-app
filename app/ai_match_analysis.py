@@ -2,17 +2,31 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import time
+import unicodedata
 from typing import Any
 
 import pandas as pd
 import requests
+from data_pipeline.fetch_iddaa_odds import event_matches_fixture_order
 
 
 class MatchAnalysisAIError(RuntimeError):
     """A safe, user-facing error for AI commentary generation."""
+
+
+def iddaa_odds_revision(quote: dict[str, Any] | None) -> str:
+    """Hash the latest quote so cached commentary can be checked for freshness."""
+    payload = {
+        "captured_at": (quote or {}).get("captured_at"),
+        "source_updated_at": (quote or {}).get("source_updated_at"),
+        "odds": (quote or {}).get("odds"),
+    }
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _recent_team_scores(
@@ -175,6 +189,153 @@ def _summarize_recent_team_matches(matches: list[dict[str, Any]]) -> dict[str, A
     return summary
 
 
+def _days_since_latest_match(
+    matches: list[dict[str, Any]], kickoff: pd.Timestamp
+) -> int | None:
+    """Return the age of the newest included match relative to kickoff."""
+    if not matches or pd.isna(kickoff):
+        return None
+    latest = pd.to_datetime(matches[0].get("date"), utc=True, errors="coerce")
+    if pd.isna(latest):
+        return None
+    return max(0, int((kickoff - latest).total_seconds() // 86400))
+
+
+def _iddaa_odds_context(
+    quote: dict[str, Any] | None,
+    kickoff: pd.Timestamp | None = None,
+    fixture_home: str | None = None,
+    fixture_away: str | None = None,
+) -> dict[str, Any] | None:
+    """Keep only valid IdDaa outcome markets that can be compared to the model."""
+    if not isinstance(quote, dict):
+        return None
+    payload = quote.get("odds")
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except ValueError:
+            return None
+    if not isinstance(payload, dict) or payload.get("source") != "iddaa.com":
+        return None
+    if (
+        fixture_home
+        and fixture_away
+        and payload.get("home_team")
+        and payload.get("away_team")
+        and not event_matches_fixture_order(
+            str(payload["home_team"]),
+            str(payload["away_team"]),
+            fixture_home,
+            fixture_away,
+        )
+    ):
+        return None
+
+    def normalize(value: Any) -> str:
+        decomposed = unicodedata.normalize("NFKD", str(value or "").casefold())
+        return "".join(char for char in decomposed if not unicodedata.combining(char)).replace("ı", "i")
+
+    markets = []
+    ignored_market_count = 0
+    for market in payload.get("markets", []):
+        if not isinstance(market, dict):
+            continue
+        name = str(market.get("market_name") or "")
+        normalized_name = normalize(name)
+        market_id = str(market.get("market_id") or "")
+        sport_type = str(market.get("sport_type") or "")
+        raw_selections = market.get("selections", [])
+        selection_names = {
+            normalize(item.get("name") or item.get("id"))
+            for item in raw_selections
+            if isinstance(item, dict)
+        }
+        if any(term in normalized_name for term in ("korner", "corner", "kart", "card", "yari", "half")):
+            ignored_market_count += 1
+            continue
+        if (
+            "karsilikli gol" in normalized_name
+            and selection_names in ({"var", "yok"}, {"evet", "hayir"}, {"yes", "no"})
+        ):
+            kind = "both_teams_to_score"
+        elif (sport_type == "2" and market_id in {"603", "604"}) or (
+            sport_type == "4" and market_id in {"203", "207"}
+        ):
+            kind = "team_goals"
+        elif (
+            selection_names in ({"alt", "ust"}, {"under", "over"})
+            and (
+                any(term in normalized_name for term in ("alt/ust", "alt ust", "over/under", "toplam gol"))
+                or market_id == "101"
+            )
+        ):
+            kind = "total_goals"
+        elif (
+            selection_names in ({"1", "0", "2"}, {"1", "x", "2"})
+            and market.get("line") in (None, "", 0, "0")
+        ):
+            kind = "result"
+        else:
+            ignored_market_count += 1
+            continue
+
+        selections = []
+        for selection in market.get("selections", []):
+            if not isinstance(selection, dict):
+                continue
+            try:
+                odd_value = selection.get("odds")
+                if odd_value is None:
+                    odd_value = selection.get("display_odds")
+                odd = float(odd_value)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(odd) or odd <= 1:
+                continue
+            selections.append({
+                "name": str(selection.get("name") or selection.get("id") or "Seçim"),
+                "odds": odd,
+                "raw_implied_probability": 1 / odd,
+            })
+        if len(selections) < 2:
+            continue
+        implied_total = sum(item["raw_implied_probability"] for item in selections)
+        for item in selections:
+            item["no_vig_market_probability"] = item["raw_implied_probability"] / implied_total
+        markets.append({
+            "kind": kind,
+            "name": name or f"Market {market_id}",
+            "market_id": market_id,
+            "sport_type": sport_type,
+            "line": market.get("line"),
+            "overround": implied_total - 1,
+            "selections": selections,
+        })
+
+    captured = pd.to_datetime(quote.get("captured_at"), utc=True, errors="coerce")
+    hours_before_kickoff = None
+    quote_age_hours = None
+    if not pd.isna(captured):
+        quote_age_hours = round(
+            max(0.0, (pd.Timestamp.now(tz="UTC") - captured).total_seconds() / 3600), 2
+        )
+    if kickoff is not None and not pd.isna(kickoff) and not pd.isna(captured):
+        hours_before_kickoff = round((kickoff - captured).total_seconds() / 3600, 2)
+    return {
+        "source": "IdDaa",
+        "event_id": payload.get("event_id"),
+        "event_home_team": payload.get("home_team"),
+        "event_away_team": payload.get("away_team"),
+        "captured_at": quote.get("captured_at"),
+        "source_updated_at": quote.get("source_updated_at"),
+        "quote_age_hours": quote_age_hours,
+        "hours_before_kickoff": hours_before_kickoff,
+        "markets": markets,
+        "ignored_unmodeled_market_count": ignored_market_count,
+    }
+
+
 def _model_markets(forecast: dict[str, Any], home: str, away: str) -> dict[str, float]:
     matrix = forecast.get("score_matrix") or []
 
@@ -278,6 +439,16 @@ def _score_distribution_summary(forecast: dict[str, Any]) -> dict[str, Any]:
         "away_win": float(forecast["away_win"]),
     }
     ranked_results = sorted(result_probs.items(), key=lambda item: item[1], reverse=True)
+    # Normalized entropy describes how evenly the model spreads its 1X2 mass.
+    # It is a property of this forecast, not a calibrated confidence score.
+    probability_total = sum(max(0.0, value) for value in result_probs.values())
+    normalized_entropy = None
+    if probability_total > 0:
+        normalized_entropy = -sum(
+            (value / probability_total) * math.log(value / probability_total)
+            for value in result_probs.values()
+            if value > 0
+        ) / math.log(3)
     return {
         "top_exact_scores": [
             {"score": f"{home_goals}-{away_goals}", "probability": probability}
@@ -287,6 +458,7 @@ def _score_distribution_summary(forecast: dict[str, Any]) -> dict[str, Any]:
         "most_likely_result": ranked_results[0][0],
         "most_likely_result_probability": ranked_results[0][1],
         "result_probability_gap": ranked_results[0][1] - ranked_results[1][1],
+        "normalized_1x2_entropy": normalized_entropy,
     }
 
 
@@ -586,6 +758,7 @@ def build_match_analysis_context(
     row: dict[str, Any], history: pd.DataFrame, forecast: dict[str, Any],
     half_forecasts: dict[str, Any] | None = None,
     commentary_quality_feedback: dict[str, Any] | None = None,
+    odds_quote: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     home = str(row.get("home_name") or "Ev sahibi")
     away = str(row.get("away_name") or "Deplasman")
@@ -621,6 +794,7 @@ def build_match_analysis_context(
             "kickoff": kickoff.isoformat() if not pd.isna(kickoff) else None,
             "venue": str(row.get("venue") or "Bilinmiyor"),
         },
+        "iddaa_odds": _iddaa_odds_context(odds_quote, kickoff, home, away),
         "model": {
             "method": "Independent Poisson model based on league and recent team scores",
             "most_likely_score": str(forecast["most_likely_score"]),
@@ -664,6 +838,10 @@ def build_match_analysis_context(
             },
             "home_recent_matches": home_recent,
             "away_recent_matches": away_recent,
+            "recent_data_recency_days": {
+                "home": _days_since_latest_match(home_recent, kickoff),
+                "away": _days_since_latest_match(away_recent, kickoff),
+            },
         },
         "confirmed_lineups": confirmed_lineup_context(row),
         "likely_lineups_from_previous_match": previous_lineup_context(row),
@@ -687,7 +865,17 @@ def generate_match_analysis(
     instructions = (
         "Bir futbol analisti gibi Türkçe yaz. Verilen JSON, maç ve model hakkında "
         "kullanılabilecek tek bilgi kaynağıdır. Oyuncu, sakatlık, diziliş, teknik "
-        "direktör, canlı haber, oran veya form bilgisi uydurma. Veri eksikse bunu "
+        "direktör, canlı haber, oran veya form bilgisi uydurma. iddaa_odds doluysa "
+        "yalnızca oradaki IdDaa oranlarını kullan; her oran kaydının captured_at zamanını "
+        "quote_age_hours ve hours_before_kickoff değerlerini dikkate al; eski fiyatı "
+        "güncelmiş gibi sunma. Verilmeyen market/oranı ekleme. "
+        "no_vig_market_probability, aynı marketteki oranlardan marj çıkarılarak "
+        "normalize edilmiş piyasa olasılığıdır; raw_implied_probability ise marjı içerir. "
+        "Yalnızca aynı seçim yönü ve aynı gol çizgisi eşleşiyorsa piyasa olasılığı ile "
+        "candidate_markets model olasılığını "
+        "karşılaştır, farkı açıkça model-piyasa ayrışması olarak adlandır ve tek başına "
+        "değerli bahis/fırsat ya da kazanç garantisi çıkarma. iddaa_odds null veya markets "
+        "boşsa oran olmadığını belirt ve oran yorumu yapma. Veri eksikse bunu "
         "confirmed_lineups mevcut maçta API-Football'ın doğruladığı kadrodur; yalnızca "
         "buradaki kadroya kesinleşmiş de. likely_lineups_from_previous_match ise her takımın "
         "son maçındaki ilk 11 ve yedeklerden oluşturulmuş tahmini referanstır; bugünkü kadro "
@@ -713,6 +901,9 @@ def generate_match_analysis(
         "tahmin etme. Özetlerdeki her *_sample_size ilgili ölçümün kaç maçtan geldiğini "
         "gösterir. Bu geçmiş xG değerlerini modelin beklenen gol tahminiyle karıştırma. "
         "Form yorumunu bu sayısal örneklere bağla; örneklem küçükse bunu belirt. "
+        "recent_data_recency_days, son dahil edilen maçın bu maçın başlama tarihinden "
+        "kaç gün önce olduğunu gösterir. Değer büyükse yakın dönem formu güncelmiş gibi "
+        "sunma; verinin eski kaldığını açıkça belirt. Null ise gün farkı hesaplanamamıştır. "
         "Mümkün olduğunda form bölümünde son maçların G/B/M sayısını ve maç başı puanı; "
         "hücum-savunma bölümünde atılan/yenen gol ortalamasını ve mevcutsa xG farkını "
         "sayılarıyla kullan. Bir çıkarımın dayandığı ölçümün örnek sayısı azsa kesin "
@@ -725,6 +916,11 @@ def generate_match_analysis(
         "bu saha ayrımını güçlü form kanıtı sayma. goals_minus_xg pozitifse goller xG'yi "
         "aşmış, negatifse altında kalmıştır; küçük örneklemde bunu sürdürülebilir kalite "
         "diye sunma. "
+        "score_distribution içindeki normalized_1x2_entropy, 1X2 olasılıklarının ne kadar "
+        "dengeli dağıldığını 0-1 aralığında özetler; kalibre edilmiş güven puanı değildir. "
+        "result_probability_gap en yüksek ve ikinci yüksek sonuç olasılığı farkıdır. "
+        "Bu iki ölçümü, favorinin ne kadar belirgin olduğunu temkinli anlatmak için kullan; "
+        "tek başına güven veya başarı olasılığı gibi sunma. "
         "score_distribution içindeki top_exact_scores tekil tam skor olasılıklarıdır; "
         "top_three_exact_score_mass ilk üç skorun toplamıdır. En olası tam skorun tek başına "
         "yüksek olasılıklı olduğunu varsayma. Geniş 1X2 ve gol marketleriyle tek skor "
@@ -748,7 +944,10 @@ def generate_match_analysis(
         "yapılmış model kontrolüdür. Yalnızca held_out_matches en az 30 ise kısaca "
         "değin ve sonucu ön değerlendirme olarak nitele; örnek sayısını belirt, düşük "
         "log-loss/Brier değerinin daha iyi olduğunu unutma ve bu ölçümleri maç olasılığı "
-        "gibi sunma. Örnek azsa performans hükmü verme. "
+        "gibi sunma. Bir market metriğini ancak kendi sample_size değeri en az 30 ise "
+        "an; calibration_error daha düşükse tahmin olasılıkları geçmiş sıklıklarla daha "
+        "uyumlu görünür, ancak bunu gelecekteki doğruluk garantisi sayma. Örnek azsa "
+        "performans hükmü verme. "
         "Markdown kullan ve şu başlıklarla özgün, maç özelinde bir yorum üret: "
         "Maçın profili; İki takımın form sinyalleri; Olası oyun planları ve eşleşmeler; "
         "Maçın kırılma noktaları; Farklı oyun senaryoları; Model olasılıklarına göre "
@@ -896,8 +1095,8 @@ def generate_match_ai_package(
         "commentary_quality_feedback varsa en az beş kullanıcının son 30 günlük toplu "
         "geri bildirimidir. Yalnızca yorumun açıklığını/genellik düzeyini geliştirmek için "
         "kullan; maç olgusu veya tahmin dayanağı sayma. Az sayıdaki etiketleri genelleme. "
-        "Model olasılıklarını değiştirme, kesinlik "
-        "iddiası ve bahis oranı verme. Geçmiş maçlardaki xG, xA, korner, şut, isabetli şut, "
+        "Model olasılıklarını değiştirme, kesinlik veya kazanç garantisi iddiası kurma. "
+        "Geçmiş maçlardaki xG, xA, korner, şut, isabetli şut, "
         "topa sahip olma ve devre skorları gözlenen "
         "verilerdir; null değerleri doldurma, özetlerdeki sample_size alanlarıyla veri kapsamını "
         "kontrol et ve geçmiş xG'yi model beklenen golünden ayrı tut. "
@@ -973,6 +1172,14 @@ def generate_match_ai_packages(
     instructions = (
         "Türkçe futbol analisti olarak her maçı ayrı değerlendir ve yalnızca verilen "
         "JSON'daki verilere dayan. Oyuncu, sakatlık, diziliş, oran veya haber uydurma. "
+        "iddaa_odds doluysa yalnızca verilen IdDaa market/oranlarını kullan ve captured_at, "
+        "quote_age_hours ile hours_before_kickoff değerlerini hesaba kat; eski fiyatı "
+        "güncelmiş gibi anlatma. no_vig_market_probability marjdan "
+        "arındırılmış piyasa olasılığıdır; raw_implied_probability marjı içerir. Uygun "
+        "marketlerde yalnızca aynı seçim yönü ve aynı çizgi için bunu candidate_markets "
+        "model olasılığıyla karşılaştırıp farkı "
+        "model-piyasa ayrışması olarak yorumla; bunu kazanç fırsatı veya garanti sayma. "
+        "Oran verisi yoksa oran yorumu yapma. "
         "confirmed_lineups mevcut maçın doğrulanmış kadrosudur. "
         "likely_lineups_from_previous_match her takımın kendi son maçındaki kadrodur; "
         "bugünkü kesin kadro diye anlatma, sakatlık/ceza/rotasyonla değişebileceğini söyle. "

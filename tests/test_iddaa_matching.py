@@ -1,5 +1,6 @@
 from data_pipeline.fetch_iddaa_odds import (
     TEAM_ALIASES,
+    event_matches_fixture_order,
     normalize_team,
     team_names_match,
 )
@@ -24,4 +25,9 @@ def test_sporting_names_do_not_cross_match_distinct_clubs() -> None:
 def test_exact_and_common_suffix_names_match() -> None:
     assert team_names_match("Bayern München", "Bayern Munich") is True
     assert team_names_match("Queens Park Rangers", "QPR") is True
+
+
+def test_odds_event_must_match_fixture_home_away_order() -> None:
+    assert event_matches_fixture_order("Arsenal", "Chelsea", "Arsenal", "Chelsea")
+    assert not event_matches_fixture_order("Chelsea", "Arsenal", "Arsenal", "Chelsea")
 

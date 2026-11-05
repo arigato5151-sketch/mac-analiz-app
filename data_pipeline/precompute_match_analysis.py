@@ -20,6 +20,7 @@ from app.ai_match_analysis import (
     build_match_analysis_context,
     confirmed_lineup_context,
     generate_match_ai_packages,
+    iddaa_odds_revision,
     previous_match_ids_for_fixture,
     previous_lineup_context,
 )
@@ -189,6 +190,25 @@ def collect_match_analysis_cache(
         )
     cached_ai: dict[int, dict[str, Any]] = {}
     fixture_ids = [str(item["id"]) for item in fixtures if item.get("id") is not None]
+    latest_odds: dict[int, dict[str, Any]] = {}
+    for offset in range(0, len(fixture_ids), 100):
+        chunk = fixture_ids[offset : offset + 100]
+        if not chunk:
+            continue
+        quote_rows = db.select_all(
+            "odds_quote_history",
+            columns="id,match_id,bookmaker,odds,captured_at,source_updated_at",
+            filters={
+                "bookmaker": "eq.iddaa.com",
+                "match_id": f"in.({','.join(chunk)})",
+            },
+            order="captured_at.asc,id.asc",
+        )
+        for quote in quote_rows:
+            try:
+                latest_odds[int(quote["match_id"])] = quote
+            except (KeyError, TypeError, ValueError):
+                continue
     lineups_by_match: dict[int, list[dict[str, Any]]] = {}
     for offset in range(0, len(fixture_ids), 100):
         chunk = fixture_ids[offset : offset + 100]
@@ -231,6 +251,7 @@ def collect_match_analysis_cache(
                     "analysis": cached_analysis["ai_analysis"],
                     "risk_selections": cached_analysis.get("ai_risk_selections") or {},
                     "lineup_revision": cached_analysis.get("commentary_lineup_revision"),
+                    "odds_revision": cached_analysis.get("commentary_odds_revision"),
                 }
     team_names = {
         int(item["id"]): str(item["name"])
@@ -285,6 +306,7 @@ def collect_match_analysis_cache(
             "league_name": league_names.get(league_id, ""),
             "league_label": league_names.get(league_id, ""),
             "fixture_lineups": lineups_by_match.get(match_id, []),
+            "iddaa_odds_quote": latest_odds.get(match_id),
         }
         try:
             prior_matches = db.select(
@@ -347,9 +369,11 @@ def collect_match_analysis_cache(
         if google_api_key and analysis.get("forecast"):
             analysis_by_match[match_id] = analysis
             lineup_revision = _commentary_lineup_revision(row)
+            odds_revision = iddaa_odds_revision(latest_odds.get(match_id))
             if (
                 match_id in cached_ai
                 and cached_ai[match_id].get("lineup_revision") == lineup_revision
+                and cached_ai[match_id].get("odds_revision") == odds_revision
             ):
                 ai_package = cached_ai[match_id]
                 analysis["ai_analysis"] = ai_package["analysis"]
@@ -361,6 +385,7 @@ def collect_match_analysis_cache(
                     analysis["forecast"],
                     half_forecasts=analysis.get("halves"),
                     commentary_quality_feedback=commentary_feedback,
+                    odds_quote=latest_odds.get(match_id),
                 )
                 ai_context["match_id"] = match_id
                 ai_context["model"]["candidate_markets"] = {
@@ -370,6 +395,9 @@ def collect_match_analysis_cache(
                 ai_contexts.append(ai_context)
             analysis["commentary_feedback_revision"] = feedback_revision
             analysis["commentary_lineup_revision"] = lineup_revision
+            analysis["commentary_odds_revision"] = iddaa_odds_revision(
+                latest_odds.get(match_id)
+            )
         cache_row = {
                 "match_id": match_id,
                 "league_id": league_id,

@@ -290,6 +290,15 @@ def team_names_match(left: str, right: str) -> bool:
     return score >= 0.92
 
 
+def event_matches_fixture_order(
+    event_home: str, event_away: str, fixture_home: str, fixture_away: str
+) -> bool:
+    """Require the provider's home/away orientation to match before storing odds."""
+    return team_names_match(event_home, fixture_home) and team_names_match(
+        event_away, fixture_away
+    )
+
+
 def _request_json(session: requests.Session, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     response = session.get(f"{BASE_URL}/{path}", params=params, timeout=30)
     response.raise_for_status()
@@ -564,11 +573,8 @@ def import_daily_odds(
         candidates = [
             row for row in day_fixtures
             if int(row["id"]) not in matched_ids
-            and (
-                team_names_match(home, str(row["_home_name"]))
-                and team_names_match(away, str(row["_away_name"]))
-                or team_names_match(home, str(row["_away_name"]))
-                and team_names_match(away, str(row["_home_name"]))
+            and event_matches_fixture_order(
+                home, away, str(row["_home_name"]), str(row["_away_name"])
             )
         ]
         if len(candidates) > 1:
