@@ -11,7 +11,6 @@ from typing import Any
 
 import pandas as pd
 import requests
-from data_pipeline.fetch_iddaa_odds import event_matches_fixture_order
 
 
 class MatchAnalysisAIError(RuntimeError):
@@ -204,8 +203,6 @@ def _days_since_latest_match(
 def _iddaa_odds_context(
     quote: dict[str, Any] | None,
     kickoff: pd.Timestamp | None = None,
-    fixture_home: str | None = None,
-    fixture_away: str | None = None,
 ) -> dict[str, Any] | None:
     """Keep only valid IdDaa outcome markets that can be compared to the model."""
     if not isinstance(quote, dict):
@@ -218,20 +215,6 @@ def _iddaa_odds_context(
             return None
     if not isinstance(payload, dict) or payload.get("source") != "iddaa.com":
         return None
-    if (
-        fixture_home
-        and fixture_away
-        and payload.get("home_team")
-        and payload.get("away_team")
-        and not event_matches_fixture_order(
-            str(payload["home_team"]),
-            str(payload["away_team"]),
-            fixture_home,
-            fixture_away,
-        )
-    ):
-        return None
-
     def normalize(value: Any) -> str:
         decomposed = unicodedata.normalize("NFKD", str(value or "").casefold())
         return "".join(char for char in decomposed if not unicodedata.combining(char)).replace("ı", "i")
@@ -794,7 +777,7 @@ def build_match_analysis_context(
             "kickoff": kickoff.isoformat() if not pd.isna(kickoff) else None,
             "venue": str(row.get("venue") or "Bilinmiyor"),
         },
-        "iddaa_odds": _iddaa_odds_context(odds_quote, kickoff, home, away),
+        "iddaa_odds": _iddaa_odds_context(odds_quote, kickoff),
         "model": {
             "method": "Independent Poisson model based on league and recent team scores",
             "most_likely_score": str(forecast["most_likely_score"]),

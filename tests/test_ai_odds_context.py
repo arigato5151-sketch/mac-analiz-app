@@ -33,7 +33,7 @@ def test_iddaa_odds_context_preserves_prices_and_removes_market_margin() -> None
                 ],
             },
         }
-    context = _iddaa_odds_context(quote, fixture_home="Arsenal", fixture_away="Chelsea")
+    context = _iddaa_odds_context(quote)
 
     assert context is not None
     assert context["event_home_team"] == "Arsenal"
@@ -48,20 +48,6 @@ def test_iddaa_odds_context_preserves_prices_and_removes_market_margin() -> None
 
 def test_odds_context_rejects_non_iddaa_quotes() -> None:
     assert _iddaa_odds_context({"odds": {"source": "other", "markets": []}}) is None
-
-
-def test_odds_context_rejects_old_quote_with_reversed_teams() -> None:
-    quote = {
-        "odds": {
-            "source": "iddaa.com",
-            "home_team": "Chelsea",
-            "away_team": "Arsenal",
-            "markets": [],
-        }
-    }
-    assert _iddaa_odds_context(
-        quote, fixture_home="Arsenal", fixture_away="Chelsea"
-    ) is None
 
 
 def test_iddaa_generic_match_result_over_under_label_is_total_goals() -> None:
