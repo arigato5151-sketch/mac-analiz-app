@@ -680,8 +680,6 @@ def generate_match_analysis(
     instructions_override: str | None = None, json_mode: bool = False,
     max_output_tokens: int = 1800,
     response_schema: dict[str, Any] | None = None,
-    google_search_grounding: bool = False,
-    grounding_sources: list[dict[str, str]] | None = None,
 ) -> str:
     """Generate a Turkish analysis using only supplied match and model data."""
     if not api_key:
@@ -782,8 +780,6 @@ def generate_match_analysis(
             **({"responseSchema": response_schema} if response_schema else {}),
         },
     }
-    if google_search_grounding:
-        request_body["tools"] = [{"google_search": {}}]
     try:
         for attempt in range(3):
             response = requests.post(
@@ -806,8 +802,6 @@ def generate_match_analysis(
                 context, api_key=api_key, model="gemini-3.5-flash-lite",
                 instructions_override=instructions_override, json_mode=json_mode,
                 max_output_tokens=max_output_tokens, response_schema=response_schema,
-                google_search_grounding=google_search_grounding,
-                grounding_sources=grounding_sources,
             )
         raise MatchAnalysisAIError("Google Gemini API bağlantısı kurulamadı.") from exc
     if not response.ok:
@@ -829,16 +823,12 @@ def generate_match_analysis(
                 context, api_key=api_key, model="gemini-3.8-flash",
                 instructions_override=instructions_override, json_mode=json_mode,
                 max_output_tokens=max_output_tokens, response_schema=response_schema,
-                google_search_grounding=google_search_grounding,
-                grounding_sources=grounding_sources,
             )
         if response.status_code in {429, 503} and model != "gemini-3.5-flash-lite":
             return generate_match_analysis(
                 context, api_key=api_key, model="gemini-3.5-flash-lite",
                 instructions_override=instructions_override, json_mode=json_mode,
                 max_output_tokens=max_output_tokens, response_schema=response_schema,
-                google_search_grounding=google_search_grounding,
-                grounding_sources=grounding_sources,
             )
         diagnostic = ": ".join(part for part in (status, detail) if part)
         if len(diagnostic) > 400:
@@ -851,16 +841,6 @@ def generate_match_analysis(
         payload = response.json()
         candidates = payload.get("candidates") or []
         parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
-        if grounding_sources is not None and candidates:
-            metadata = candidates[0].get("groundingMetadata") or {}
-            for chunk in metadata.get("groundingChunks") or []:
-                web = chunk.get("web") or {}
-                url = str(web.get("uri") or "").strip()
-                title = str(web.get("title") or "Web source").strip()
-                if url.startswith(("https://", "http://")) and not any(
-                    item.get("url") == url for item in grounding_sources
-                ):
-                    grounding_sources.append({"title": title[:200], "url": url})
         output = "\n".join(
             str(part.get("text", "")).strip() for part in parts if part.get("text")
         ).strip()
@@ -985,32 +965,14 @@ def generate_match_ai_package(
 
 
 def generate_match_ai_packages(
-    contexts: list[dict[str, Any]],
-    *,
-    api_key: str,
-    model: str = "gemini-3.8-flash",
-    google_search_grounding: bool = False,
+    contexts: list[dict[str, Any]], *, api_key: str, model: str = "gemini-3.8-flash"
 ) -> dict[int, dict[str, Any]]:
     """Generate compact, match-specific packages in one quota-efficient request."""
     if not contexts:
         return {}
-    if google_search_grounding and len(contexts) > 1:
-        grounded_packages: dict[int, dict[str, Any]] = {}
-        for context in contexts:
-            grounded_packages.update(
-                generate_match_ai_packages(
-                    [context],
-                    api_key=api_key,
-                    model=model,
-                    google_search_grounding=True,
-                )
-            )
-        return grounded_packages
     instructions = (
-        "Türkçe futbol analisti olarak her maçı ayrı değerlendir. Model tahminleri için "
-        "verilen JSON'daki verilere dayan; kayıtlı istatistikleri JSON'dan aktar. "
-        "Google Arama açıksa yalnızca JSON'da eksik kalan geçmiş maç/güncel bağlamı "
-        "arama kaynaklarıyla tamamla. Oyuncu, sakatlık, diziliş, oran veya haber uydurma. "
+        "Türkçe futbol analisti olarak her maçı ayrı değerlendir ve yalnızca verilen "
+        "JSON'daki verilere dayan. Oyuncu, sakatlık, diziliş, oran veya haber uydurma. "
         "confirmed_lineups mevcut maçın doğrulanmış kadrosudur. "
         "likely_lineups_from_previous_match her takımın kendi son maçındaki kadrodur; "
         "bugünkü kesin kadro diye anlatma, sakatlık/ceza/rotasyonla değişebileceğini söyle. "
@@ -1060,16 +1022,6 @@ def generate_match_ai_packages(
         "\"risk_selections\":{\"low\":[{\"market\":\"...\",\"reason\":\"...\"}],"
         "\"medium\":[...]}}]}"
     )
-    if google_search_grounding:
-        instructions += (
-            " Google Arama'yı yalnızca bu maçın yaklaşan fikstürünü bağlamlamak için kullan: "
-            "takımların son oynadığı maçların skorlarını, bulunursa maç istatistiklerini ve "
-            "yakın tarihli kadro/haber bilgisini ara. Yalnızca aramada doğrulanabilen bilgileri "
-            "yorumda kullan; kaynakta bulunmayan xG, şut, topa sahip olma, sakatlık veya kadro "
-            "bilgisini yazma. Bulamadığın alanı eksik bırak. Google'dan gelen bağlam mevcut "
-            "model olasılıklarını değiştiremez; tahmin gerekçesinden ayrı, kaynaklı gözlem olarak "
-            "kullan. Analizin sonuna web kaynaklarını başlık ve URL ile ekle."
-        )
     selection_schema = {
         "type": "ARRAY",
         "items": {
@@ -1106,35 +1058,11 @@ def generate_match_ai_packages(
         },
         "required": ["matches"],
     }
-    grounding_sources: list[dict[str, str]] = []
-    try:
-        raw = generate_match_analysis(
-            {"matches": contexts}, api_key=api_key, model=model,
-            instructions_override=instructions, json_mode=True, max_output_tokens=12000,
-            response_schema=response_schema,
-            google_search_grounding=google_search_grounding,
-            grounding_sources=grounding_sources,
-        )
-    except MatchAnalysisAIError as exc:
-        if not google_search_grounding or "HTTP 429" not in str(exc):
-            raise
-        print(
-            "Google Search grounding quota unavailable; retrying this fixture "
-            "without web search."
-        )
-        packages = generate_match_ai_packages(
-            contexts,
-            api_key=api_key,
-            model=model,
-            google_search_grounding=False,
-        )
-        for package in packages.values():
-            package["analysis"] = (
-                package["analysis"]
-                + "\n\n_Not: Google Arama kotası nedeniyle bu yorum "
-                "web kaynaklarıyla zenginleştirilemedi; kayıtlı maç verileri kullanıldı._"
-            )[:12000]
-        return packages
+    raw = generate_match_analysis(
+        {"matches": contexts}, api_key=api_key, model=model,
+        instructions_override=instructions, json_mode=True, max_output_tokens=12000,
+        response_schema=response_schema,
+    )
     try:
         payload = json.loads(raw)
     except ValueError as exc:
@@ -1165,15 +1093,6 @@ def generate_match_ai_packages(
             "analysis": analysis[:12000],
             "risk_selections": selections,
         }
-        if google_search_grounding and grounding_sources:
-            sources_markdown = "\n".join(
-                f"- [{source['title']}]({source['url']})"
-                for source in grounding_sources
-            )
-            packages[match_id]["analysis"] = (
-                f"{packages[match_id]['analysis']}\n\n"
-                f"**Google Arama kaynakları**\n{sources_markdown}"
-            )[:12000]
     if not packages:
         raise MatchAnalysisAIError("Yapay zekâ geçerli maç paketi döndürmedi.")
     return packages

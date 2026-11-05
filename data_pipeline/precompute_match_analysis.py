@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import argparse
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -161,10 +160,7 @@ def _commentary_lineup_revision(row: dict[str, Any]) -> str:
 
 
 def collect_match_analysis_cache(
-    db: SupabaseRestClient,
-    *,
-    now: datetime | None = None,
-    google_search_grounding: bool = False,
+    db: SupabaseRestClient, *, now: datetime | None = None
 ) -> list[dict[str, Any]]:
     """Build analysis payloads for all upcoming scheduled fixtures."""
     reference = now or datetime.now(timezone.utc)
@@ -386,58 +382,43 @@ def collect_match_analysis_cache(
             }
         rows.append(cache_row)
         cache_row_by_match[match_id] = cache_row
-    # Search grounding is scoped to the upcoming slate and each match is sent
-    # separately so its citations cannot be mixed with another fixture's.
+    # One structured request can analyze several fixtures, keeping a full slate
+    # within the free-tier daily request budget. Existing AI results are reused
+    # by the second scheduled refresh instead of consuming the quota twice.
     for offset in range(0, len(ai_contexts), 10):
         batch = ai_contexts[offset : offset + 10]
-        request_groups = [[item] for item in batch] if google_search_grounding else [batch]
-        for request_group in request_groups:
-            try:
-                packages = generate_match_ai_packages(
-                    request_group,
-                    api_key=google_api_key or "",
-                    model=google_model,
-                    google_search_grounding=google_search_grounding,
-                )
-                for match_id, package in packages.items():
-                    analysis = analysis_by_match.get(match_id)
-                    if analysis is not None:
-                        analysis["ai_analysis"] = package["analysis"]
-                        analysis["ai_risk_selections"] = package["risk_selections"]
-                        cache_row = cache_row_by_match.get(match_id)
-                        if cache_row is not None:
-                            cache_row["analysis_json"]["ai_analysis"] = package["analysis"]
-                            cache_row["analysis_json"]["ai_risk_selections"] = package[
-                                "risk_selections"
-                            ]
-                missing = {
-                    int(context["match_id"]) for context in request_group
-                } - packages.keys()
-                ai_failures += len(missing)
-                if missing:
-                    print(f"AI precompute returned no package for matches: {sorted(missing)}")
-            except MatchAnalysisAIError as exc:
-                ai_failures += len(request_group)
-                print(
-                    f"AI precompute failed for match batch "
-                    f"{offset // 10 + 1} ({len(request_group)} matches): {exc}"
-                )
+        try:
+            packages = generate_match_ai_packages(
+                batch, api_key=google_api_key or "", model=google_model
+            )
+            for match_id, package in packages.items():
+                analysis = analysis_by_match.get(match_id)
+                if analysis is not None:
+                    analysis["ai_analysis"] = package["analysis"]
+                    analysis["ai_risk_selections"] = package["risk_selections"]
+                    cache_row = cache_row_by_match.get(match_id)
+                    if cache_row is not None:
+                        cache_row["analysis_json"]["ai_analysis"] = package["analysis"]
+                        cache_row["analysis_json"]["ai_risk_selections"] = package[
+                            "risk_selections"
+                        ]
+            missing = {int(context["match_id"]) for context in batch} - packages.keys()
+            ai_failures += len(missing)
+            if missing:
+                print(f"AI precompute returned no package for matches: {sorted(missing)}")
+        except MatchAnalysisAIError as exc:
+            ai_failures += len(batch)
+            print(
+                f"AI precompute failed for match batch "
+                f"{offset // 10 + 1} ({len(batch)} matches): {exc}"
+            )
     return rows
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--google-search-grounding",
-        action="store_true",
-        help="Use Google Search grounding for the upcoming fixture slate and save citations with each analysis.",
-    )
-    args = parser.parse_args()
     settings = get_supabase_admin_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
-    rows = collect_match_analysis_cache(
-        db, google_search_grounding=args.google_search_grounding
-    )
+    rows = collect_match_analysis_cache(db)
     db.delete(
         "match_analysis_cache",
         filters={"match_date": f"lt.{datetime.now(timezone.utc).isoformat()}"},
