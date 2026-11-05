@@ -1107,13 +1107,34 @@ def generate_match_ai_packages(
         "required": ["matches"],
     }
     grounding_sources: list[dict[str, str]] = []
-    raw = generate_match_analysis(
-        {"matches": contexts}, api_key=api_key, model=model,
-        instructions_override=instructions, json_mode=True, max_output_tokens=12000,
-        response_schema=response_schema,
-        google_search_grounding=google_search_grounding,
-        grounding_sources=grounding_sources,
-    )
+    try:
+        raw = generate_match_analysis(
+            {"matches": contexts}, api_key=api_key, model=model,
+            instructions_override=instructions, json_mode=True, max_output_tokens=12000,
+            response_schema=response_schema,
+            google_search_grounding=google_search_grounding,
+            grounding_sources=grounding_sources,
+        )
+    except MatchAnalysisAIError as exc:
+        if not google_search_grounding or "HTTP 429" not in str(exc):
+            raise
+        print(
+            "Google Search grounding quota unavailable; retrying this fixture "
+            "without web search."
+        )
+        packages = generate_match_ai_packages(
+            contexts,
+            api_key=api_key,
+            model=model,
+            google_search_grounding=False,
+        )
+        for package in packages.values():
+            package["analysis"] = (
+                package["analysis"]
+                + "\n\n_Not: Google Arama kotası nedeniyle bu yorum "
+                "web kaynaklarıyla zenginleştirilemedi; kayıtlı maç verileri kullanıldı._"
+            )[:12000]
+        return packages
     try:
         payload = json.loads(raw)
     except ValueError as exc:
