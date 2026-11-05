@@ -70,7 +70,14 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GOOGLE_MODEL: gemini-3.8-flash
-        run: python -m data_pipeline.precompute_match_analysis --google-search-grounding
+          GOOGLE_SEARCH_GROUNDING_ENABLED: ${{ vars.GOOGLE_SEARCH_GROUNDING_ENABLED }}
+        run: |
+          if [[ "$GOOGLE_SEARCH_GROUNDING_ENABLED" == "true" ]]; then
+            python -m data_pipeline.precompute_match_analysis --google-search-grounding
+          else
+            echo "Google Search grounding is disabled; Gemini will use stored match data."
+            python -m data_pipeline.precompute_match_analysis
+          fi
       - name: Report retained odds history size
         if: always()
         env:
