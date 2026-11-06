@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import math
 import time
@@ -834,6 +835,35 @@ def build_match_analysis_context(
         "commentary_quality_feedback": commentary_quality_feedback,
         "available_lineup_or_injury_information": row.get("verified_team_news"),
     }
+
+
+def build_compatible_match_analysis_context(
+    row: dict[str, Any],
+    history: pd.DataFrame,
+    forecast: dict[str, Any],
+    *,
+    half_forecasts: dict[str, Any] | None = None,
+    commentary_quality_feedback: dict[str, Any] | None = None,
+    odds_quote: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build context across app instances whose imported helper may be stale.
+
+    Streamlit can keep an imported module alive across a code refresh. Filter
+    optional keyword arguments against the active callable's signature so a
+    newer caller does not fail when that module still has the previous version.
+    """
+    supported = inspect.signature(build_match_analysis_context).parameters
+    optional = {
+        "half_forecasts": half_forecasts,
+        "commentary_quality_feedback": commentary_quality_feedback,
+        "odds_quote": odds_quote,
+    }
+    kwargs = {
+        name: value
+        for name, value in optional.items()
+        if name in supported and value is not None
+    }
+    return build_match_analysis_context(row, history, forecast, **kwargs)
 
 
 def generate_match_analysis(

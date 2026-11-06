@@ -24,7 +24,7 @@ from app.odds_quality import total_market_key
 from app.market_mapping import is_compound_selection, standard_market_price, total_goals_outcome
 from app.ai_match_analysis import (
     MatchAnalysisAIError,
-    build_match_analysis_context,
+    build_compatible_match_analysis_context,
     confirmed_lineup_context,
     generate_match_analysis,
     generate_match_risk_recommendations,
@@ -1496,7 +1496,7 @@ def render_tactical_match_readout(
             st.warning("AI risk seçimi için GOOGLE_API_KEY ayarlanmalı (.env veya Streamlit secrets).")
         else:
             model = get_optional_setting("GOOGLE_MODEL", "gemini-3.8-flash")
-            context = build_match_analysis_context(row, history, forecast)
+            context = build_compatible_match_analysis_context(row, history, forecast)
             context["model"]["candidate_markets"] = {
                 label: float(chance) for label, chance, _ in candidates
             }
@@ -2044,7 +2044,7 @@ def render_ai_match_analysis(
                     str(half): model_half_forecast(row, history, half=half)
                     for half in (1, 2)
                 }
-                context = build_match_analysis_context(
+                context = build_compatible_match_analysis_context(
                     row, history, forecast, half_forecasts=half_forecasts,
                     odds_quote=row.get("iddaa_odds_quote"),
                 )

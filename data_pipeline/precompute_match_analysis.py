@@ -17,7 +17,7 @@ from app.main import (
 )
 from app.ai_match_analysis import (
     MatchAnalysisAIError,
-    build_match_analysis_context,
+    build_compatible_match_analysis_context,
     confirmed_lineup_context,
     generate_match_ai_packages,
     iddaa_odds_revision,
@@ -379,7 +379,7 @@ def collect_match_analysis_cache(
                 analysis["ai_analysis"] = ai_package["analysis"]
                 analysis["ai_risk_selections"] = ai_package["risk_selections"]
             else:
-                ai_context = build_match_analysis_context(
+                ai_context = build_compatible_match_analysis_context(
                     row,
                     histories[league_id],
                     analysis["forecast"],
