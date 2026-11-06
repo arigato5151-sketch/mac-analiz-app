@@ -28,7 +28,6 @@ from app.ai_match_analysis import (
     confirmed_lineup_context,
     generate_match_analysis,
     generate_match_risk_recommendations,
-    iddaa_odds_revision,
     previous_lineup_context,
     previous_match_ids_for_fixture,
 )
@@ -1640,7 +1639,21 @@ def render_analysis(
         with match_expander:
             cached_record = analyses_by_id.get(match_id)
             cached_analysis = _cached_analysis_for_match(cached_record, row)
-            odds_revision = iddaa_odds_revision(row.get("iddaa_odds_quote"))
+            raw_odds_quote = row.get("iddaa_odds_quote")
+            odds_quote = raw_odds_quote if isinstance(raw_odds_quote, dict) else {}
+            odds_revision_payload = {
+                "captured_at": odds_quote.get("captured_at"),
+                "source_updated_at": odds_quote.get("source_updated_at"),
+                "odds": odds_quote.get("odds"),
+            }
+            odds_revision = hashlib.sha256(
+                json.dumps(
+                    odds_revision_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
             commentary_has_current_odds = (
                 cached_analysis is not None
                 and cached_analysis.get("commentary_odds_revision") == odds_revision
