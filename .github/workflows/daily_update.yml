@@ -50,6 +50,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m data_pipeline.fetch_iddaa_fixtures
       - name: Pull IdDaa daily fixtures and all listed markets
+        id: refresh_odds
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 3 * * *' || github.event.schedule == '30 20 * * *'
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
@@ -63,8 +64,17 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m data_pipeline.fetch_results --lookback-days 7
-      - name: Precompute nightly match analysis
-        if: always() && (github.event_name == 'workflow_dispatch' || github.event.schedule == '30 20 * * *') && steps.refresh_fixtures.outcome == 'success' && steps.refresh_results.outcome == 'success'
+      - name: Verify AI commentary key for nightly run
+        if: always() && (github.event_name == 'workflow_dispatch' || github.event.schedule == '30 20 * * *') && steps.refresh_fixtures.outcome == 'success' && steps.refresh_odds.outcome == 'success' && steps.refresh_results.outcome == 'success'
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          if [ -z "$GOOGLE_API_KEY" ]; then
+            echo "GOOGLE_API_KEY secret is missing; nightly AI commentary cannot be generated."
+            exit 1
+          fi
+      - name: Generate and save nightly AI match commentary
+        if: always() && (github.event_name == 'workflow_dispatch' || github.event.schedule == '30 20 * * *') && steps.refresh_fixtures.outcome == 'success' && steps.refresh_odds.outcome == 'success' && steps.refresh_results.outcome == 'success'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
