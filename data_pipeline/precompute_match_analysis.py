@@ -457,23 +457,25 @@ def main() -> None:
             rows[offset : offset + 100],
             on_conflict="match_id",
         )
-    print(
-        json.dumps(
-            {
-                "fixtures_cached": len(rows),
-                "ai_analyses_cached": sum(
-                    1 for row in rows if row["analysis_json"].get("ai_analysis")
-                ),
-                "ai_failures": sum(
-                    1
-                    for row in rows
-                    if row["analysis_json"].get("forecast")
-                    and not row["analysis_json"].get("ai_analysis")
-                ),
-                "model_version": ANALYSIS_MODEL_VERSION,
-            }
+    summary = {
+        "fixtures_cached": len(rows),
+        "ai_analyses_cached": sum(
+            1 for row in rows if row["analysis_json"].get("ai_analysis")
+        ),
+        "ai_failures": sum(
+            1
+            for row in rows
+            if row["analysis_json"].get("forecast")
+            and not row["analysis_json"].get("ai_analysis")
+        ),
+        "model_version": ANALYSIS_MODEL_VERSION,
+    }
+    print(json.dumps(summary))
+    if summary["ai_failures"]:
+        raise SystemExit(
+            f"AI commentary was not generated for {summary['ai_failures']} fixtures. "
+            "Check the Gemini quota and API response above."
         )
-    )
 
 
 if __name__ == "__main__":
