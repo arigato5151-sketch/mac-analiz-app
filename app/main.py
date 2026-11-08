@@ -2000,7 +2000,7 @@ def render_ai_match_analysis(
     home_probability = round(float(forecast["home_win"]), 3)
     away_probability = round(float(forecast["away_win"]), 3)
     state_key = (
-        f"ai_match_analysis_v2_{match_id}_"
+        f"ai_match_analysis_v3_{match_id}_"
         f"{round(home_probability * 1000)}_{round(away_probability * 1000)}"
     )
     st.markdown("#### Yapay zekâ destekli detaylı yorum")

@@ -869,7 +869,7 @@ def build_compatible_match_analysis_context(
 def generate_match_analysis(
     context: dict[str, Any], *, api_key: str, model: str = "gemini-3.8-flash",
     instructions_override: str | None = None, json_mode: bool = False,
-    max_output_tokens: int = 5000,
+    max_output_tokens: int = 65536,
     response_schema: dict[str, Any] | None = None,
 ) -> str:
     """Generate a Turkish analysis using only supplied match and model data."""
@@ -1264,7 +1264,7 @@ def generate_match_ai_packages(
         "örneklemidir. En az 30 maç yoksa model güvenilirliği hakkında hüküm verme. Yeterli "
         "örnek varsa sonucu ön değerlendirme olarak tanımla, sayıyı belirt ve kalite metriğini "
         "maç olasılığından ayrı tut. "
-        "Her maç için 80-100 kelimeyi geçmeyen, 4 kısa başlıklı Markdown yorum yaz: "
+        "Her maç için eksiksiz ve maç verisine dayalı, dört başlıklı Markdown yorum yaz: "
         "Maç profili, Form ve eşleşme, "
         "Olası senaryolar, Risk profillerine göre seçimler. Yorum her maçta o maçın "
         "takım adlarına, formuna ve Poisson olasılıklarına özgü olsun; veri zayıfsa "
@@ -1315,7 +1315,7 @@ def generate_match_ai_packages(
     }
     raw = generate_match_analysis(
         {"matches": contexts}, api_key=api_key, model=model,
-        instructions_override=instructions, json_mode=True, max_output_tokens=20000,
+        instructions_override=instructions, json_mode=True, max_output_tokens=65536,
         response_schema=response_schema,
     )
     try:
