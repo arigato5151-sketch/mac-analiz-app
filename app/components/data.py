@@ -144,7 +144,8 @@ def load_recent_team_matches(
     before_filter = before_utc.isoformat()
     columns = (
         "id,home_team_id,away_team_id,match_date,home_score,away_score,home_xg,away_xg,"
-        "home_shots,away_shots,home_shots_on_target,away_shots_on_target,home_possession,away_possession"
+        "home_shots,away_shots,home_shots_on_target,away_shots_on_target,home_possession,away_possession,"
+        "expected_metrics_checked_at"
     )
     team_matches: dict[int, dict[int, dict[str, Any]]] = {}
     for team_id in sorted({int(value) for value in team_ids}):
@@ -170,6 +171,26 @@ def load_recent_team_matches(
     )
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def load_match_statistics_check_times(
+    match_ids: tuple[int, ...],
+) -> dict[int, str | None]:
+    """Read the last provider-statistics lookup time for a small match sample."""
+    normalized_ids = tuple(sorted({int(match_id) for match_id in match_ids}))
+    if not normalized_ids:
+        return {}
+    rows = get_db().select_all(
+        "matches",
+        columns="id,expected_metrics_checked_at",
+        filters={"id": f"in.({','.join(map(str, normalized_ids))})"},
+    )
+    return {
+        int(row["id"]): row.get("expected_metrics_checked_at")
+        for row in rows
+        if row.get("id") is not None
+    }
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def load_league_match_history(league_id: int) -> list[dict[str, Any]]:
     """Load only the score fields needed by league-level forecast baselines."""
@@ -178,8 +199,9 @@ def load_league_match_history(league_id: int) -> list[dict[str, Any]]:
         columns=(
             "id,league_id,home_team_id,away_team_id,match_date,status,"
             "home_score,away_score,home_halftime_score,away_halftime_score,"
-            "home_xg,away_xg,home_xa,away_xa,home_corners,away_corners"
-            ",home_shots,away_shots,home_shots_on_target,away_shots_on_target,home_possession,away_possession"
+            "home_xg,away_xg,home_xa,away_xa,home_corners,away_corners,"
+            "home_shots,away_shots,home_shots_on_target,away_shots_on_target,"
+            "home_possession,away_possession,expected_metrics_checked_at"
         ),
         filters={
             "status": "eq.finished",

@@ -36,6 +36,7 @@ from app.components.data import (
     load_completed_match_history,
     get_db,
     load_league_match_history,
+    load_match_statistics_check_times,
     load_match_day,
     load_recent_team_matches,
     load_fixture_lineups_for_matches,
@@ -1808,6 +1809,28 @@ def render_match_data_coverage(
             | (pd.to_numeric(prior.get("away_team_id"), errors="coerce") == team_id)
         ].sort_values(["match_date", "id"], ascending=False).head(5)
         recent_count = len(team_history)
+        if recent_count:
+            if "expected_metrics_checked_at" in team_history.columns:
+                check_time_by_match = {
+                    int(item["id"]): item.get("expected_metrics_checked_at")
+                    for item in team_history.to_dict("records")
+                    if item.get("id") is not None
+                }
+            else:
+                check_time_by_match = load_match_statistics_check_times(
+                    tuple(
+                        int(match_id)
+                        for match_id in team_history["id"]
+                        if pd.notna(match_id)
+                    )
+                )
+            checked_count = sum(
+                pd.notna(check_time_by_match.get(int(match_id)))
+                for match_id in team_history["id"]
+                if pd.notna(match_id)
+            )
+        else:
+            checked_count = 0
         latest_match = (
             pd.to_datetime(team_history.iloc[0].get("match_date"), utc=True, errors="coerce")
             if recent_count else pd.NaT
@@ -1841,6 +1864,9 @@ def render_match_data_coverage(
             {
                 "Takım": team_name,
                 "Son 5 tamamlanmış maç": f"{recent_count}/5",
+                "API istatistik kontrolü": (
+                    f"{checked_count}/{recent_count}" if recent_count else "0/0"
+                ),
                 "Skor": f"{coverage['Skor']}/{recent_count}" if recent_count else "0/0",
                 "Devre": f"{coverage['Devre skoru']}/{recent_count}" if recent_count else "0/0",
                 "xG": f"{coverage['xG']}/{recent_count}" if recent_count else "0/0",
@@ -1852,7 +1878,12 @@ def render_match_data_coverage(
             }
         )
     with st.expander("Veri kapsamı ve güncelliği", expanded=False):
-        st.caption("Her ölçüm, ilgili takımın son 5 tamamlanmış maçındaki gerçek kayıt sayısını gösterir; eksik veriler doldurulmaz.")
+        st.caption(
+            "Her ölçüm, son 5 tamamlanmış maçtaki gerçek kayıt sayısını gösterir. "
+            "API istatistik kontrolü, istatistik uç noktasının bu maç için sorgulanıp sorgulanmadığını belirtir; "
+            "kontrol edilmiş maçta boş alan, son API yanıtında o ölçümün gelmediği anlamına gelir. "
+            "xA şu ana kadar API-Football arşivindeki maçlarda dönmedi."
+        )
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
         model_history = int((forecast or {}).get("history_count") or 0)
         st.caption(f"Maç sonu Poisson modeli: {model_history} geçmiş lig maçı.")

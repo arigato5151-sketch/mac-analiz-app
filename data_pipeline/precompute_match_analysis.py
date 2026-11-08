@@ -34,7 +34,7 @@ HISTORY_COLUMNS = (
     "id,league_id,home_team_id,away_team_id,match_date,status,home_score,away_score,"
     "home_halftime_score,away_halftime_score,home_xg,away_xg,home_xa,away_xa,"
     "home_corners,away_corners,home_shots,away_shots,home_shots_on_target,away_shots_on_target,"
-    "home_possession,away_possession"
+    "home_possession,away_possession,expected_metrics_checked_at"
 )
 AI_MATCHES_PER_REQUEST = 35
 AI_MAX_REQUESTS_PER_RUN = 2
