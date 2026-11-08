@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import time
 from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -27,7 +28,12 @@ TACTICAL_STAT_TYPES = {
 }
 STALE_ACTIVE_GRACE = timedelta(hours=4)
 MAX_STALE_ACTIVE_RECONCILIATIONS = 4
-MAX_EXPECTED_METRIC_REQUESTS_PER_RUN = 2
+# The scheduled results job runs twice a day. Keep this retry budget bounded,
+# while allowing the last week's late-arriving fixture stats to be revisited.
+MAX_EXPECTED_METRIC_REQUESTS_PER_RUN = 50
+EXPECTED_METRICS_RECHECK_HOURS = 12
+API_REQUEST_DAILY_RESERVE = 200
+API_REQUEST_INTERVAL_SECONDS = 0.26
 
 
 def _statistic_key(value: object) -> str:
@@ -358,23 +364,31 @@ def sync_recent_expected_metrics(
             "status": "eq.finished",
             "and": f"(match_date.gte.{start},match_date.lt.{end})",
         },
+        order="match_date.desc,id.desc",
     )
-    updates: list[dict[str, Any]] = []
     api_requests = 0
+    rows_updated = 0
+    no_supported_stats = 0
     for match in matches:
         checked_at = match.get("expected_metrics_checked_at")
         already_complete = all(
             match.get(column) is not None
             for column in (
-                "home_xg", "away_xg", "home_xa", "away_xa", "home_corners", "away_corners",
+                # API-Football does not consistently return xA. Do not let that
+                # unsupported optional metric trigger repeated lookups by itself.
+                "home_xg", "away_xg", "home_corners", "away_corners",
                 "home_shots", "away_shots", "home_shots_on_target", "away_shots_on_target",
                 "home_possession", "away_possession",
             )
         )
-        # Avoid paying an API request every run when a competition does not expose xA.
+        # Recent finished fixtures can gain stats after the first fetch. Retry
+        # incomplete rows after a cooldown, but only while inside this function's
+        # bounded lookback window.
         recently_checked = checked_at is not None and datetime.fromisoformat(
             str(checked_at).replace("Z", "+00:00")
-        ) >= datetime.now(ZoneInfo("UTC")) - timedelta(hours=12)
+        ) >= datetime.now(ZoneInfo("UTC")) - timedelta(
+            hours=EXPECTED_METRICS_RECHECK_HOURS
+        )
         if already_complete or recently_checked:
             continue
         if api_requests >= MAX_EXPECTED_METRIC_REQUESTS_PER_RUN:
@@ -383,6 +397,23 @@ def sync_recent_expected_metrics(
                 f"after {MAX_EXPECTED_METRIC_REQUESTS_PER_RUN} API requests."
             )
             break
+        rate_limit = api.diagnostics().get("rate_limit", {})
+        daily_remaining = next(
+            (
+                value
+                for key, value in rate_limit.items()
+                if "requests-remaining" in key.lower()
+            ),
+            None,
+        )
+        if daily_remaining is not None and int(daily_remaining) <= API_REQUEST_DAILY_RESERVE:
+            print(
+                "Deferring expected-metric lookups to preserve the daily API reserve "
+                f"of {API_REQUEST_DAILY_RESERVE} requests."
+            )
+            break
+        if api_requests:
+            time.sleep(API_REQUEST_INTERVAL_SECONDS)
         try:
             api_requests += 1
             statistics = api.get("fixtures/statistics", {"fixture": int(match["id"])})
@@ -405,24 +436,26 @@ def sync_recent_expected_metrics(
         if corners is not None:
             metrics["home_corners"] = corners[0]
             metrics["away_corners"] = corners[1]
-        updates.append(
-            {
-                "id": int(match["id"]),
-                **{
-                    column: value
-                    for column, value in metrics.items()
-                    if value is not None
-                },
-                "expected_metrics_checked_at": datetime.now(
-                    ZoneInfo("UTC")
-                ).isoformat(),
-            }
-        )
-    for update in updates:
-        fixture_id = update.pop("id")
+        values = {
+            column: value
+            for column, value in metrics.items()
+            if value is not None and match.get(column) is None
+        }
+        values["expected_metrics_checked_at"] = datetime.now(
+            ZoneInfo("UTC")
+        ).isoformat()
         # These rows already exist; PATCH avoids re-validating required insert fields.
-        db.update("matches", update, filters={"id": f"eq.{fixture_id}"})
-    return len(updates)
+        db.update("matches", values, filters={"id": f"eq.{int(match['id'])}"})
+        if len(values) > 1:
+            rows_updated += 1
+        else:
+            no_supported_stats += 1
+    print(
+        "Recent match-stat retry summary: "
+        f"requests={api_requests}, updated={rows_updated}, "
+        f"no_new_supported_stats={no_supported_stats}"
+    )
+    return api_requests
 
 
 def sync_recent_xg(
