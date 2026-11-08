@@ -1024,8 +1024,20 @@ def generate_match_analysis(
             error_payload = response.json().get("error", {})
             detail = str(error_payload.get("message", "")).strip()
             status = str(error_payload.get("status", "")).strip()
+            detail_parts = [status, detail]
+            for item in error_payload.get("details", []):
+                if not isinstance(item, dict):
+                    continue
+                description = str(item.get("description", "")).strip()
+                quota_id = str(item.get("quotaId", "")).strip()
+                retry_delay = str(item.get("retryDelay", "")).strip()
+                extra = "; ".join(
+                    part for part in (description, quota_id, retry_delay) if part
+                )
+                if extra:
+                    detail_parts.append(extra)
         except (ValueError, AttributeError):
-            detail, status = "", ""
+            detail_parts = []
         if (
             response.status_code == 404
             and model != "gemini-3.8-flash"
@@ -1036,13 +1048,13 @@ def generate_match_analysis(
                 instructions_override=instructions_override, json_mode=json_mode,
                 max_output_tokens=max_output_tokens, response_schema=response_schema,
             )
-        if response.status_code in {429, 503} and model != "gemini-3.5-flash-lite":
+        if response.status_code == 503 and model != "gemini-3.5-flash-lite":
             return generate_match_analysis(
                 context, api_key=api_key, model="gemini-3.5-flash-lite",
                 instructions_override=instructions_override, json_mode=json_mode,
                 max_output_tokens=max_output_tokens, response_schema=response_schema,
             )
-        diagnostic = ": ".join(part for part in (status, detail) if part)
+        diagnostic = ": ".join(part for part in detail_parts if part)
         if len(diagnostic) > 400:
             diagnostic = diagnostic[:397] + "..."
         suffix = f" — {diagnostic}" if diagnostic else ""
