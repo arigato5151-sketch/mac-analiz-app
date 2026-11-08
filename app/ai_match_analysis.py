@@ -869,7 +869,7 @@ def build_compatible_match_analysis_context(
 def generate_match_analysis(
     context: dict[str, Any], *, api_key: str, model: str = "gemini-3.8-flash",
     instructions_override: str | None = None, json_mode: bool = False,
-    max_output_tokens: int = 1800,
+    max_output_tokens: int = 5000,
     response_schema: dict[str, Any] | None = None,
 ) -> str:
     """Generate a Turkish analysis using only supplied match and model data."""
@@ -1064,6 +1064,11 @@ def generate_match_analysis(
     try:
         payload = response.json()
         candidates = payload.get("candidates") or []
+        finish_reason = candidates[0].get("finishReason") if candidates else None
+        if finish_reason == "MAX_TOKENS":
+            raise MatchAnalysisAIError(
+                "Yapay zekâ yorumu çıktı sınırına takılıp yarıda kesildi. Yeniden deneyin."
+            )
         parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
         output = "\n".join(
             str(part.get("text", "")).strip() for part in parts if part.get("text")
@@ -1072,6 +1077,23 @@ def generate_match_analysis(
         raise MatchAnalysisAIError("Google Gemini API yanıtı okunamadı.") from exc
     if not output:
         raise MatchAnalysisAIError("Google Gemini API boş bir analiz döndürdü.")
+    if not json_mode and instructions_override is None:
+        normalized_output = unicodedata.normalize("NFKD", output)
+        normalized_output = "".join(
+            char for char in normalized_output if not unicodedata.combining(char)
+        ).lower().replace("ı", "i")
+        required_sections = (
+            "macin profili",
+            "iki takimin form sinyalleri",
+            "olasi oyun planlari ve eslesmeler",
+            "macin kirilma noktalari",
+            "farkli oyun senaryolari",
+            "model olasiliklarina gore",
+        )
+        if not all(section in normalized_output for section in required_sections):
+            raise MatchAnalysisAIError(
+                "Yapay zekâ yorumu tüm bölümleri tamamlamadan durdu. Yeniden deneyin."
+            )
     return output
 
 
