@@ -1242,7 +1242,8 @@ def generate_match_ai_packages(
         "örneklemidir. En az 30 maç yoksa model güvenilirliği hakkında hüküm verme. Yeterli "
         "örnek varsa sonucu ön değerlendirme olarak tanımla, sayıyı belirt ve kalite metriğini "
         "maç olasılığından ayrı tut. "
-        "Her maç için 4 kısa başlıklı Markdown yorum yaz: Maç profili, Form ve eşleşme, "
+        "Her maç için 80-100 kelimeyi geçmeyen, 4 kısa başlıklı Markdown yorum yaz: "
+        "Maç profili, Form ve eşleşme, "
         "Olası senaryolar, Risk profillerine göre seçimler. Yorum her maçta o maçın "
         "takım adlarına, formuna ve Poisson olasılıklarına özgü olsun; veri zayıfsa "
         "bunu belirt. Seçimleri yalnızca ilgili maçın candidate_markets listesinden "
@@ -1292,7 +1293,7 @@ def generate_match_ai_packages(
     }
     raw = generate_match_analysis(
         {"matches": contexts}, api_key=api_key, model=model,
-        instructions_override=instructions, json_mode=True, max_output_tokens=12000,
+        instructions_override=instructions, json_mode=True, max_output_tokens=20000,
         response_schema=response_schema,
     )
     try:

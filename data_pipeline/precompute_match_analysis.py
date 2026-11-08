@@ -36,8 +36,8 @@ HISTORY_COLUMNS = (
     "home_corners,away_corners,home_shots,away_shots,home_shots_on_target,away_shots_on_target,"
     "home_possession,away_possession"
 )
-AI_MATCHES_PER_REQUEST = 10
-AI_MAX_REQUESTS_PER_RUN = 8
+AI_MATCHES_PER_REQUEST = 35
+AI_MAX_REQUESTS_PER_RUN = 2
 NUMERIC_HISTORY_COLUMNS = (
     "id",
     "league_id",
