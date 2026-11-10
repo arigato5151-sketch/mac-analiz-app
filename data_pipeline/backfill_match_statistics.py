@@ -38,7 +38,7 @@ def backfill_match_statistics(
     matches = db.select_all(
         "matches",
         columns=(
-            "id,home_team_id,away_team_id,home_xg,away_xg,home_corners,away_corners,"
+            "id,home_team_id,away_team_id,home_xg,away_xg,home_xa,away_xa,home_corners,away_corners,"
             "home_shots,away_shots,home_shots_on_target,away_shots_on_target,"
             "home_possession,away_possession,expected_metrics_checked_at"
         ),
@@ -91,6 +91,9 @@ def backfill_match_statistics(
             key: value for key, value in metrics.items()
             if value is not None and row.get(key) is None
         }
+        for key in tuple(values):
+            if key.endswith(("_xg", "_xa")):
+                values[f"{key}_source"] = "api-football"
         values["expected_metrics_checked_at"] = datetime.now(timezone.utc).isoformat()
         db.update("matches", values, filters={"id": f"eq.{fixture_id}"})
         checked += 1

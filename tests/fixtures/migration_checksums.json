@@ -43,5 +43,6 @@
   "042_read_only_public_acl_check": "85895ccf340ffeb0473342d388da6878f6a207109f2dfb59ffb59f2aa8ae6481",
   "043_nightly_match_analysis_cache": "909d16d1d9c0bb9130dacf21a5cff8830a049976d8a504e390dd0680c7ae5afb",
   "044_match_shot_possession_history": "142d029d6622dc16b33f4786da67698c1ad7d7073ed551c82d866e74d37de408",
-  "045_ai_analysis_feedback": "dda34882abb1b925fb546241ce5bc24b718d761b540fd06350bf3be4b1003f57"
+  "045_ai_analysis_feedback": "dda34882abb1b925fb546241ce5bc24b718d761b540fd06350bf3be4b1003f57",
+  "046_expected_metrics_sources": "9ef95529f4fac5ec8d61ec04c76c9562568e117a454473886af5d1f3a61dcb6a"
 }

@@ -441,6 +441,9 @@ def sync_recent_expected_metrics(
             for column, value in metrics.items()
             if value is not None and match.get(column) is None
         }
+        for column in tuple(values):
+            if column.endswith(("_xg", "_xa")):
+                values[f"{column}_source"] = "api-football"
         values["expected_metrics_checked_at"] = datetime.now(
             ZoneInfo("UTC")
         ).isoformat()

@@ -29,10 +29,15 @@ Actions çalışma özetinde bu değerler görünür; kapsam raporu veri değiş
 ## Oran kapsamı ve hata takibi
 
 Oran çekici IdDaa karşılaşmalarını lig, normalize edilmiş/alias takım adları ve
-başlama saatiyle eşleştirir. Bir hedef maç eşleşmezse çekim kısmi başarısız
-olarak raporlanır ve sıfırdan farklı çıkış kodu döndürür. Eşleşen maçların
-oranları kaydedilmiş olur; aynı çalışmada otomatik tekrar yapılmaz, çünkü bu
-oran geçmişine yinelenen anlık kayıtlar ekler. Sonraki zamanlanmış çekim yeniden
+başlama saatiyle eşleştirir. Takım adlarından biri doğrudan eşleşmediğinde,
+diğer takım aynıysa, ev/deplasman yönü değişmemişse, ad farkı makul bir sağlayıcı
+varyantıysa, başlama saatleri 30 dakika içindeyse ve tam olarak bir aday
+fikstür varsa bağlamsal eşleştirme yapar; bu eşleşme günlükte ayrıca görünür.
+Aynı koşullarda birden fazla aday kalırsa sistem tahmin yürütmez ve eşleşmeyi
+inceleme için raporlar. Bir hedef maç eşleşmezse çekim kısmi başarısız olarak
+raporlanır ve sıfırdan farklı çıkış kodu döndürür. Eşleşen maçların oranları
+kaydedilmiş olur; aynı çalışmada otomatik tekrar yapılmaz, çünkü bu oran
+geçmişine yinelenen anlık kayıtlar ekler. Sonraki zamanlanmış çekim yeniden
 eşleşme deneyebilir.
 
 Windows günlükleri `logs/local_scheduler` altındadır. `PIPELINE FAILED` veya

@@ -261,6 +261,8 @@ def _team_alias_groups() -> tuple[frozenset[str], ...]:
 
 
 TEAM_ALIAS_GROUPS = _team_alias_groups()
+CONTEXTUAL_NAME_SIMILARITY_THRESHOLD = 0.82
+CONTEXTUAL_KICKOFF_TOLERANCE = timedelta(minutes=30)
 
 
 def team_names_match(left: str, right: str) -> bool:
@@ -297,6 +299,25 @@ def event_matches_fixture_order(
     return team_names_match(event_home, fixture_home) and team_names_match(
         event_away, fixture_away
     )
+
+
+def contextual_team_name_match(provider_name: str, fixture_name: str) -> bool:
+    """Allow a weak name signal only as part of a unique fixture-level match."""
+    provider_norm, fixture_norm = normalize_team(provider_name), normalize_team(fixture_name)
+    if not provider_norm or not fixture_norm:
+        return False
+    provider_tokens, fixture_tokens = provider_norm.split(), fixture_norm.split()
+    shorter, longer = sorted((provider_tokens, fixture_tokens), key=len)
+    if (
+        len(shorter) == 1
+        and len(shorter[0]) >= 4
+        and len(longer) > 1
+        and longer[0] == shorter[0]
+    ):
+        return True
+    if min(len(provider_norm), len(fixture_norm)) < 6:
+        return False
+    return SequenceMatcher(None, provider_norm, fixture_norm).ratio() >= CONTEXTUAL_NAME_SIMILARITY_THRESHOLD
 
 
 def _request_json(session: requests.Session, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -577,15 +598,64 @@ def import_daily_odds(
                 home, away, str(row["_home_name"]), str(row["_away_name"])
             )
         ]
+        ambiguous_exact_candidates = False
         if len(candidates) > 1:
-            candidates.sort(
-                key=lambda row: (
-                    team_names_match(home, str(row["_home_name"]))
-                    and team_names_match(away, str(row["_away_name"])),
-                    -abs((datetime.fromisoformat(str(row["match_date"]).replace("Z", "+00:00")) - kickoff.astimezone(timezone.utc)).total_seconds()),
-                ),
-                reverse=True,
+            ranked = sorted(
+                candidates,
+                key=lambda row: abs(
+                    datetime.fromisoformat(str(row["match_date"]).replace("Z", "+00:00"))
+                    - kickoff.astimezone(timezone.utc)
+                ).total_seconds(),
             )
+            closest_seconds = abs(
+                datetime.fromisoformat(str(ranked[0]["match_date"]).replace("Z", "+00:00"))
+                - kickoff.astimezone(timezone.utc)
+            ).total_seconds()
+            next_seconds = abs(
+                datetime.fromisoformat(str(ranked[1]["match_date"]).replace("Z", "+00:00"))
+                - kickoff.astimezone(timezone.utc)
+            ).total_seconds()
+            # Do not guess between duplicate provider fixtures whose kickoff
+            # times are effectively tied; the ambiguity is reported below.
+            if next_seconds - closest_seconds < 5 * 60:
+                ambiguous_exact_candidates = True
+                candidates = []
+            else:
+                candidates = [ranked[0]]
+        if not candidates and not ambiguous_exact_candidates:
+            contextual_candidates: list[tuple[dict[str, Any], float]] = []
+            for row in day_fixtures:
+                if int(row["id"]) in matched_ids:
+                    continue
+                fixture_home, fixture_away = str(row["_home_name"]), str(row["_away_name"])
+                home_matches = team_names_match(home, fixture_home)
+                away_matches = team_names_match(away, fixture_away)
+                # Require one side to match normally and the other to be a
+                # plausible provider variant; never infer a home/away swap.
+                if home_matches == away_matches:
+                    continue
+                if team_names_match(home, fixture_away) or team_names_match(away, fixture_home):
+                    continue
+                variant_name, fixture_name = (
+                    (away, fixture_away) if home_matches else (home, fixture_home)
+                )
+                if not contextual_team_name_match(variant_name, fixture_name):
+                    continue
+                fixture_kickoff = datetime.fromisoformat(
+                    str(row["match_date"]).replace("Z", "+00:00")
+                )
+                kickoff_delta = abs(fixture_kickoff - kickoff.astimezone(timezone.utc))
+                if kickoff_delta <= CONTEXTUAL_KICKOFF_TOLERANCE:
+                    contextual_candidates.append((row, kickoff_delta.total_seconds()))
+            if len(contextual_candidates) == 1:
+                row, kickoff_delta = contextual_candidates[0]
+                candidates = [row]
+                LOG.warning(
+                    "Contextual auto-match: event %r - %r matched fixture %s %r - %r "
+                    "using the other team and kickoff within 30 minutes (delta=%ss)",
+                    home, away, row["id"], row["_home_name"], row["_away_name"],
+                    int(kickoff_delta),
+                )
         if not candidates:
             unmatched += 1
             same_day_league = index.get((league_id, kickoff.date()), [])
@@ -603,7 +673,11 @@ def import_daily_odds(
                 "home": home,
                 "away": away,
                 "kickoff": kickoff.isoformat(),
-                "reason": "no_unique_team_pair_match",
+                "reason": (
+                    "ambiguous_exact_fixture_candidates"
+                    if ambiguous_exact_candidates
+                    else "no_unique_team_pair_match"
+                ),
                 "candidate_fixtures": team_mismatch_candidates[:5],
             }
             unmatched_details.append(detail)
@@ -614,7 +688,11 @@ def import_daily_odds(
                 event.get("hn"),
                 event.get("an"),
                 kickoff.isoformat(),
-                "team_names_or_home_away_order_do_not_match_or_fixture_already_matched",
+                (
+                    "multiple_exact_candidates_have_indistinguishable_kickoffs"
+                    if ambiguous_exact_candidates
+                    else "team_names_or_home_away_order_do_not_match_or_fixture_already_matched"
+                ),
                 len(same_day_league),
                 team_mismatch_candidates[:5],
             )

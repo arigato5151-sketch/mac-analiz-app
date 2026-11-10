@@ -24,6 +24,8 @@ To refresh the repository migration manifest, run `python -m db.migrations --man
 
 Migration `044_match_shot_possession_history.sql` adds nullable API-Football total shots, shots on target, and possession fields to `matches`. `data_pipeline.fetch_results` fills them alongside xG/xA and corners when provider statistics are available; existing rows are populated gradually by the recent finished-match statistics sync. The AI commentary reports each measure only for matches with an observation and includes its sample size.
 
+Migration `046_expected_metrics_sources.sql` adds per-side source labels for xG and xA and labels existing populated values as `api-football`. New API-Football backfills tag values when they fill a previously empty metric. This lets a future secondary-provider import fill only gaps while retaining the origin of every value.
+
 Migration `045_ai_analysis_feedback.sql` creates an insert-only, anonymous feedback table for AI comment ratings. The UI submits only the match, model version, a SHA-256 hash of the rendered comment, a random Streamlit-session UUID, a helpful/unhelpful vote, and fixed issue codes. Public roles cannot read feedback or store comment text or personal details; service-role access is reserved for aggregate quality review.
 
 Nightly analysis may use the previous 30 days of feedback as style guidance only after at least five votes are present. The pipeline passes aggregate helpful rate and fixed issue-code counts; it does not expose match IDs, session IDs, hashes, or comment text to Gemini. Feedback cannot alter model probabilities or match facts.
