@@ -102,7 +102,29 @@ def sync_iddaa_fixtures(
             continue
         events.append((event, league_id))
     if not events:
-        raise RuntimeError("IdDaa bulletin returned no fixtures for the tracked competitions")
+        # Some days the bulletin contains no events in any competition tracked
+        # by the app. That is a valid empty day: retain the current fixture
+        # schedule and, crucially, do not hide every upcoming match as stale.
+        summary = {
+            "source": "iddaa.com",
+            "events_seen": 0,
+            "matches_upserted": 0,
+            "teams_added": 0,
+            "stale_fixtures_hidden": 0,
+            "covered_start": None,
+            "covered_end": None,
+            "events_excluded_from_tracked_competitions": len(bulletin_events),
+            "skipped_reason": "no_tracked_fixture_events",
+            "catalogued_tracked_competitions": len(
+                set(competition_map.values()) & tracked
+            ),
+        }
+        print(
+            "No IdDaa fixtures for tracked competitions; retaining the existing "
+            "schedule without stale-fixture reconciliation.",
+            flush=True,
+        )
+        return summary
 
     event_days = [
         datetime.fromtimestamp(int(event["d"]), timezone.utc).astimezone(ISTANBUL).date()
