@@ -70,6 +70,13 @@ LEAGUE_NAMES_TR = {
     "FIFA World Cup": "FIFA Dünya Kupası", "Euro Championship": "Avrupa Şampiyonası",
     "UEFA Nations League": "UEFA Uluslar Ligi", "Africa Cup of Nations": "Afrika Uluslar Kupası",
     "Asian Cup": "Asya Kupası", "Copa America": "Copa América", "CONCACAF Gold Cup": "CONCACAF Altın Kupa",
+    "Friendlies": "Milli Takım Hazırlık Maçları",
+    "World Cup Qualification Europe": "Dünya Kupası Elemeleri · Avrupa",
+    "World Cup Qualification Africa": "Dünya Kupası Elemeleri · Afrika",
+    "World Cup Qualification Asia": "Dünya Kupası Elemeleri · Asya",
+    "World Cup Qualification Oceania": "Dünya Kupası Elemeleri · Okyanusya",
+    "World Cup Qualification CONCACAF": "Dünya Kupası Elemeleri · Kuzey ve Orta Amerika",
+    "World Cup Qualification South America": "Dünya Kupası Elemeleri · Güney Amerika",
 }
 
 if __name__ == "__main__":
