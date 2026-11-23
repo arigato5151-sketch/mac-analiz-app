@@ -37,7 +37,7 @@ HISTORY_COLUMNS = (
     "home_corners,away_corners,home_shots,away_shots,home_shots_on_target,away_shots_on_target,"
     "home_possession,away_possession,expected_metrics_checked_at"
 )
-AI_MATCHES_PER_REQUEST = 4
+AI_MATCHES_PER_REQUEST = 8
 AI_SECONDS_BETWEEN_REQUESTS = 15
 NUMERIC_HISTORY_COLUMNS = (
     "id",

@@ -989,6 +989,11 @@ def generate_match_analysis(
         "generationConfig": {
             "maxOutputTokens": max_output_tokens,
             "temperature": 0.7,
+            **(
+                {"thinkingConfig": {"thinkingLevel": "LOW"}}
+                if model.startswith("gemini-3.")
+                else {}
+            ),
             **({"responseMimeType": "application/json"} if json_mode else {}),
             **({"responseSchema": response_schema} if response_schema else {}),
         },
