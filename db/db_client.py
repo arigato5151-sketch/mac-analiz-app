@@ -159,6 +159,35 @@ class SupabaseRestClient:
             params["order"] = order
         return self._request("GET", table, params=params)
 
+    def count(
+        self,
+        table: str,
+        *,
+        filters: Mapping[str, str | int | float | bool] | None = None,
+    ) -> int:
+        """Return an exact PostgREST row count without downloading the rows."""
+        if not table or "/" in table:
+            raise ValueError("Table name is invalid")
+        params: dict[str, Any] = {"select": "id"}
+        if filters:
+            params.update(filters)
+        response = self._session.request(
+            "GET",
+            f"{self._base_url}/{table}",
+            params=params,
+            headers={**self._headers, "Prefer": "count=exact", "Range": "0-0"},
+            timeout=self._timeout,
+        )
+        if not response.ok:
+            raise DatabaseError(
+                f"Supabase GET {table} count failed ({response.status_code})"
+            )
+        content_range = response.headers.get("Content-Range", "")
+        _, separator, total = content_range.rpartition("/")
+        if not separator or not total.isdigit():
+            raise DatabaseError(f"Supabase GET {table} returned an invalid row count")
+        return int(total)
+
     def rpc(
         self,
         function: str,

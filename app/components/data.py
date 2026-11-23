@@ -113,10 +113,59 @@ def load_previous_team_match_history(
     )
 
 
+def _completed_match_filters(
+    league_ids: tuple[int, ...] | None, team_ids: tuple[int, ...] | None
+) -> dict[str, str | int]:
+    filters: dict[str, str | int] = {
+        "status": "eq.finished",
+        "home_score": "not.is.null",
+        "away_score": "not.is.null",
+    }
+    if league_ids is not None:
+        normalized_leagues = tuple(sorted({int(league_id) for league_id in league_ids}))
+        if not normalized_leagues:
+            raise ValueError("An empty league filter cannot be converted to a database query")
+        filters["league_id"] = (
+            f"eq.{normalized_leagues[0]}" if len(normalized_leagues) == 1
+            else f"in.({','.join(map(str, normalized_leagues))})"
+        )
+    if team_ids is not None:
+        normalized_ids = tuple(sorted({int(team_id) for team_id in team_ids}))
+        if not normalized_ids:
+            raise ValueError("An empty team filter cannot be converted to a database query")
+        id_list = ",".join(map(str, normalized_ids))
+        filters["or"] = f"(home_team_id.in.({id_list}),away_team_id.in.({id_list}))"
+    return filters
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def count_completed_match_history(
+    league_ids: tuple[int, ...] | None = None, team_ids: tuple[int, ...] | None = None
+) -> int:
+    """Count filtered completed matches without downloading their rows."""
+    if team_ids is not None and not team_ids:
+        return 0
+    if league_ids is not None and not league_ids:
+        return 0
+    return get_db().count("matches", filters=_completed_match_filters(league_ids, team_ids))
+
+
 @st.cache_data(ttl=900, show_spinner="Maç istatistikleri yükleniyor…")
-def load_completed_match_history() -> list[dict[str, Any]]:
-    """Read all completed history for the statistics archive."""
-    return get_db().select_all(
+def load_completed_match_history(
+    *,
+    offset: int = 0,
+    limit: int = 200,
+    league_ids: tuple[int, ...] | None = None,
+    team_ids: tuple[int, ...] | None = None,
+) -> list[dict[str, Any]]:
+    """Read one page of filtered completed history for the archive."""
+    if offset < 0 or limit < 1 or limit > 1_000:
+        raise ValueError("Archive page bounds are invalid")
+    if league_ids is not None and not league_ids:
+        return []
+    if team_ids is not None and not team_ids:
+        return []
+    return get_db().select(
         "matches",
         columns=(
             "id,league_id,home_team_id,away_team_id,match_date,status,"
@@ -124,11 +173,9 @@ def load_completed_match_history() -> list[dict[str, Any]]:
             "home_corners,away_corners,home_shots,away_shots,home_shots_on_target,away_shots_on_target,"
             "home_possession,away_possession"
         ),
-        filters={
-            "status": "eq.finished",
-            "home_score": "not.is.null",
-            "away_score": "not.is.null",
-        },
+        filters=_completed_match_filters(league_ids, team_ids),
+        limit=limit,
+        offset=offset,
         order="match_date.desc,id.desc",
     )
 
