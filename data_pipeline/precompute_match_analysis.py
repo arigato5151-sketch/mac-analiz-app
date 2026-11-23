@@ -458,6 +458,14 @@ def collect_match_analysis_cache(
             if missing:
                 print(f"AI precompute returned no package for matches: {sorted(missing)}")
         except MatchAnalysisAIError as exc:
+            if "HTTP 429" in str(exc):
+                remaining = len(ai_contexts) - offset
+                ai_failures += remaining
+                print(
+                    f"Gemini rate/quota limit reached; skipping the remaining "
+                    f"{remaining} fixtures for this run: {exc}"
+                )
+                break
             ai_failures += len(batch)
             print(
                 f"AI precompute failed for match batch "
