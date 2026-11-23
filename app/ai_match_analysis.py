@@ -1004,6 +1004,7 @@ def generate_match_analysis(
             if response.status_code not in {429, 503} or attempt == 3:
                 break
             retryable_429 = False
+            minute_quota = False
             retry_after = response.headers.get("Retry-After", "")
             retry_delay = ""
             if response.status_code == 429:
@@ -1022,9 +1023,10 @@ def generate_match_analysis(
                     if isinstance(item, dict) and item.get("retryDelay")
                 ]
                 retry_delay = retry_delays[0] if retry_delays else ""
-                retryable_429 = bool(retry_delay) or any(
+                minute_quota = any(
                     "PerMinute" in quota_id for quota_id in quota_ids
                 )
+                retryable_429 = bool(retry_delay) or minute_quota
                 if not retryable_429:
                     break
             delay_value = retry_after or retry_delay
@@ -1038,7 +1040,11 @@ def generate_match_analysis(
             try:
                 delay = min(max(float(delay_value.rstrip("s")), 1.0), 60.0)
             except ValueError:
-                delay = min(5.0 * (2**attempt), 30.0)
+                delay = (
+                    60.0
+                    if response.status_code == 429 and minute_quota
+                    else min(5.0 * (2**attempt), 30.0)
+                )
             time.sleep(delay)
     except requests.RequestException as exc:
         if model != "gemini-3.5-flash-lite":
