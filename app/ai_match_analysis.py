@@ -1028,11 +1028,14 @@ def generate_match_analysis(
                     if isinstance(item, dict) and item.get("retryDelay")
                 ]
                 retry_delay = retry_delays[0] if retry_delays else ""
+                daily_quota = any("PerDay" in quota_id for quota_id in quota_ids)
                 minute_quota = any(
                     "PerMinute" in quota_id for quota_id in quota_ids
                 )
-                retryable_429 = bool(retry_delay) or minute_quota
+                retryable_429 = not daily_quota and (bool(retry_delay) or minute_quota)
                 if not retryable_429:
+                    break
+                if minute_quota and attempt >= 1:
                     break
             delay_value = retry_after or retry_delay
             if not delay_value:

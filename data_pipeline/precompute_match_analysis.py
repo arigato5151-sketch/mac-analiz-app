@@ -413,6 +413,14 @@ def collect_match_analysis_cache(
             }
         rows.append(cache_row)
         cache_row_by_match[match_id] = cache_row
+    # Persist forecasts before Gemini calls. A provider failure or cancelled
+    # AI step must not leave match cards waiting on an empty analysis cache.
+    for offset in range(0, len(rows), 100):
+        db.upsert(
+            "match_analysis_cache",
+            rows[offset : offset + 100],
+            on_conflict="match_id",
+        )
     # Process every eligible fixture in kickoff order so cards do not need an
     # on-demand AI request when a nightly run contains more than 70 matches.
     for offset in range(0, len(ai_contexts), AI_MATCHES_PER_REQUEST):
@@ -434,6 +442,17 @@ def collect_match_analysis_cache(
                         cache_row["analysis_json"]["ai_risk_selections"] = package[
                             "risk_selections"
                         ]
+            updated_rows = [
+                cache_row_by_match[match_id]
+                for match_id in packages
+                if match_id in cache_row_by_match
+            ]
+            if updated_rows:
+                db.upsert(
+                    "match_analysis_cache",
+                    updated_rows,
+                    on_conflict="match_id",
+                )
             missing = {int(context["match_id"]) for context in batch} - packages.keys()
             ai_failures += len(missing)
             if missing:
