@@ -8,11 +8,11 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-from app.components.data import (
+from app.archive_data import (
     count_completed_match_history,
     load_completed_match_history,
-    load_reference_catalog,
 )
+from app.components.data import load_reference_catalog
 from app.localization import COUNTRY_NAMES_TR, LEAGUE_NAMES_TR
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")

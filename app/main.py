@@ -21,6 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.odds_quality import total_market_key
+from app.archive_data import count_completed_match_history, load_completed_match_history
 from app.archive import render_archive
 from app.forecast import (
     market_probability_tables,
@@ -44,8 +45,6 @@ from app.ai_match_analysis import (
 )
 from config.settings import get_optional_setting
 from app.components.data import (
-    count_completed_match_history,
-    load_completed_match_history,
     load_league_match_history,
     load_match_statistics_check_times,
     load_match_day,
