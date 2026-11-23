@@ -13,8 +13,8 @@ import pandas as pd
 from app.main import (
     ANALYSIS_MODEL_VERSION,
     build_precomputed_match_analysis,
-    tune_recent_form_prior,
 )
+from app.forecast import tune_recent_form_prior
 from app.ai_match_analysis import (
     MatchAnalysisAIError,
     build_compatible_match_analysis_context,
