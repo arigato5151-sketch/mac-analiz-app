@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import time
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -36,7 +37,8 @@ HISTORY_COLUMNS = (
     "home_corners,away_corners,home_shots,away_shots,home_shots_on_target,away_shots_on_target,"
     "home_possession,away_possession,expected_metrics_checked_at"
 )
-AI_MATCHES_PER_REQUEST = 35
+AI_MATCHES_PER_REQUEST = 4
+AI_SECONDS_BETWEEN_REQUESTS = 15
 NUMERIC_HISTORY_COLUMNS = (
     "id",
     "league_id",
@@ -415,6 +417,8 @@ def collect_match_analysis_cache(
     # on-demand AI request when a nightly run contains more than 70 matches.
     for offset in range(0, len(ai_contexts), AI_MATCHES_PER_REQUEST):
         batch = ai_contexts[offset : offset + AI_MATCHES_PER_REQUEST]
+        if offset:
+            time.sleep(AI_SECONDS_BETWEEN_REQUESTS)
         try:
             packages = generate_match_ai_packages(
                 batch, api_key=google_api_key or "", model=google_model

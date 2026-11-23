@@ -6,6 +6,7 @@ import hashlib
 import inspect
 import json
 import math
+import re
 import time
 import unicodedata
 from typing import Any
@@ -993,20 +994,51 @@ def generate_match_analysis(
         },
     }
     try:
-        for attempt in range(3):
+        for attempt in range(4):
             response = requests.post(
                 request_url,
                 headers=request_headers,
                 json=request_body,
                 timeout=60,
             )
-            if response.status_code != 503 or attempt == 2:
+            if response.status_code not in {429, 503} or attempt == 3:
                 break
+            retryable_429 = False
             retry_after = response.headers.get("Retry-After", "")
+            retry_delay = ""
+            if response.status_code == 429:
+                try:
+                    error_details = response.json().get("error", {}).get("details", [])
+                except (ValueError, AttributeError):
+                    error_details = []
+                quota_ids = [
+                    str(item.get("quotaId", ""))
+                    for item in error_details
+                    if isinstance(item, dict)
+                ]
+                retry_delays = [
+                    str(item.get("retryDelay", ""))
+                    for item in error_details
+                    if isinstance(item, dict) and item.get("retryDelay")
+                ]
+                retry_delay = retry_delays[0] if retry_delays else ""
+                retryable_429 = bool(retry_delay) or any(
+                    "PerMinute" in quota_id for quota_id in quota_ids
+                )
+                if not retryable_429:
+                    break
+            delay_value = retry_after or retry_delay
+            if not delay_value:
+                retry_info = re.search(
+                    r"retry in ([0-9]+(?:\.[0-9]+)?)s",
+                    response.text,
+                    flags=re.IGNORECASE,
+                )
+                delay_value = retry_info.group(1) if retry_info else ""
             try:
-                delay = min(max(float(retry_after), 1.0), 8.0)
+                delay = min(max(float(delay_value.rstrip("s")), 1.0), 60.0)
             except ValueError:
-                delay = 1.5 * (attempt + 1)
+                delay = min(5.0 * (2**attempt), 30.0)
             time.sleep(delay)
     except requests.RequestException as exc:
         if model != "gemini-3.5-flash-lite":
@@ -1315,7 +1347,7 @@ def generate_match_ai_packages(
     }
     raw = generate_match_analysis(
         {"matches": contexts}, api_key=api_key, model=model,
-        instructions_override=instructions, json_mode=True, max_output_tokens=65536,
+        instructions_override=instructions, json_mode=True, max_output_tokens=16384,
         response_schema=response_schema,
     )
     try:
