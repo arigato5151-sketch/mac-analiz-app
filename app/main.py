@@ -35,15 +35,10 @@ from app.performance import load_evaluated_prediction_results, render_performanc
 from app.localization import COUNTRY_NAMES_TR, LEAGUE_NAMES_TR
 from app.market_mapping import is_compound_selection, standard_market_price, total_goals_outcome
 from app.ai_match_analysis import (
-    MatchAnalysisAIError,
-    build_compatible_match_analysis_context,
     confirmed_lineup_context,
-    generate_match_analysis,
-    generate_match_risk_recommendations,
     previous_lineup_context,
     previous_match_ids_for_fixture,
 )
-from config.settings import get_optional_setting
 from app.components.data import (
     load_league_match_history,
     load_match_statistics_check_times,
@@ -857,33 +852,7 @@ def render_tactical_match_readout(
         for _, h, a in scorelines
     )
     candidate_probabilities = {label: chance for label, chance, _ in candidates}
-    risk_state_key = f"ai_risk_selections_{int(row['id'])}"
-    if precomputed_risks is None and st.button(
-        "🧠 Risk seçimlerini yapay zekâ belirlesin",
-        key=f"generate_ai_risks_{int(row['id'])}",
-        help="Gemini model olasılıklarına göre temkinli ve dengeli profiller için farklı marketlerden seçim yapar.",
-    ):
-        api_key = get_optional_setting("GOOGLE_API_KEY")
-        if not api_key:
-            st.warning("AI risk seçimi için GOOGLE_API_KEY ayarlanmalı (.env veya Streamlit secrets).")
-        else:
-            model = get_optional_setting("GOOGLE_MODEL", "gemini-3.8-flash")
-            context = build_compatible_match_analysis_context(row, history, forecast)
-            context["model"]["candidate_markets"] = {
-                label: float(chance) for label, chance, _ in candidates
-            }
-            with st.spinner("Yapay zekâ maç senaryolarını değerlendiriyor…"):
-                try:
-                    st.session_state[risk_state_key] = generate_match_risk_recommendations(
-                        context, api_key=api_key, model=model
-                    )
-                except MatchAnalysisAIError as exc:
-                    st.error(str(exc))
-    ai_risks = (
-        precomputed_risks
-        if precomputed_risks is not None
-        else st.session_state.get(risk_state_key, {})
-    )
+    ai_risks = precomputed_risks or {}
     low, medium = st.columns(2)
     for column, title, profile, explanation in (
         (low, "Görece daha olası", "low", "Yapay zekânın temkinli bulduğu, model olasılığı yüksek seçimler:"),
@@ -897,7 +866,7 @@ def render_tactical_match_readout(
                 if precomputed_risks is not None:
                     st.caption("Bu profil için doğrulanmış bir AI seçimi üretilemedi.")
                 else:
-                    st.caption("Bu maç için henüz yapay zekâ seçimi oluşturulmadı.")
+                    st.caption("Yapay zekâ seçimi gece iş akışında hazırlanacak; henüz hazır değil.")
             for selection in selections:
                 label = selection["market"]
                 chance = selection.get(
@@ -1399,12 +1368,6 @@ def render_ai_match_analysis(
     precomputed_halves: dict[str, Any] | None = None,
 ) -> None:
     """Generate an optional, session-cached AI interpretation for one match."""
-    home_probability = round(float(forecast["home_win"]), 3)
-    away_probability = round(float(forecast["away_win"]), 3)
-    state_key = (
-        f"ai_match_analysis_v3_{match_id}_"
-        f"{round(home_probability * 1000)}_{round(away_probability * 1000)}"
-    )
     st.markdown("#### Yapay zekâ destekli detaylı yorum")
     st.caption(
         "Google Gemini, uygulamanın maç geçmişi ve Poisson olasılıklarını yorumlar; "
@@ -1431,34 +1394,8 @@ def render_ai_match_analysis(
         st.markdown(precomputed_analysis)
         analysis_text = precomputed_analysis
     else:
-        if st.button(
-            "🧠 Yapay zekâ analizi oluştur",
-            key=f"generate_ai_analysis_{match_id}",
-            help="Bu maç için bir Google Gemini API isteği gönderir.",
-        ):
-            api_key = get_optional_setting("GOOGLE_API_KEY")
-            if not api_key:
-                st.warning(
-                    "AI yorumu için GOOGLE_API_KEY ayarlanmalı (.env veya Streamlit secrets)."
-                )
-            else:
-                half_forecasts = precomputed_halves or {
-                    str(half): model_half_forecast(row, history, half=half)
-                    for half in (1, 2)
-                }
-                context = build_compatible_match_analysis_context(
-                    row, history, forecast, half_forecasts=half_forecasts,
-                    odds_quote=row.get("iddaa_odds_quote"),
-                )
-                model = get_optional_setting("GOOGLE_MODEL", "gemini-3.8-flash")
-                with st.spinner("Maç verileri yorumlanıyor…"):
-                    try:
-                        st.session_state[state_key] = generate_match_analysis(
-                            context, api_key=api_key, model=model
-                        )
-                    except MatchAnalysisAIError as exc:
-                        st.error(str(exc))
-        analysis_text = st.session_state.get(state_key)
+        st.caption("Yapay zekâ yorumu gece iş akışında hazırlanacak; henüz hazır değil.")
+        analysis_text = None
     if analysis_text:
         if not precomputed_analysis:
             st.markdown(analysis_text)

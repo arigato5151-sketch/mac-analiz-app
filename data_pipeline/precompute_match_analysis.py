@@ -37,7 +37,6 @@ HISTORY_COLUMNS = (
     "home_possession,away_possession,expected_metrics_checked_at"
 )
 AI_MATCHES_PER_REQUEST = 35
-AI_MAX_REQUESTS_PER_RUN = 2
 NUMERIC_HISTORY_COLUMNS = (
     "id",
     "league_id",
@@ -412,17 +411,10 @@ def collect_match_analysis_cache(
             }
         rows.append(cache_row)
         cache_row_by_match[match_id] = cache_row
-    # Keep one run within a conservative Gemini quota budget. Fixtures are
-    # already ordered by kickoff, so the nearest matches get commentary first.
-    max_contexts = AI_MATCHES_PER_REQUEST * AI_MAX_REQUESTS_PER_RUN
-    if len(ai_contexts) > max_contexts:
-        print(
-            f"Gemini request budget: processing the first {max_contexts} fixtures; "
-            f"deferring {len(ai_contexts) - max_contexts} fixtures to a later run."
-        )
-    contexts_to_process = ai_contexts[:max_contexts]
-    for offset in range(0, len(contexts_to_process), AI_MATCHES_PER_REQUEST):
-        batch = contexts_to_process[offset : offset + AI_MATCHES_PER_REQUEST]
+    # Process every eligible fixture in kickoff order so cards do not need an
+    # on-demand AI request when a nightly run contains more than 70 matches.
+    for offset in range(0, len(ai_contexts), AI_MATCHES_PER_REQUEST):
+        batch = ai_contexts[offset : offset + AI_MATCHES_PER_REQUEST]
         try:
             packages = generate_match_ai_packages(
                 batch, api_key=google_api_key or "", model=google_model
@@ -446,7 +438,7 @@ def collect_match_analysis_cache(
             ai_failures += len(batch)
             print(
                 f"AI precompute failed for match batch "
-                f"{offset // 10 + 1} ({len(batch)} matches): {exc}"
+                f"{offset // AI_MATCHES_PER_REQUEST + 1} ({len(batch)} matches): {exc}"
             )
     return rows
 
