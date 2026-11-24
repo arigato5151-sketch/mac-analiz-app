@@ -1529,10 +1529,15 @@ def generate_match_ai_packages(
                 "değiştirme, kesinlik veya kazanç garantisi verme. Her maç için kısa Markdown "
                 "başlıkları kullan: Maç profili, Form ve eşleşme, Olası senaryolar, Risk "
                 "seçimleri. Sadece candidate_markets içindeki tam adları seç; low ve medium "
-                "gruplarına farklı marketlerden ikişer seçim ve kısa gerekçe yaz. Girdi "
-                "match_id değerlerini koru. Yalnızca istenen matches JSON nesnesini döndür."
+                "gruplarına farklı market türlerinden birer seçim ve kısa gerekçe yaz. Girdi "
+                "match_id değerlerini koru. Her maçta analysis ve risk_selections alanları "
+                "zorunludur; risk_selections içinde low ve medium dizileri bulunmalıdır. "
+                'JSON biçimi: {"matches":[{"match_id":123,"analysis":"...",'
+                '"risk_selections":{"low":[{"market":"...","reason":"..."}],'
+                '"medium":[{"market":"...","reason":"..."}]}}]}. '
+                "Yalnızca bu JSON nesnesini döndür."
             )
-            provider_output_tokens = 1000
+            provider_output_tokens = 1800
         try:
             raw = generate_match_analysis(
                 request_context,
