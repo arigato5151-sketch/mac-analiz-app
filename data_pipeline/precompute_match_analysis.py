@@ -279,6 +279,8 @@ def collect_match_analysis_cache(
             "api_key": api_key_setting("GROQ_API_KEY"),
             "base_url": "https://api.groq.com/openai/v1",
             "model": get_optional_setting("GROQ_MODEL", "openai/gpt-oss-20b"),
+            "strict_json_schema": "true",
+            "reasoning_effort": "low",
         },
         {
             "provider": "openai_compatible",

@@ -12,6 +12,8 @@ from app.ai_match_analysis import (
 
 class FakeResponse:
     ok = True
+    status_code = 200
+    headers: dict[str, str] = {}
 
     def json(self) -> dict[str, Any]:
         return {"choices": [{"message": {"content": '{"matches": []}'}}]}
@@ -36,6 +38,13 @@ def test_openai_compatible_provider_builds_json_chat_request(monkeypatch: Any) -
         max_output_tokens=12000,
         provider="openai_compatible",
         base_url="https://example.test/openai/v1/",
+        strict_json_schema=True,
+        reasoning_effort="low",
+        response_schema={
+            "type": "OBJECT",
+            "properties": {"matches": {"type": "ARRAY", "items": {"type": "OBJECT"}}},
+            "required": ["matches"],
+        },
     )
 
     assert result == '{"matches": []}'
@@ -43,7 +52,12 @@ def test_openai_compatible_provider_builds_json_chat_request(monkeypatch: Any) -
     assert captured["headers"]["Authorization"] == "Bearer test-key"
     assert captured["json"]["model"] == "test-model"
     assert captured["json"]["max_tokens"] == 8192
-    assert captured["json"]["response_format"] == {"type": "json_object"}
+    assert captured["json"]["reasoning_effort"] == "low"
+    response_format = captured["json"]["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["strict"] is True
+    assert response_format["json_schema"]["schema"]["type"] == "object"
+    assert response_format["json_schema"]["schema"]["additionalProperties"] is False
 
 
 def test_fallback_splits_match_batches_after_primary_quota_error(monkeypatch: Any) -> None:

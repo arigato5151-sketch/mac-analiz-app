@@ -874,6 +874,8 @@ def generate_match_analysis(
     response_schema: dict[str, Any] | None = None,
     provider: str = "google",
     base_url: str | None = None,
+    strict_json_schema: bool = False,
+    reasoning_effort: str | None = None,
 ) -> str:
     """Generate a Turkish analysis using only supplied match and model data."""
     if not api_key:
@@ -989,18 +991,57 @@ def generate_match_analysis(
             "temperature": 0.4,
             "max_tokens": min(max_output_tokens, 8192),
         }
+        if reasoning_effort:
+            compatible_body["reasoning_effort"] = reasoning_effort
         if json_mode:
-            compatible_body["response_format"] = {"type": "json_object"}
+            if strict_json_schema and response_schema:
+                def openai_schema(value: Any) -> Any:
+                    if isinstance(value, list):
+                        return [openai_schema(item) for item in value]
+                    if not isinstance(value, dict):
+                        return value
+                    converted = {key: openai_schema(item) for key, item in value.items()}
+                    if isinstance(converted.get("type"), str):
+                        converted["type"] = converted["type"].lower()
+                    if converted.get("type") == "object":
+                        converted["additionalProperties"] = False
+                    return converted
+
+                compatible_body["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "match_analysis_packages",
+                        "strict": True,
+                        "schema": openai_schema(response_schema),
+                    },
+                }
+            else:
+                compatible_body["response_format"] = {"type": "json_object"}
         try:
-            compatible_response = requests.post(
-                compatible_url,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=compatible_body,
-                timeout=90,
-            )
+            for attempt in range(2):
+                compatible_response = requests.post(
+                    compatible_url,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=compatible_body,
+                    timeout=90,
+                )
+                if compatible_response.status_code != 429 or attempt:
+                    break
+                retry_after = compatible_response.headers.get("Retry-After", "")
+                if not retry_after:
+                    retry_match = re.search(
+                        r"try again in ([0-9]+(?:\.[0-9]+)?)s",
+                        compatible_response.text,
+                        flags=re.IGNORECASE,
+                    )
+                    retry_after = retry_match.group(1) if retry_match else ""
+                try:
+                    time.sleep(min(max(float(retry_after.rstrip("s")), 1.0), 60.0))
+                except ValueError:
+                    time.sleep(30)
         except requests.RequestException as exc:
             raise MatchAnalysisAIError(
                 f"{provider} API bağlantısı kurulamadı ({type(exc).__name__})."
@@ -1015,6 +1056,8 @@ def generate_match_analysis(
                     else str(error_data)
                 )
             except (ValueError, AttributeError):
+                diagnostic = compatible_response.text[:300]
+            if not diagnostic:
                 diagnostic = compatible_response.text[:300]
             diagnostic = str(diagnostic).strip()[:300]
             suffix = f": {diagnostic}" if diagnostic else ""
@@ -1464,7 +1507,7 @@ def generate_match_ai_packages(
                     item.get("api_key") and not item.get("_disabled")
                     for item in active_fallbacks
                 ):
-                    time.sleep(15)
+                    time.sleep(25)
                 try:
                     packages.update(
                         generate_match_ai_packages(
@@ -1489,7 +1532,7 @@ def generate_match_ai_packages(
                 "gruplarına farklı marketlerden ikişer seçim ve kısa gerekçe yaz. Girdi "
                 "match_id değerlerini koru. Yalnızca istenen matches JSON nesnesini döndür."
             )
-            provider_output_tokens = 1800
+            provider_output_tokens = 1000
         try:
             raw = generate_match_analysis(
                 request_context,
@@ -1501,6 +1544,8 @@ def generate_match_ai_packages(
                 response_schema=response_schema,
                 provider=provider_type,
                 base_url=provider_config.get("base_url"),
+                strict_json_schema=bool(provider_config.get("strict_json_schema")),
+                reasoning_effort=provider_config.get("reasoning_effort"),
             )
             if provider_name != "Google Gemini":
                 print(f"AI commentary generated using fallback provider: {provider_name}")
@@ -1560,19 +1605,46 @@ def generate_match_ai_packages(
 
 def _compact_fallback_match_context(context: dict[str, Any]) -> dict[str, Any]:
     """Keep fallback-provider inputs small while retaining forecast evidence."""
-    compact = dict(context)
-    model = dict(context.get("model") or {})
-    model.pop("home_recent_matches", None)
-    model.pop("away_recent_matches", None)
-    compact["model"] = model
+    compact = {
+        key: context.get(key)
+        for key in (
+            "match",
+            "iddaa_odds",
+            "model",
+            "confirmed_lineups",
+            "match_id",
+        )
+        if key in context
+    }
+    source_model = context.get("model") or {}
+    model_keys = (
+        "most_likely_score",
+        "expected_goals",
+        "probabilities",
+        "score_distribution",
+        "period_forecasts",
+        "candidate_markets",
+        "league_history_matches",
+        "historical_model_evaluation",
+        "home_recent_summary",
+        "away_recent_summary",
+        "home_recent_trend",
+        "away_recent_trend",
+        "home_venue_summary",
+        "away_venue_summary",
+        "recent_form_comparisons",
+        "venue_form_comparisons",
+        "expected_goals_comparison",
+        "recent_data_recency_days",
+    )
+    compact["model"] = {
+        key: source_model[key] for key in model_keys if key in source_model
+    }
     odds = context.get("iddaa_odds")
     if isinstance(odds, dict):
         compact_odds = dict(odds)
-        compact_odds["markets"] = list(odds.get("markets") or [])[:12]
+        compact_odds["markets"] = list(odds.get("markets") or [])[:6]
         compact["iddaa_odds"] = compact_odds
-    compact["commentary_quality_feedback"] = None
-    compact["likely_lineups_from_previous_match"] = None
-    compact["previous_match_lineup_reference"] = None
     return compact
 
 
