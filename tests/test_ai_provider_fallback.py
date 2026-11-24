@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from app.ai_match_analysis import generate_match_analysis
+from app.ai_match_analysis import (
+    MatchAnalysisAIError,
+    generate_match_ai_packages,
+    generate_match_analysis,
+)
 
 
 class FakeResponse:
@@ -39,3 +44,46 @@ def test_openai_compatible_provider_builds_json_chat_request(monkeypatch: Any) -
     assert captured["json"]["model"] == "test-model"
     assert captured["json"]["max_tokens"] == 8192
     assert captured["json"]["response_format"] == {"type": "json_object"}
+
+
+def test_fallback_splits_match_batches_after_primary_quota_error(monkeypatch: Any) -> None:
+    fallback_calls: list[list[int]] = []
+
+    def fake_generate(context: dict[str, Any], **kwargs: Any) -> str:
+        if kwargs["provider"] == "google":
+            raise MatchAnalysisAIError("HTTP 429 quota exhausted")
+        matches = context["matches"]
+        match_ids = [int(item["match_id"]) for item in matches]
+        fallback_calls.append(match_ids)
+        return json.dumps(
+            {
+                "matches": [
+                    {"match_id": match_id, "analysis": "Kısa analiz", "risk_selections": {}}
+                    for match_id in match_ids
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.ai_match_analysis.generate_match_analysis", fake_generate)
+    monkeypatch.setattr("app.ai_match_analysis.time.sleep", lambda _: None)
+    contexts = [
+        {"match_id": match_id, "model": {"candidate_markets": {"Beraberlik": 0.3}}}
+        for match_id in (11, 12)
+    ]
+
+    packages = generate_match_ai_packages(
+        contexts,
+        api_key="google-key",
+        fallback_providers=[
+            {
+                "provider": "openai_compatible",
+                "name": "Groq",
+                "api_key": "groq-key",
+                "base_url": "https://example.test/v1",
+                "model": "test-model",
+            }
+        ],
+    )
+
+    assert fallback_calls == [[11], [12]]
+    assert set(packages) == {11, 12}

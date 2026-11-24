@@ -1002,7 +1002,9 @@ def generate_match_analysis(
                 timeout=90,
             )
         except requests.RequestException as exc:
-            raise MatchAnalysisAIError(f"{provider} API bağlantısı kurulamadı.") from exc
+            raise MatchAnalysisAIError(
+                f"{provider} API bağlantısı kurulamadı ({type(exc).__name__})."
+            ) from exc
         if not compatible_response.ok:
             try:
                 error_body = compatible_response.json()
@@ -1437,16 +1439,67 @@ def generate_match_ai_packages(
         if not provider_key:
             continue
         provider_name = provider_config.get("name", provider_config.get("provider", "AI"))
+        if provider_config.get("_disabled"):
+            provider_errors.append(
+                f"{provider_name}: {provider_config.get('_last_error', 'önceki istekte kullanılamadı')}"
+            )
+            continue
+        provider_type = provider_config.get("provider", "google")
+        if provider_type != "google" and len(contexts) > 1:
+            # Free provider tiers often have much tighter per-minute token
+            # limits. Send compact, single-match requests so fallback does not
+            # fail on the same oversized batch that exhausted Gemini.
+            compact_contexts = [
+                _compact_fallback_match_context(context) for context in contexts
+            ]
+            packages: dict[int, dict[str, Any]] = {}
+            other_fallbacks = [
+                item
+                for item in fallback_providers or []
+                if item is not provider_config
+            ]
+            for index, compact_context in enumerate(compact_contexts):
+                active_fallbacks = [provider_config, *other_fallbacks]
+                if index and any(
+                    item.get("api_key") and not item.get("_disabled")
+                    for item in active_fallbacks
+                ):
+                    time.sleep(15)
+                try:
+                    packages.update(
+                        generate_match_ai_packages(
+                            [compact_context],
+                            fallback_providers=[provider_config, *other_fallbacks],
+                        )
+                    )
+                except MatchAnalysisAIError as exc:
+                    provider_errors.append(f"{provider_name}: {exc}")
+            if packages:
+                return packages
+            continue
+        provider_instructions = instructions
+        provider_output_tokens = 16384
+        if provider_type != "google":
+            provider_instructions = (
+                "Türkçe futbol analisti olarak her maçı yalnızca verilen JSON verisiyle "
+                "yorumla; eksik kadro, sakatlık, oran veya haber uydurma. Model olasılıklarını "
+                "değiştirme, kesinlik veya kazanç garantisi verme. Her maç için kısa Markdown "
+                "başlıkları kullan: Maç profili, Form ve eşleşme, Olası senaryolar, Risk "
+                "seçimleri. Sadece candidate_markets içindeki tam adları seç; low ve medium "
+                "gruplarına farklı marketlerden ikişer seçim ve kısa gerekçe yaz. Girdi "
+                "match_id değerlerini koru. Yalnızca istenen matches JSON nesnesini döndür."
+            )
+            provider_output_tokens = 1800
         try:
             raw = generate_match_analysis(
                 request_context,
                 api_key=provider_key,
                 model=provider_config.get("model", model),
-                instructions_override=instructions,
+                instructions_override=provider_instructions,
                 json_mode=True,
-                max_output_tokens=16384,
+                max_output_tokens=provider_output_tokens,
                 response_schema=response_schema,
-                provider=provider_config.get("provider", "google"),
+                provider=provider_type,
                 base_url=provider_config.get("base_url"),
             )
             if provider_name != "Google Gemini":
@@ -1454,6 +1507,8 @@ def generate_match_ai_packages(
             break
         except MatchAnalysisAIError as exc:
             provider_errors.append(f"{provider_name}: {exc}")
+            provider_config["_last_error"] = str(exc)
+            provider_config["_disabled"] = True
     if not raw:
         if not provider_errors:
             raise MatchAnalysisAIError("Hiçbir yapay zekâ sağlayıcısı için API anahtarı yapılandırılmamış.")
@@ -1494,6 +1549,24 @@ def generate_match_ai_packages(
     if not packages:
         raise MatchAnalysisAIError("Yapay zekâ geçerli maç paketi döndürmedi.")
     return packages
+
+
+def _compact_fallback_match_context(context: dict[str, Any]) -> dict[str, Any]:
+    """Keep fallback-provider inputs small while retaining forecast evidence."""
+    compact = dict(context)
+    model = dict(context.get("model") or {})
+    model.pop("home_recent_matches", None)
+    model.pop("away_recent_matches", None)
+    compact["model"] = model
+    odds = context.get("iddaa_odds")
+    if isinstance(odds, dict):
+        compact_odds = dict(odds)
+        compact_odds["markets"] = list(odds.get("markets") or [])[:12]
+        compact["iddaa_odds"] = compact_odds
+    compact["commentary_quality_feedback"] = None
+    compact["likely_lineups_from_previous_match"] = None
+    compact["previous_match_lineup_reference"] = None
+    return compact
 
 
 def _validate_risk_selections(
