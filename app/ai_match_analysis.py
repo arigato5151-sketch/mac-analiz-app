@@ -1527,6 +1527,13 @@ def generate_match_ai_packages(
     }
     packages: dict[int, dict[str, Any]] = {}
     matches = payload.get("matches", []) if isinstance(payload, dict) else []
+    if (
+        not matches
+        and len(contexts) == 1
+        and isinstance(payload, dict)
+        and payload.get("analysis")
+    ):
+        matches = [{**payload, "match_id": contexts[0].get("match_id")}]
     for item in matches if isinstance(matches, list) else []:
         if not isinstance(item, dict):
             continue

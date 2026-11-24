@@ -266,20 +266,24 @@ def collect_match_analysis_cache(
         for item in db.select_all("leagues", columns="id,name")
         if item.get("id") is not None and item.get("name")
     }
-    google_api_key = get_optional_setting("GOOGLE_API_KEY")
+    def api_key_setting(name: str) -> str:
+        # Secrets pasted from consoles can contain line breaks or a BOM.
+        return "".join(get_optional_setting(name).replace("\ufeff", "").split())
+
+    google_api_key = api_key_setting("GOOGLE_API_KEY")
     google_model = get_optional_setting("GOOGLE_MODEL", "gemini-3.8-flash")
     fallback_providers = [
         {
             "provider": "openai_compatible",
             "name": "Groq",
-            "api_key": get_optional_setting("GROQ_API_KEY"),
+            "api_key": api_key_setting("GROQ_API_KEY"),
             "base_url": "https://api.groq.com/openai/v1",
             "model": get_optional_setting("GROQ_MODEL", "openai/gpt-oss-20b"),
         },
         {
             "provider": "openai_compatible",
             "name": "NVIDIA NIM",
-            "api_key": get_optional_setting("NVIDIA_API_KEY"),
+            "api_key": api_key_setting("NVIDIA_API_KEY"),
             "base_url": "https://integrate.api.nvidia.com/v1",
             "model": get_optional_setting(
                 "NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b"
