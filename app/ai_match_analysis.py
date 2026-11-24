@@ -1507,7 +1507,7 @@ def generate_match_ai_packages(
                     item.get("api_key") and not item.get("_disabled")
                     for item in active_fallbacks
                 ):
-                    time.sleep(25)
+                    time.sleep(20)
                 try:
                     packages.update(
                         generate_match_ai_packages(
@@ -1526,8 +1526,9 @@ def generate_match_ai_packages(
             provider_instructions = (
                 "Türkçe futbol analisti olarak her maçı yalnızca verilen JSON verisiyle "
                 "yorumla; eksik kadro, sakatlık, oran veya haber uydurma. Model olasılıklarını "
-                "değiştirme, kesinlik veya kazanç garantisi verme. Her maç için kısa Markdown "
-                "başlıkları kullan: Maç profili, Form ve eşleşme, Olası senaryolar, Risk "
+                "değiştirme, kesinlik veya kazanç garantisi verme. Analizi en fazla 120 kelime "
+                "tut. Her maç için kısa Markdown başlıkları kullan: Maç profili, Form ve "
+                "eşleşme, Olası senaryolar, Risk "
                 "seçimleri. Sadece candidate_markets içindeki tam adları seç; low ve medium "
                 "gruplarına farklı market türlerinden birer seçim ve kısa gerekçe yaz. Girdi "
                 "match_id değerlerini koru. Her maçta analysis ve risk_selections alanları "
@@ -1537,7 +1538,7 @@ def generate_match_ai_packages(
                 '"medium":[{"market":"...","reason":"..."}]}}]}. '
                 "Yalnızca bu JSON nesnesini döndür."
             )
-            provider_output_tokens = 1800
+            provider_output_tokens = 1200
         try:
             raw = generate_match_analysis(
                 request_context,
@@ -1614,9 +1615,7 @@ def _compact_fallback_match_context(context: dict[str, Any]) -> dict[str, Any]:
         key: context.get(key)
         for key in (
             "match",
-            "iddaa_odds",
             "model",
-            "confirmed_lineups",
             "match_id",
         )
         if key in context
@@ -1626,30 +1625,34 @@ def _compact_fallback_match_context(context: dict[str, Any]) -> dict[str, Any]:
         "most_likely_score",
         "expected_goals",
         "probabilities",
-        "score_distribution",
-        "period_forecasts",
         "candidate_markets",
         "league_history_matches",
-        "historical_model_evaluation",
         "home_recent_summary",
         "away_recent_summary",
-        "home_recent_trend",
-        "away_recent_trend",
-        "home_venue_summary",
-        "away_venue_summary",
-        "recent_form_comparisons",
-        "venue_form_comparisons",
-        "expected_goals_comparison",
         "recent_data_recency_days",
     )
     compact["model"] = {
         key: source_model[key] for key in model_keys if key in source_model
     }
-    odds = context.get("iddaa_odds")
-    if isinstance(odds, dict):
-        compact_odds = dict(odds)
-        compact_odds["markets"] = list(odds.get("markets") or [])[:6]
-        compact["iddaa_odds"] = compact_odds
+    for summary_key in ("home_recent_summary", "away_recent_summary"):
+        summary = source_model.get(summary_key)
+        if isinstance(summary, dict):
+            compact["model"][summary_key] = {
+                key: summary[key]
+                for key in (
+                    "matches",
+                    "points_per_match",
+                    "goals_for_per_match",
+                    "goals_against_per_match",
+                    "xg_for_per_match",
+                    "xg_against_per_match",
+                    "scored_sample_size",
+                    "conceded_sample_size",
+                    "xg_for_sample_size",
+                    "xg_against_sample_size",
+                )
+                if key in summary
+            }
     return compact
 
 
