@@ -458,11 +458,17 @@ def collect_match_analysis_cache(
             if missing:
                 print(f"AI precompute returned no package for matches: {sorted(missing)}")
         except MatchAnalysisAIError as exc:
-            if "HTTP 429" in str(exc):
+            error_text = str(exc)
+            if "HTTP 429" in error_text or "HTTP 503" in error_text:
                 remaining = len(ai_contexts) - offset
                 ai_failures += remaining
+                provider_issue = (
+                    "rate/quota limit"
+                    if "HTTP 429" in error_text
+                    else "temporary overload"
+                )
                 print(
-                    f"Gemini rate/quota limit reached; skipping the remaining "
+                    f"Gemini {provider_issue}; skipping the remaining "
                     f"{remaining} fixtures for this run: {exc}"
                 )
                 break

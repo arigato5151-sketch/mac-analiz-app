@@ -1008,6 +1008,13 @@ def generate_match_analysis(
             )
             if response.status_code not in {429, 503} or attempt == 3:
                 break
+            # A single retry is enough for a transient overload. Repeating a
+            # long batch several times can burn the project's daily request
+            # quota before the remaining fixtures get a chance to run.
+            if response.status_code == 503 and (
+                attempt >= 1 or model == "gemini-3.5-flash-lite"
+            ):
+                break
             retryable_429 = False
             minute_quota = False
             retry_after = response.headers.get("Retry-After", "")
