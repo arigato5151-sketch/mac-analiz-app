@@ -68,9 +68,11 @@ jobs:
         if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && steps.refresh_fixtures.outcome == 'success' && steps.refresh_odds.outcome == 'success' && steps.refresh_results.outcome == 'success'
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
         run: |
-          if [ -z "$GOOGLE_API_KEY" ]; then
-            echo "GOOGLE_API_KEY secret is missing; nightly AI commentary cannot be generated."
+          if [ -z "$GOOGLE_API_KEY" ] && [ -z "$GROQ_API_KEY" ] && [ -z "$NVIDIA_API_KEY" ]; then
+            echo "No AI provider key is configured; scheduled AI commentary cannot be generated."
             exit 1
           fi
       - name: Generate and save scheduled AI match commentary
@@ -80,6 +82,10 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GOOGLE_MODEL: gemini-3.8-flash
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL: openai/gpt-oss-20b
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          NVIDIA_MODEL: nvidia/nemotron-3.5-lightning-30b-a3b
         run: python -m data_pipeline.precompute_match_analysis
       - name: Report retained odds history size
         if: always()

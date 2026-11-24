@@ -872,10 +872,12 @@ def generate_match_analysis(
     instructions_override: str | None = None, json_mode: bool = False,
     max_output_tokens: int = 65536,
     response_schema: dict[str, Any] | None = None,
+    provider: str = "google",
+    base_url: str | None = None,
 ) -> str:
     """Generate a Turkish analysis using only supplied match and model data."""
     if not api_key:
-        raise MatchAnalysisAIError("Google API anahtarı yapılandırılmamış.")
+        raise MatchAnalysisAIError(f"{provider} API anahtarı yapılandırılmamış.")
     instructions = (
         "Bir futbol analisti gibi Türkçe yaz. Verilen JSON, maç ve model hakkında "
         "kullanılabilecek tek bilgi kaynağıdır. Oyuncu, sakatlık, diziliş, teknik "
@@ -971,6 +973,62 @@ def generate_match_analysis(
     )
     if instructions_override:
         instructions = instructions_override
+    if provider != "google":
+        if not base_url:
+            raise MatchAnalysisAIError(f"{provider} API adresi yapılandırılmamış.")
+        compatible_url = f"{base_url.rstrip('/')}/chat/completions"
+        compatible_body: dict[str, Any] = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": instructions},
+                {
+                    "role": "user",
+                    "content": json.dumps(context, ensure_ascii=False, separators=(",", ":")),
+                },
+            ],
+            "temperature": 0.4,
+            "max_tokens": min(max_output_tokens, 8192),
+        }
+        if json_mode:
+            compatible_body["response_format"] = {"type": "json_object"}
+        try:
+            compatible_response = requests.post(
+                compatible_url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=compatible_body,
+                timeout=90,
+            )
+        except requests.RequestException as exc:
+            raise MatchAnalysisAIError(f"{provider} API bağlantısı kurulamadı.") from exc
+        if not compatible_response.ok:
+            try:
+                error_body = compatible_response.json()
+                error_data = error_body.get("error", {}) if isinstance(error_body, dict) else {}
+                diagnostic = (
+                    error_data.get("message", "")
+                    if isinstance(error_data, dict)
+                    else str(error_data)
+                )
+            except (ValueError, AttributeError):
+                diagnostic = compatible_response.text[:300]
+            diagnostic = str(diagnostic).strip()[:300]
+            suffix = f": {diagnostic}" if diagnostic else ""
+            raise MatchAnalysisAIError(
+                f"{provider} API isteği başarısız oldu "
+                f"(HTTP {compatible_response.status_code}){suffix}"
+            )
+        try:
+            compatible_payload = compatible_response.json()
+            choices = compatible_payload.get("choices") or []
+            output = str(choices[0].get("message", {}).get("content") or "").strip()
+        except (ValueError, AttributeError, IndexError, TypeError) as exc:
+            raise MatchAnalysisAIError(f"{provider} API yanıtı okunamadı.") from exc
+        if not output:
+            raise MatchAnalysisAIError(f"{provider} boş bir analiz döndürdü.")
+        return output
     request_url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     )
@@ -1264,7 +1322,8 @@ def generate_match_ai_package(
 
 
 def generate_match_ai_packages(
-    contexts: list[dict[str, Any]], *, api_key: str, model: str = "gemini-3.8-flash"
+    contexts: list[dict[str, Any]], *, api_key: str = "", model: str = "gemini-3.8-flash",
+    fallback_providers: list[dict[str, str]] | None = None,
 ) -> dict[int, dict[str, Any]]:
     """Generate compact, match-specific packages in one quota-efficient request."""
     if not contexts:
@@ -1366,11 +1425,42 @@ def generate_match_ai_packages(
         },
         "required": ["matches"],
     }
-    raw = generate_match_analysis(
-        {"matches": contexts}, api_key=api_key, model=model,
-        instructions_override=instructions, json_mode=True, max_output_tokens=16384,
-        response_schema=response_schema,
-    )
+    request_context = {"matches": contexts}
+    providers = [
+        {"provider": "google", "name": "Google Gemini", "api_key": api_key, "model": model},
+        *(fallback_providers or []),
+    ]
+    provider_errors: list[str] = []
+    raw = ""
+    for provider_config in providers:
+        provider_key = provider_config.get("api_key", "")
+        if not provider_key:
+            continue
+        provider_name = provider_config.get("name", provider_config.get("provider", "AI"))
+        try:
+            raw = generate_match_analysis(
+                request_context,
+                api_key=provider_key,
+                model=provider_config.get("model", model),
+                instructions_override=instructions,
+                json_mode=True,
+                max_output_tokens=16384,
+                response_schema=response_schema,
+                provider=provider_config.get("provider", "google"),
+                base_url=provider_config.get("base_url"),
+            )
+            if provider_name != "Google Gemini":
+                print(f"AI commentary generated using fallback provider: {provider_name}")
+            break
+        except MatchAnalysisAIError as exc:
+            provider_errors.append(f"{provider_name}: {exc}")
+    if not raw:
+        if not provider_errors:
+            raise MatchAnalysisAIError("Hiçbir yapay zekâ sağlayıcısı için API anahtarı yapılandırılmamış.")
+        raise MatchAnalysisAIError(
+            "Tüm yapılandırılmış yapay zekâ sağlayıcıları başarısız oldu. "
+            + " | ".join(provider_errors)
+        )
     try:
         payload = json.loads(raw)
     except ValueError as exc:

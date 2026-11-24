@@ -268,9 +268,28 @@ def collect_match_analysis_cache(
     }
     google_api_key = get_optional_setting("GOOGLE_API_KEY")
     google_model = get_optional_setting("GOOGLE_MODEL", "gemini-3.8-flash")
+    fallback_providers = [
+        {
+            "provider": "openai_compatible",
+            "name": "Groq",
+            "api_key": get_optional_setting("GROQ_API_KEY"),
+            "base_url": "https://api.groq.com/openai/v1",
+            "model": get_optional_setting("GROQ_MODEL", "openai/gpt-oss-20b"),
+        },
+        {
+            "provider": "openai_compatible",
+            "name": "NVIDIA NIM",
+            "api_key": get_optional_setting("NVIDIA_API_KEY"),
+            "base_url": "https://integrate.api.nvidia.com/v1",
+            "model": get_optional_setting(
+                "NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b"
+            ),
+        },
+    ]
+    has_ai_provider = bool(google_api_key or any(item["api_key"] for item in fallback_providers))
     ai_failures = 0
-    if not google_api_key:
-        print("GOOGLE_API_KEY is missing; nightly AI commentary will not be generated.")
+    if not has_ai_provider:
+        print("No AI provider API key is configured; nightly AI commentary will not be generated.")
     histories: dict[int, pd.DataFrame] = {}
     tuning_by_league: dict[int, dict[str, Any] | None] = {}
     rows: list[dict[str, Any]] = []
@@ -369,7 +388,7 @@ def collect_match_analysis_cache(
         analysis = build_precomputed_match_analysis(
             row, histories[league_id], tuning_by_league[league_id]
         )
-        if google_api_key and analysis.get("forecast"):
+        if has_ai_provider and analysis.get("forecast"):
             analysis_by_match[match_id] = analysis
             lineup_revision = _commentary_lineup_revision(row)
             odds_revision = iddaa_odds_revision(latest_odds.get(match_id))
@@ -429,7 +448,10 @@ def collect_match_analysis_cache(
             time.sleep(AI_SECONDS_BETWEEN_REQUESTS)
         try:
             packages = generate_match_ai_packages(
-                batch, api_key=google_api_key or "", model=google_model
+                batch,
+                api_key=google_api_key or "",
+                model=google_model,
+                fallback_providers=fallback_providers,
             )
             for match_id, package in packages.items():
                 analysis = analysis_by_match.get(match_id)
@@ -462,13 +484,9 @@ def collect_match_analysis_cache(
             if "HTTP 429" in error_text or "HTTP 503" in error_text:
                 remaining = len(ai_contexts) - offset
                 ai_failures += remaining
-                provider_issue = (
-                    "rate/quota limit"
-                    if "HTTP 429" in error_text
-                    else "temporary overload"
-                )
+                provider_issue = "rate/quota limit" if "HTTP 429" in error_text else "temporary overload"
                 print(
-                    f"Gemini {provider_issue}; skipping the remaining "
+                    f"AI provider {provider_issue}; skipping the remaining "
                     f"{remaining} fixtures for this run: {exc}"
                 )
                 break
@@ -511,7 +529,7 @@ def main() -> None:
     if summary["ai_failures"]:
         raise SystemExit(
             f"AI commentary was not generated for {summary['ai_failures']} fixtures. "
-            "Check the Gemini quota and API response above."
+            "Check configured AI provider quotas and API responses above."
         )
 
 
