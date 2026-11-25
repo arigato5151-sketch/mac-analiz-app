@@ -876,6 +876,7 @@ def generate_match_analysis(
     base_url: str | None = None,
     strict_json_schema: bool = False,
     reasoning_effort: str | None = None,
+    extra_body: dict[str, Any] | None = None,
 ) -> str:
     """Generate a Turkish analysis using only supplied match and model data."""
     if not api_key:
@@ -1017,6 +1018,8 @@ def generate_match_analysis(
                 }
             else:
                 compatible_body["response_format"] = {"type": "json_object"}
+        if extra_body:
+            compatible_body.update(extra_body)
         try:
             for attempt in range(2):
                 compatible_response = requests.post(
@@ -1552,6 +1555,7 @@ def generate_match_ai_packages(
                 base_url=provider_config.get("base_url"),
                 strict_json_schema=bool(provider_config.get("strict_json_schema")),
                 reasoning_effort=provider_config.get("reasoning_effort"),
+                extra_body=provider_config.get("extra_body"),
             )
             if provider_name != "Google Gemini":
                 print(f"AI commentary generated using fallback provider: {provider_name}")

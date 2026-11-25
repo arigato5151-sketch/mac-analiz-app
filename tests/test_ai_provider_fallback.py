@@ -40,6 +40,7 @@ def test_openai_compatible_provider_builds_json_chat_request(monkeypatch: Any) -
         base_url="https://example.test/openai/v1/",
         strict_json_schema=True,
         reasoning_effort="low",
+        extra_body={"chat_template_kwargs": {"enable_thinking": True}},
         response_schema={
             "type": "OBJECT",
             "properties": {"matches": {"type": "ARRAY", "items": {"type": "OBJECT"}}},
@@ -53,6 +54,7 @@ def test_openai_compatible_provider_builds_json_chat_request(monkeypatch: Any) -
     assert captured["json"]["model"] == "test-model"
     assert captured["json"]["max_tokens"] == 8192
     assert captured["json"]["reasoning_effort"] == "low"
+    assert captured["json"]["chat_template_kwargs"] == {"enable_thinking": True}
     response_format = captured["json"]["response_format"]
     assert response_format["type"] == "json_schema"
     assert response_format["json_schema"]["strict"] is True

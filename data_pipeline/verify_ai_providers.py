@@ -20,9 +20,11 @@ def main() -> None:
             "name": "NVIDIA NIM",
             "key": get_optional_setting("NVIDIA_API_KEY"),
             "model": get_optional_setting(
-                "NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b"
+                "NVIDIA_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"
             ),
             "base_url": "https://integrate.api.nvidia.com/v1",
+            "extra_body": {"chat_template_kwargs": {"enable_thinking": True}},
+            "strict_json_schema": False,
         },
     )
     failures = 0
@@ -42,7 +44,8 @@ def main() -> None:
                 max_output_tokens=128,
                 provider="openai_compatible",
                 base_url=provider["base_url"],
-                strict_json_schema=True,
+                strict_json_schema=bool(provider.get("strict_json_schema", True)),
+                extra_body=provider.get("extra_body"),
                 response_schema={
                     "type": "OBJECT",
                     "properties": {"ok": {"type": "BOOLEAN"}},

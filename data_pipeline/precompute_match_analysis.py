@@ -288,8 +288,9 @@ def collect_match_analysis_cache(
             "api_key": api_key_setting("NVIDIA_API_KEY"),
             "base_url": "https://integrate.api.nvidia.com/v1",
             "model": get_optional_setting(
-                "NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b"
+                "NVIDIA_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"
             ),
+            "extra_body": {"chat_template_kwargs": {"enable_thinking": True}},
         },
     ]
     has_ai_provider = bool(google_api_key or any(item["api_key"] for item in fallback_providers))
