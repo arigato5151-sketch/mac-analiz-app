@@ -41,7 +41,7 @@ def main() -> None:
                 model=provider["model"],
                 instructions_override='Return exactly this JSON: {"ok":true}',
                 json_mode=True,
-                max_output_tokens=128,
+                max_output_tokens=512,
                 provider="openai_compatible",
                 base_url=provider["base_url"],
                 strict_json_schema=bool(provider.get("strict_json_schema", True)),
