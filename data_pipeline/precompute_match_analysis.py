@@ -8,6 +8,7 @@ import math
 import time
 from datetime import date, datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -41,6 +42,7 @@ AI_MATCHES_PER_REQUEST = 8
 AI_SECONDS_BETWEEN_REQUESTS = 5
 AI_FALLBACK_DELAY_SECONDS = 5
 AI_REQUEST_TIMEOUT_SECONDS = 20
+ISTANBUL = ZoneInfo("Europe/Istanbul")
 NUMERIC_HISTORY_COLUMNS = (
     "id",
     "league_id",
@@ -168,11 +170,12 @@ def _commentary_lineup_revision(row: dict[str, Any]) -> str:
 def collect_match_analysis_cache(
     db: SupabaseRestClient, *, now: datetime | None = None
 ) -> list[dict[str, Any]]:
-    """Build analysis payloads for all upcoming scheduled fixtures."""
+    """Cache upcoming forecasts and generate AI commentary for today's fixtures."""
     reference = now or datetime.now(timezone.utc)
     if reference.tzinfo is None:
         raise ValueError("now must be timezone-aware")
     reference = reference.astimezone(timezone.utc)
+    daily_fixture_date = reference.astimezone(ISTANBUL).date()
     cache_until = reference + pd.Timedelta(hours=36)
     fixtures = db.select_all(
         "matches",
@@ -320,6 +323,7 @@ def collect_match_analysis_cache(
     cache_row_by_match: dict[int, dict[str, Any]] = {}
     ai_contexts: list[dict[str, Any]] = []
     analysis_by_match: dict[int, dict[str, Any]] = {}
+    daily_fixture_count = 0
     for fixture in fixtures:
         try:
             league_id = int(fixture["league_id"])
@@ -412,7 +416,10 @@ def collect_match_analysis_cache(
         analysis = build_precomputed_match_analysis(
             row, histories[league_id], tuning_by_league[league_id]
         )
-        if has_ai_provider and analysis.get("forecast"):
+        is_daily_fixture = match_date.tz_convert(ISTANBUL).date() == daily_fixture_date
+        if analysis.get("forecast") and is_daily_fixture:
+            daily_fixture_count += 1
+        if has_ai_provider and analysis.get("forecast") and is_daily_fixture:
             analysis_by_match[match_id] = analysis
             lineup_revision = _commentary_lineup_revision(row)
             odds_revision = iddaa_odds_revision(latest_odds.get(match_id))
@@ -456,7 +463,13 @@ def collect_match_analysis_cache(
             }
         rows.append(cache_row)
         cache_row_by_match[match_id] = cache_row
-    # Persist forecasts before Gemini calls. A provider failure or cancelled
+    print(
+        f"Daily AI scope ({daily_fixture_date.isoformat()} Europe/Istanbul): "
+        f"{daily_fixture_count} fixtures; {len(ai_contexts)} new AI analyses required. "
+        "Forecasts for other dates remain cached without nightly AI commentary.",
+        flush=True,
+    )
+    # Persist forecasts before AI calls. A provider failure or cancelled
     # AI step must not leave match cards waiting on an empty analysis cache.
     for offset in range(0, len(rows), 100):
         db.upsert(
@@ -464,8 +477,8 @@ def collect_match_analysis_cache(
             rows[offset : offset + 100],
             on_conflict="match_id",
         )
-    # Process every eligible fixture in kickoff order so cards do not need an
-    # on-demand AI request when a nightly run contains more than 70 matches.
+    # Process only today's fixture contexts in kickoff order; future forecasts
+    # remain available without requiring an on-demand AI request in the card.
     total_batches = math.ceil(len(ai_contexts) / AI_MATCHES_PER_REQUEST)
     for offset in range(0, len(ai_contexts), AI_MATCHES_PER_REQUEST):
         batch = ai_contexts[offset : offset + AI_MATCHES_PER_REQUEST]
@@ -553,12 +566,18 @@ def main() -> None:
     summary = {
         "fixtures_cached": len(rows),
         "ai_analyses_cached": sum(
-            1 for row in rows if row["analysis_json"].get("ai_analysis")
+            1
+            for row in rows
+            if row["analysis_json"].get("ai_analysis")
+            and pd.to_datetime(row["match_date"], utc=True).tz_convert(ISTANBUL).date()
+            == pd.to_datetime(row["calculated_at"], utc=True).tz_convert(ISTANBUL).date()
         ),
         "ai_failures": sum(
             1
             for row in rows
             if row["analysis_json"].get("forecast")
+            and pd.to_datetime(row["match_date"], utc=True).tz_convert(ISTANBUL).date()
+            == pd.to_datetime(row["calculated_at"], utc=True).tz_convert(ISTANBUL).date()
             and not row["analysis_json"].get("ai_analysis")
         ),
         "model_version": ANALYSIS_MODEL_VERSION,
