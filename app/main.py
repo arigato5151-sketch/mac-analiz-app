@@ -1655,9 +1655,17 @@ def render_auto_coupon(
 if __name__ == '__main__':
     st.markdown("<section class='hero'><div class='hero-kicker'>Günlük karşılaşmalar · iddaa marketleri</div><h1>Maç Merkezi</h1><p>Maçları inceleyin, marketleri karşılaştırın ve maç istatistikleri arşivine ulaşın.</p></section>", unsafe_allow_html=True)
     today = datetime.now(ISTANBUL).date()
+    # Keep a user's manually selected day during normal reruns, but advance it
+    # automatically after midnight so yesterday's finished fixtures do not
+    # make today's page appear empty.
+    if st.session_state.get("_match_day_session_date") != today:
+        st.session_state["match_day_picker"] = today
+        st.session_state["_match_day_session_date"] = today
     col, refresh_col, _ = st.columns([1, 1, 2])
     with col:
-        selected_day = st.date_input("Maç günü", value=today, format="DD.MM.YYYY")
+        selected_day = st.date_input(
+            "Maç günü", format="DD.MM.YYYY", key="match_day_picker"
+        )
     with refresh_col:
         st.write("")
         if st.button("Verileri şimdi yenile", width="stretch"):
