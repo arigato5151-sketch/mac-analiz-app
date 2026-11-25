@@ -43,6 +43,7 @@ AI_SECONDS_BETWEEN_REQUESTS = 5
 AI_FALLBACK_DELAY_SECONDS = 5
 AI_REQUEST_TIMEOUT_SECONDS = 20
 ISTANBUL = ZoneInfo("Europe/Istanbul")
+COMMENTARY_PROMPT_REVISION = "plain_language_v1"
 NUMERIC_HISTORY_COLUMNS = (
     "id",
     "league_id",
@@ -189,7 +190,14 @@ def collect_match_analysis_cache(
     )
     commentary_feedback = _load_commentary_feedback_summary(db, now=reference)
     feedback_revision = hashlib.sha256(
-        json.dumps(commentary_feedback, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        json.dumps(
+            {
+                "prompt_revision": COMMENTARY_PROMPT_REVISION,
+                "feedback": commentary_feedback,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8")
     ).hexdigest()
     if commentary_feedback:
         print(

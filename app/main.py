@@ -726,68 +726,57 @@ def render_tactical_match_readout(
     away_form = summarize_team_form(away_recent, away_id)
     home_xg, away_xg = forecast["expected_home"], forecast["expected_away"]
     home_p, draw_p, away_p = forecast["home_win"], forecast["draw"], forecast["away_win"]
-    over_15 = sum(
-        forecast["score_matrix"][h][a]
-        for h in range(len(forecast["score_matrix"]))
-        for a in range(len(forecast["score_matrix"][h]))
-        if h + a >= 2
-    )
     btts_no = 1 - forecast["btts"]
 
     home_name, away_name = row["home_name"], row["away_name"]
-    recent_goal_diff = (
-        (home_form["goals_for"] - home_form["goals_against"])
-        - (away_form["goals_for"] - away_form["goals_against"])
-        if home_form["goals_for"] is not None and away_form["goals_for"] is not None else None
-    )
-    if home_form["points"] is not None and away_form["points"] is not None:
-        points_gap = home_form["points"] - away_form["points"]
-        goal_balance = (
-            f"Gol ortalamaları {home_name} için {home_form['goals_for']:.1f} attı / {home_form['goals_against']:.1f} yedi, "
-            f"{away_name} için {away_form['goals_for']:.1f} attı / {away_form['goals_against']:.1f} yedi."
-        )
-        if points_gap >= 0.7:
-            form_read = f"Son 5 maçın puan ortalaması {home_name} lehine belirgin: {home_form['points']:.2f}'e {away_form['points']:.2f}. {goal_balance}"
-        elif points_gap <= -0.7:
-            form_read = f"Yakın dönem sonuçları {away_name} lehine: maç başına {away_form['points']:.2f} puan, {home_name} için {home_form['points']:.2f}. {goal_balance} Form üstünlüğüne rağmen ev sahibinin saha avantajı model tahmininde ayrıca hesaba katılıyor."
-        else:
-            form_read = f"Son 5 maçın puan temposu birbirine yakın ({home_name} {home_form['points']:.2f}, {away_name} {away_form['points']:.2f} puan/maç). {goal_balance}"
-        form_read += f" Son maç form dizileri: {home_name} {home_form['form']}; {away_name} {away_form['form']} (yeniden eskiye)."
-        if home_form["xg_for"] is not None and away_form["xg_for"] is not None:
-            form_read += f" Mevcut xG kayıtlarında maç başı üretim {home_name} {home_form['xg_for']:.2f}, {away_name} {away_form['xg_for']:.2f}."
-    else:
-        form_read = "Takımlardan en az biri için yeterli yakın dönem maç kaydı bulunmadığından form karşılaştırması sınırlı; aşağıdaki senaryolar modelin mevcut lig örneklemine dayanıyor."
-
     total_xg = home_xg + away_xg
-    if total_xg < 2.15:
-        tempo_read = f"Beklenen toplam gol {total_xg:.2f}: modelin gol beklentisi düşük. Bu tahmin maç içindeki gol zamanını veya taktik değişiklikleri öngörmez."
-    elif total_xg > 3.15:
-        tempo_read = f"Beklenen toplam gol {total_xg:.2f}: modelin gol beklentisi yüksek. Bu sayı maçın temposunu, gol zamanını veya oyun planını tek başına göstermez."
-    else:
-        tempo_read = f"Beklenen toplam gol {total_xg:.2f}: model orta seviyede gol beklentisi hesaplıyor. Bu tahmin maç içindeki gol zamanını veya taktik değişiklikleri öngörmez."
-    if forecast["btts"] >= 0.62:
-        tempo_read += f" Karşılıklı gol olasılığının %{forecast['btts'] * 100:.0f} olması, iki takımın da skor katkısı vermesini makul kılıyor."
-    elif forecast["btts"] <= 0.38:
-        tempo_read += f" KG Var olasılığı yalnızca %{forecast['btts'] * 100:.0f}; model gol tehdidinin en az bir tarafta sınırlı kalabileceğini düşünüyor."
+    st.markdown("**Takımların son maçları**")
+    form_rows = []
+    for name, team_form, recent in (
+        (home_name, home_form, home_recent),
+        (away_name, away_form, away_recent),
+    ):
+        form_rows.append({
+            "Takım": name,
+            "Sonuçlar (yeniden eskiye)": team_form["form"],
+            "Maç sayısı": len(recent),
+            "Puan / maç": f"{team_form['points']:.2f}" if team_form["points"] is not None else "Veri yok",
+            "Gol attı / yedi / maç": (
+                f"{team_form['goals_for']:.1f} / {team_form['goals_against']:.1f}"
+                if team_form["goals_for"] is not None else "Veri yok"
+            ),
+            "xG / maç": f"{team_form['xg_for']:.2f}" if team_form["xg_for"] is not None else "Veri yok",
+        })
+    st.dataframe(pd.DataFrame(form_rows), width="stretch", hide_index=True)
+    st.caption("G: galibiyet · B: beraberlik · M: mağlubiyet. xG, geçmiş maçlardaki gol fırsatlarının kalitesinden hesaplanan beklenen gol değeridir.")
 
-    if draw_p >= max(home_p, away_p) - 0.06:
-        edge_read = f"Üç sonuç olasılığı birbirine yakın; beraberlik %{draw_p:.0%}. Beklenen goller {home_name} için {home_xg:.2f}, {away_name} için {away_xg:.2f}; bu değerler model tahminidir, maç içi eşleşmeleri açıklamaz."
-    elif home_p > away_p:
-        edge_read = f"Model {home_name} galibiyet olasılığını %{home_p:.0f}, {away_name} olasılığını %{away_p:.0f} hesaplıyor. Beklenen gol farkı ev sahibi lehine {home_xg - away_xg:+.2f}; model belirli bir oyun planı tahmin etmiyor."
-    else:
-        edge_read = f"Model {away_name} galibiyet olasılığını %{away_p:.0f}, {home_name} olasılığını %{home_p:.0f} hesaplıyor. Beklenen gol farkı deplasman lehine {away_xg - home_xg:+.2f}; model belirli bir oyun planı tahmin etmiyor."
-    if recent_goal_diff is not None and abs(recent_goal_diff) >= 0.7:
-        stronger = home_name if recent_goal_diff > 0 else away_name
-        edge_read += f" Son maçlardaki gol atma/yeme farkı da {stronger} lehine ayrışıyor."
-
-    st.markdown(f"**Form ve üretim.** {form_read}")
-    st.markdown(f"**Beklenen oyun akışı.** {tempo_read}")
-    st.markdown(f"**Maçın belirleyici eşleşmesi.** {edge_read}")
+    st.markdown("**Modelin maç tahmini**")
+    home_metric, draw_metric, away_metric, goals_metric, btts_metric = st.columns(5)
+    home_metric.metric(f"{home_name} kazanır", f"{home_p:.0%}")
+    draw_metric.metric("Beraberlik", f"{draw_p:.0%}")
+    away_metric.metric(f"{away_name} kazanır", f"{away_p:.0%}")
+    goals_metric.metric("Toplam gol beklentisi", f"{total_xg:.2f}")
+    btts_metric.metric("İki takım da gol atar", f"{forecast['btts']:.0%}")
     st.caption(
-        f"Model görünümü: {row['home_name']} {home_p:.0%} · Beraberlik {draw_p:.0%} · "
-        f"{row['away_name']} {away_p:.0%} | KG Yok {btts_no:.0%} | 1,5 gol üst {over_15:.0%} | "
-        f"En olası skor {forecast['most_likely_score']}. Olasılıklar geçmiş lig ve takım maçlarından hesaplanan model çıktılarıdır."
+        f"Takım başına beklenen gol: {home_name} {home_xg:.2f} · {away_name} {away_xg:.2f}. "
+        f"En olası tek skor {forecast['most_likely_score']}; bu skorun kesin veya yüksek olasılıklı olduğu anlamına gelmez."
     )
+    strongest_outcome, strongest_probability = max(
+        ((home_name, home_p), ("Beraberlik", draw_p), (away_name, away_p)),
+        key=lambda item: item[1],
+    )
+    st.info(
+        f"Kısa özet: Modelde en yüksek maç sonucu olasılığı {strongest_outcome} için "
+        f"{strongest_probability:.0%}. Bu, sonucun garanti olduğu anlamına gelmez."
+    )
+    with st.expander("Bu tahminleri nasıl okumalıyım?"):
+        st.markdown(
+            "- **Maç sonucu yüzdeleri** ev sahibi galibiyeti, beraberlik ve deplasman galibiyetinin model olasılıklarıdır; toplamları yaklaşık %100 eder.\n"
+            "- **Toplam gol beklentisi** kesin skor değildir; geçmiş verilerden hesaplanan ortalama gol sayısıdır.\n"
+            "- **İki takım da gol atar** yüzdesi, iki takımın da en az bir gol bulma olasılığıdır.\n"
+            "- **En olası tek skor**, olası skorlar içindeki en yüksek değerdir; tek başına güçlü bir kesinlik göstermez.\n"
+            "- Son maç sonuçları geçmiş performanstır. Bunlar model tahminiyle aynı şey değildir."
+        )
     matrix = forecast["score_matrix"]
     def probability(predicate: Any) -> float:
         return sum(

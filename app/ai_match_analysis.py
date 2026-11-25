@@ -1550,15 +1550,20 @@ def generate_match_ai_packages(
         provider_output_tokens = 16384
         if provider_type != "google":
             provider_instructions = (
-                "Türkçe futbol analisti olarak her maçı yalnızca verilen JSON verisiyle "
-                "yorumla; eksik kadro, sakatlık, oran veya haber uydurma. Model olasılıklarını "
-                "değiştirme, kesinlik veya kazanç garantisi verme. Analizi en fazla 120 kelime "
-                "tut. Her maç için kısa Markdown başlıkları kullan: Maç profili, Form ve "
-                "eşleşme, Olası senaryolar, Risk "
-                "seçimleri. Sadece candidate_markets içindeki tam adları seç; low ve medium "
-                "gruplarına farklı market türlerinden birer seçim ve kısa gerekçe yaz. Girdi "
-                "match_id değerlerini koru. Her maçta analysis ve risk_selections alanları "
-                "zorunludur; risk_selections içinde low ve medium dizileri bulunmalıdır. "
+                "Türkçe ve sade bir dille yaz; teknik terim ve kısaltma kullanırsan ilk geçtiği "
+                "yerde anlamını açıkla. Her maçı yalnızca verilen JSON verisiyle yorumla; "
+                "eksik kadro, sakatlık, oran, istatistik veya haber uydurma. Geçmiş sonuçları "
+                "model tahminlerinden açıkça ayır. Son 5 maçın gol ve puan ortalamalarını, "
+                "örnek sayısını ve modelin ev sahibi/beraberlik/deplasman yüzdelerini veride "
+                "bulunuyorsa anlaşılır biçimde açıkla. Beklenen golün kesin skor olmadığını "
+                "belirt; olasılıkları garanti gibi sunma. Veriler birbiriyle çelişiyorsa taraf "
+                "seçme, çelişkiyi ve veri sınırını açıkça söyle. Analizi 100–140 kelime tut ve "
+                "şu kısa Markdown başlıklarını kullan: Maçın özeti, Takımların formu, Olası "
+                "senaryo, Belirsizlikler. Sadece candidate_markets içindeki tam adları seç; "
+                "low ve medium gruplarına farklı market türlerinden birer kısa gerekçeli seçim "
+                "yaz. Kesinlik veya kazanç garantisi verme. Girdi match_id değerlerini koru. "
+                "Her maçta analysis ve risk_selections alanları zorunludur; risk_selections "
+                "içinde low ve medium dizileri bulunmalıdır. "
                 'JSON biçimi: {"matches":[{"match_id":123,"analysis":"...",'
                 '"risk_selections":{"low":[{"market":"...","reason":"..."}],'
                 '"medium":[{"market":"...","reason":"..."}]}}]}. '
