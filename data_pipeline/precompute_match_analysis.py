@@ -286,6 +286,9 @@ def collect_match_analysis_cache(
             "model": get_optional_setting("GROQ_MODEL", "openai/gpt-oss-20b"),
             "strict_json_schema": "true",
             "reasoning_effort": "low",
+            "max_output_tokens": 800,
+            "request_timeout_seconds": 20,
+            "request_delay_seconds": 15,
         },
         {
             "provider": "openai_compatible",
@@ -295,12 +298,16 @@ def collect_match_analysis_cache(
             "model": get_optional_setting(
                 "NVIDIA_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"
             ),
+            "request_timeout_seconds": 60,
+            "request_delay_seconds": 5,
         },
         {
             "provider": "google",
             "name": "Google Gemini",
             "api_key": google_api_key,
             "model": google_model,
+            "request_timeout_seconds": 45,
+            "request_delay_seconds": 5,
         },
     ]
     has_ai_provider = bool(google_api_key or any(item["api_key"] for item in fallback_providers))

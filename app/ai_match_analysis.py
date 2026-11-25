@@ -1037,15 +1037,22 @@ def generate_match_analysis(
                 retry_after = compatible_response.headers.get("Retry-After", "")
                 if not retry_after:
                     retry_match = re.search(
-                        r"try again in ([0-9]+(?:\.[0-9]+)?)s",
+                        r"try again in ([0-9]+(?:\.[0-9]+)?)(ms|s)",
                         compatible_response.text,
                         flags=re.IGNORECASE,
                     )
-                    retry_after = retry_match.group(1) if retry_match else ""
+                    if retry_match:
+                        retry_after = retry_match.group(1) + retry_match.group(2)
                 try:
-                    time.sleep(min(max(float(retry_after.rstrip("s")), 1.0), 60.0))
+                    retry_text = retry_after.strip().lower()
+                    retry_seconds = (
+                        float(retry_text[:-2]) / 1000
+                        if retry_text.endswith("ms")
+                        else float(retry_text.rstrip("s"))
+                    )
+                    time.sleep(min(max(retry_seconds, 0.1), 60.0))
                 except ValueError:
-                    time.sleep(30)
+                    time.sleep(1)
         except requests.RequestException as exc:
             raise MatchAnalysisAIError(
                 f"{provider} API bağlantısı kurulamadı ({type(exc).__name__})."
@@ -1509,11 +1516,22 @@ def generate_match_ai_packages(
             ]
             for index, compact_context in enumerate(compact_contexts):
                 active_fallbacks = [provider_config, *other_fallbacks]
-                if index and any(
-                    item.get("api_key") and not item.get("_disabled")
-                    for item in active_fallbacks
-                ):
-                    time.sleep(fallback_delay_seconds)
+                active_provider = next(
+                    (
+                        item
+                        for item in active_fallbacks
+                        if item.get("api_key") and not item.get("_disabled")
+                    ),
+                    None,
+                )
+                if index and active_provider:
+                    delay = int(
+                        active_provider.get(
+                            "request_delay_seconds", fallback_delay_seconds
+                        )
+                    )
+                    if delay > 0:
+                        time.sleep(delay)
                 try:
                     packages.update(
                         generate_match_ai_packages(
@@ -1554,14 +1572,20 @@ def generate_match_ai_packages(
                 model=provider_config.get("model", model),
                 instructions_override=provider_instructions,
                 json_mode=True,
-                max_output_tokens=provider_output_tokens,
+                max_output_tokens=int(
+                    provider_config.get("max_output_tokens", provider_output_tokens)
+                ),
                 response_schema=response_schema,
                 provider=provider_type,
                 base_url=provider_config.get("base_url"),
                 strict_json_schema=bool(provider_config.get("strict_json_schema")),
                 reasoning_effort=provider_config.get("reasoning_effort"),
                 extra_body=provider_config.get("extra_body"),
-                request_timeout_seconds=request_timeout_seconds,
+                request_timeout_seconds=int(
+                    provider_config.get(
+                        "request_timeout_seconds", request_timeout_seconds
+                    )
+                ),
             )
             if provider_name != "Google Gemini":
                 print(f"AI commentary generated using fallback provider: {provider_name}")
