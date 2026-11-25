@@ -23,7 +23,6 @@ def main() -> None:
                 "NVIDIA_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"
             ),
             "base_url": "https://integrate.api.nvidia.com/v1",
-            "extra_body": {"chat_template_kwargs": {"enable_thinking": True}},
             "strict_json_schema": False,
         },
     )

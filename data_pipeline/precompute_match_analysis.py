@@ -38,7 +38,9 @@ HISTORY_COLUMNS = (
     "home_possession,away_possession,expected_metrics_checked_at"
 )
 AI_MATCHES_PER_REQUEST = 8
-AI_SECONDS_BETWEEN_REQUESTS = 15
+AI_SECONDS_BETWEEN_REQUESTS = 5
+AI_FALLBACK_DELAY_SECONDS = 5
+AI_REQUEST_TIMEOUT_SECONDS = 20
 NUMERIC_HISTORY_COLUMNS = (
     "id",
     "league_id",
@@ -272,6 +274,9 @@ def collect_match_analysis_cache(
 
     google_api_key = api_key_setting("GOOGLE_API_KEY")
     google_model = get_optional_setting("GOOGLE_MODEL", "gemini-3.8-flash")
+    # Groq is attempted first because its key/model were verified and this
+    # nightly task needs short, compact responses. Keep NVIDIA and Gemini as
+    # fallbacks so a quota or provider outage does not block all AI output.
     fallback_providers = [
         {
             "provider": "openai_compatible",
@@ -290,7 +295,12 @@ def collect_match_analysis_cache(
             "model": get_optional_setting(
                 "NVIDIA_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"
             ),
-            "extra_body": {"chat_template_kwargs": {"enable_thinking": True}},
+        },
+        {
+            "provider": "google",
+            "name": "Google Gemini",
+            "api_key": google_api_key,
+            "model": google_model,
         },
     ]
     has_ai_provider = bool(google_api_key or any(item["api_key"] for item in fallback_providers))
@@ -449,16 +459,25 @@ def collect_match_analysis_cache(
         )
     # Process every eligible fixture in kickoff order so cards do not need an
     # on-demand AI request when a nightly run contains more than 70 matches.
+    total_batches = math.ceil(len(ai_contexts) / AI_MATCHES_PER_REQUEST)
     for offset in range(0, len(ai_contexts), AI_MATCHES_PER_REQUEST):
         batch = ai_contexts[offset : offset + AI_MATCHES_PER_REQUEST]
+        batch_number = offset // AI_MATCHES_PER_REQUEST + 1
+        print(
+            f"AI commentary batch {batch_number}/{total_batches} started "
+            f"({len(batch)} matches; {len(ai_contexts) - offset} remaining).",
+            flush=True,
+        )
         if offset:
             time.sleep(AI_SECONDS_BETWEEN_REQUESTS)
         try:
             packages = generate_match_ai_packages(
                 batch,
-                api_key=google_api_key or "",
+                api_key="",
                 model=google_model,
                 fallback_providers=fallback_providers,
+                request_timeout_seconds=AI_REQUEST_TIMEOUT_SECONDS,
+                fallback_delay_seconds=AI_FALLBACK_DELAY_SECONDS,
             )
             for match_id, package in packages.items():
                 analysis = analysis_by_match.get(match_id)
@@ -486,6 +505,11 @@ def collect_match_analysis_cache(
             ai_failures += len(missing)
             if missing:
                 print(f"AI precompute returned no package for matches: {sorted(missing)}")
+            print(
+                f"AI commentary batch {batch_number}/{total_batches} finished "
+                f"({len(packages)}/{len(batch)} matches generated).",
+                flush=True,
+            )
         except MatchAnalysisAIError as exc:
             error_text = str(exc)
             if "HTTP 429" in error_text or "HTTP 503" in error_text:
@@ -534,9 +558,10 @@ def main() -> None:
     }
     print(json.dumps(summary))
     if summary["ai_failures"]:
-        raise SystemExit(
-            f"AI commentary was not generated for {summary['ai_failures']} fixtures. "
-            "Check configured AI provider quotas and API responses above."
+        print(
+            f"WARNING: AI commentary was not generated for {summary['ai_failures']} "
+            "fixtures. Forecasts remain cached; check provider quota and API responses above.",
+            flush=True,
         )
 
 

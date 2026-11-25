@@ -877,6 +877,7 @@ def generate_match_analysis(
     strict_json_schema: bool = False,
     reasoning_effort: str | None = None,
     extra_body: dict[str, Any] | None = None,
+    request_timeout_seconds: int = 90,
 ) -> str:
     """Generate a Turkish analysis using only supplied match and model data."""
     if not api_key:
@@ -1029,7 +1030,7 @@ def generate_match_analysis(
                         "Content-Type": "application/json",
                     },
                     json=compatible_body,
-                    timeout=90,
+                    timeout=request_timeout_seconds,
                 )
                 if compatible_response.status_code != 429 or attempt:
                     break
@@ -1110,7 +1111,7 @@ def generate_match_analysis(
                 request_url,
                 headers=request_headers,
                 json=request_body,
-                timeout=60,
+                timeout=min(request_timeout_seconds, 60),
             )
             if response.status_code not in {429, 503} or attempt == 3:
                 break
@@ -1372,6 +1373,8 @@ def generate_match_ai_package(
 def generate_match_ai_packages(
     contexts: list[dict[str, Any]], *, api_key: str = "", model: str = "gemini-3.8-flash",
     fallback_providers: list[dict[str, str]] | None = None,
+    request_timeout_seconds: int = 90,
+    fallback_delay_seconds: int = 20,
 ) -> dict[int, dict[str, Any]]:
     """Generate compact, match-specific packages in one quota-efficient request."""
     if not contexts:
@@ -1510,12 +1513,14 @@ def generate_match_ai_packages(
                     item.get("api_key") and not item.get("_disabled")
                     for item in active_fallbacks
                 ):
-                    time.sleep(20)
+                    time.sleep(fallback_delay_seconds)
                 try:
                     packages.update(
                         generate_match_ai_packages(
                             [compact_context],
                             fallback_providers=[provider_config, *other_fallbacks],
+                            request_timeout_seconds=request_timeout_seconds,
+                            fallback_delay_seconds=fallback_delay_seconds,
                         )
                     )
                 except MatchAnalysisAIError as exc:
@@ -1556,6 +1561,7 @@ def generate_match_ai_packages(
                 strict_json_schema=bool(provider_config.get("strict_json_schema")),
                 reasoning_effort=provider_config.get("reasoning_effort"),
                 extra_body=provider_config.get("extra_body"),
+                request_timeout_seconds=request_timeout_seconds,
             )
             if provider_name != "Google Gemini":
                 print(f"AI commentary generated using fallback provider: {provider_name}")
