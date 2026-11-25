@@ -711,6 +711,7 @@ def _cached_analysis_for_match(
 def render_tactical_match_readout(
     row: dict[str, Any], history: pd.DataFrame, forecast: dict[str, Any] | None,
     precomputed_risks: dict[str, Any] | None = None,
+    ai_risks_stale: bool = False,
 ) -> None:
     """Summarize each fixture from its pre-match form and independent goal model."""
     st.markdown("#### Taktik eşleşme ve senaryolar")
@@ -863,7 +864,11 @@ def render_tactical_match_readout(
             st.caption(explanation)
             selections = ai_risks.get(profile, [])
             if not selections:
-                if precomputed_risks is not None:
+                if ai_risks_stale:
+                    st.caption(
+                        "Oranlar AI yorumundan sonra değiştiği için önceki seçimler güncellenene kadar gösterilmiyor."
+                    )
+                elif precomputed_risks is not None:
                     st.caption("Bu profil için doğrulanmış bir AI seçimi üretilemedi.")
                 else:
                     st.caption("Yapay zekâ seçimi gece iş akışında hazırlanacak; henüz hazır değil.")
@@ -1001,7 +1006,7 @@ def render_analysis(
             )
             if cached_analysis is not None and not commentary_has_current_odds:
                 st.caption(
-                    "Oranlar gece yorumundan sonra değişmiş; aşağıdaki AI yorumu güncel oranları içermiyor."
+                    "Oranlar AI yorumu oluşturulduktan sonra güncellenmiş; yorumdaki oran bilgisi güncel olmayabilir."
                 )
             history = pd.DataFrame()
             if cached_analysis is not None:
@@ -1085,6 +1090,11 @@ def render_analysis(
                     if commentary_has_current_odds
                     else None
                 ),
+                ai_risks_stale=(
+                    cached_analysis is not None
+                    and bool((cached_analysis or {}).get("ai_risk_selections"))
+                    and not commentary_has_current_odds
+                ),
             )
             if model_forecast is not None:
                 render_ai_match_analysis(
@@ -1092,11 +1102,7 @@ def render_analysis(
                     history,
                     model_forecast,
                     match_id,
-                    precomputed_analysis=(
-                        (cached_analysis or {}).get("ai_analysis")
-                        if commentary_has_current_odds
-                        else None
-                    ),
+                    precomputed_analysis=(cached_analysis or {}).get("ai_analysis"),
                     precomputed_halves=(cached_analysis or {}).get("halves"),
                 )
             st.divider()
@@ -1370,7 +1376,7 @@ def render_ai_match_analysis(
     """Generate an optional, session-cached AI interpretation for one match."""
     st.markdown("#### Yapay zekâ destekli detaylı yorum")
     st.caption(
-        "Google Gemini, uygulamanın maç geçmişi ve Poisson olasılıklarını yorumlar; "
+        "Yapay zekâ, uygulamanın maç geçmişi ve Poisson olasılıklarını yorumlar; "
         "hesaplanmış model tahminlerini değiştirmez. Kadro bilgisi yoksa oyuncu veya sakatlık iddiası üretmez."
     )
     validation_matches = int(forecast.get("tuning_matches") or 0)
@@ -1390,7 +1396,7 @@ def render_ai_match_analysis(
     else:
         st.caption("Modelin geçmiş doğrulama örneği bu maç için güvenilir performans özeti vermeye yetmiyor.")
     if precomputed_analysis:
-        st.caption("Yapay zekâ destekli maç yorumu gece önceden hazırlandı.")
+        st.caption("Yapay zekâ destekli maç yorumu önceden oluşturuldu.")
         st.markdown(precomputed_analysis)
         analysis_text = precomputed_analysis
     else:
