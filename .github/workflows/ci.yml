@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -32,3 +33,12 @@ jobs:
         run: python -m pytest -q
       - name: Validate SQL migrations
         run: python -m db.migrations --validate
+      - name: Send detailed Telegram workflow report
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_TOKEN: ${{ github.token }}
+          WORKFLOW_STATUS: ${{ job.status }}
+          STEP_RESULTS_JSON: ${{ toJSON(steps) }}
+        run: python -m data_pipeline.notify_workflow

@@ -21,10 +21,12 @@ GitHub Actions secrets alanında `API_FOOTBALL_KEY`, `SUPABASE_URL`,
 Streamlit arayüzünde `SUPABASE_URL` ile `SUPABASE_ANON_KEY` gerekir; AI
 anahtarlarını arayüzde kullanmak zorunlu değildir.
 
-Hata bildirimi için isteğe bağlı `TELEGRAM_BOT_TOKEN` ve `TELEGRAM_CHAT_ID`
-değerlerini Windows sunucusunun `.env` dosyasına ve GitHub Actions secrets
-alanına ekleyin. Ayarlar yoksa işler yine çalışır; Windows günlükleri ve
-GitHub Actions çalışma özeti hata bilgisini göstermeye devam eder.
+Her GitHub Actions iş akışının sonunda Telegram'a çalışma raporu gönderilir.
+Başarılı raporda adımların durumu ve iş özeti; başarısız raporda başarısız adım
+ve Actions günlüğünden hata satırları ile çalıştırma bağlantısı yer alır.
+`TELEGRAM_BOT_TOKEN` ve `TELEGRAM_CHAT_ID` değerlerini GitHub repository
+secrets alanına ekleyin. Bu secrets tanımlı değilse bildirim gönderilmez.
+Windows sunucusundaki işler GitHub Actions Telegram raporuna dahil değildir.
 `ODDS_HISTORY_ALERT_ROWS` varsayılan olarak 100.000 satırdır; Windows `.env`
 dosyasına veya GitHub repository variable alanına farklı eşik yazılabilir. Eşik
 aşılınca Telegram uyarısı gönderilir, her çalışmada toplam satır sayısı da

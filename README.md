@@ -29,10 +29,13 @@ NVIDIA_MODEL=nvidia/nemotron-3-ultra-550b-a55b
 GOOGLE_API_KEY=...
 GOOGLE_MODEL=gemini-3.8-flash
 
-TELEGRAM_BOT_TOKEN=...       # İsteğe bağlı hata bildirimi
-TELEGRAM_CHAT_ID=...         # İsteğe bağlı hata bildirimi
+TELEGRAM_BOT_TOKEN=...       # GitHub Actions rapor bildirimi
+TELEGRAM_CHAT_ID=...         # GitHub Actions rapor bildirimi
 ODDS_HISTORY_ALERT_ROWS=... # İsteğe bağlı satır sayısı uyarı eşiği
 ```
+
+Telegram raporları GitHub Actions secrets içindeki `TELEGRAM_BOT_TOKEN` ve
+`TELEGRAM_CHAT_ID` değerlerini kullanır.
 
 Ardından:
 

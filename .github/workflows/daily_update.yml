@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 env:
@@ -99,12 +100,12 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         if: always()
         run: python -m data_pipeline.monitor_data_freshness
-      - name: Add failure details to the run summary
-        if: failure()
-        run: echo "A pipeline step failed. Inspect this run's logs for fixture, result, or partial odds coverage details." >> "$GITHUB_STEP_SUMMARY"
-      - name: Send optional Telegram failure alert
-        if: failure()
+      - name: Send detailed Telegram workflow report
+        if: always()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m data_pipeline.notify_failure "Maç Analiz GitHub Actions pipeline başarısız. GitHub Actions çalışma günlüğünü kontrol edin."
+          GITHUB_TOKEN: ${{ github.token }}
+          WORKFLOW_STATUS: ${{ job.status }}
+          STEP_RESULTS_JSON: ${{ toJSON(steps) }}
+        run: python -m data_pipeline.notify_workflow
