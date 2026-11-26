@@ -122,6 +122,25 @@ def _optional_number(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def _without_empty_context(value: Any) -> Any:
+    """Omit absent optional inputs while preserving meaningful zero/false values."""
+    if isinstance(value, dict):
+        cleaned = {
+            key: item
+            for key, raw in value.items()
+            if (item := _without_empty_context(raw)) not in (None, "", [], {})
+        }
+        return cleaned or None
+    if isinstance(value, list):
+        cleaned = [
+            item
+            for raw in value
+            if (item := _without_empty_context(raw)) not in (None, "", [], {})
+        ]
+        return cleaned or None
+    return value
+
+
 def _summarize_recent_team_matches(matches: list[dict[str, Any]]) -> dict[str, Any]:
     """Summarize only observed values and report each metric's sample count."""
     metric_keys = {
@@ -771,13 +790,14 @@ def build_match_analysis_context(
     away_summary = _summarize_recent_team_matches(away_recent)
     home_venue_summary = _summarize_recent_team_matches(home_venue_recent)
     away_venue_summary = _summarize_recent_team_matches(away_venue_recent)
-    return {
+    return _without_empty_context({
         "match": {
             "home": home,
             "away": away,
             "competition": str(row.get("league_label") or row.get("league_name") or ""),
             "kickoff": kickoff.isoformat() if not pd.isna(kickoff) else None,
             "venue": str(row.get("venue") or "Bilinmiyor"),
+            "status": row.get("status"),
         },
         "iddaa_odds": _iddaa_odds_context(odds_quote, kickoff),
         "model": {
@@ -835,7 +855,7 @@ def build_match_analysis_context(
         ),
         "commentary_quality_feedback": commentary_quality_feedback,
         "available_lineup_or_injury_information": row.get("verified_team_news"),
-    }
+    }) or {}
 
 
 def build_compatible_match_analysis_context(
@@ -968,12 +988,27 @@ def generate_match_analysis(
         "an; calibration_error daha düşükse tahmin olasılıkları geçmiş sıklıklarla daha "
         "uyumlu görünür, ancak bunu gelecekteki doğruluk garantisi sayma. Örnek azsa "
         "performans hükmü verme. "
-        "Markdown kullan ve şu başlıklarla özgün, maç özelinde bir yorum üret: "
-        "Maçın profili; İki takımın form sinyalleri; Olası oyun planları ve eşleşmeler; "
-        "Maçın kırılma noktaları; Farklı oyun senaryoları; Model olasılıklarına göre "
-        "temkinli ve dengeli seçimler. Her seçimde verilen model olasılığını "
-        "yüzdeyle yaz; listede olmayan market/olasılık ekleme. Oran, kazanç garantisi "
-        "veya kesin sonuç iddiası verme. Sonunda tahminin sınırlarını kısa belirt."
+        "Sade ve akıcı Türkçe kullan; aynı sayıyı farklı bölümlerde tekrarlama. "
+        "Yalnızca şu dört Markdown başlığını, tam bu adlarla ve bu sırayla kullan: "
+        "Özet; Form ve Oyun Profili; Öne Çıkan Senaryolar ve Pazarlar; "
+        "Varyans ve Risk Notu. Özet 1-2 cümlede ana senaryoyu ve model tablosunu "
+        "anlatsın. Form bölümünde son beş maçın G/B/M, puan ve gol verilerini; "
+        "xG/xA, şut, isabetli şut, korner, topa sahip olma, saha ayrımı ve devre "
+        "verilerinden yalnızca mevcut ve açıklayıcı olanları seç. Senaryolar bölümünde "
+        "verilen en olası skorları ve MS/gol/KG olasılıklarını koru; varsa devre ve "
+        "korner tahminlerini bağlamıyla ilişkilendir. Oran kıyasını yalnızca aynı "
+        "market ve aynı çizgi için veri varsa yap. Risk bölümünde skor dağılımı, "
+        "örneklem ve doğrulama sınırlarını kısaca açıkla. Modelin skor ve olasılıklarını "
+        "asla değiştirme. Önceki maç kadrosunu bugünün kesin ilk 11'i gibi sunma. "
+        "Boş verilerden söz etme, veri uydurma, başlıklar arasında tekrar yapma. "
+        "Kesinlik veya bahis garantisi verme; giriş ve kapanış cümlesi ekleme. "
+        "AI seçimlerini analysis metnine tekrar yazma; bunlar risk_selections alanında "
+        "ayrı gösterilir. Sadece candidate_markets içindeki tam adları seç; low ve "
+        "medium gruplarına farklı market türlerinden birer kısa gerekçeli seçim yaz. "
+        "Her maçta analysis ve risk_selections alanları zorunludur; çıktı yalnızca "
+        'istenen JSON nesnesi olsun: {"matches":[{"match_id":123,"analysis":"...",'
+        '"risk_selections":{"low":[{"market":"...","reason":"..."}],'
+        '"medium":[{"market":"...","reason":"..."}]}}]}.'
     )
     if instructions_override:
         instructions = instructions_override
@@ -1434,15 +1469,30 @@ def generate_match_ai_packages(
         "örneklemidir. En az 30 maç yoksa model güvenilirliği hakkında hüküm verme. Yeterli "
         "örnek varsa sonucu ön değerlendirme olarak tanımla, sayıyı belirt ve kalite metriğini "
         "maç olasılığından ayrı tut. "
-        "Her maç için eksiksiz ve maç verisine dayalı, dört başlıklı Markdown yorum yaz: "
-        "Maç profili, Form ve eşleşme, "
-        "Olası senaryolar, Risk profillerine göre seçimler. Yorum her maçta o maçın "
-        "takım adlarına, formuna ve Poisson olasılıklarına özgü olsun; veri zayıfsa "
-        "bunu belirt. Seçimleri yalnızca ilgili maçın candidate_markets listesinden "
-        "seç ve market olasılıklarını değiştirme. Her risk grubuna farklı türlerden iki seçim "
-        "gerekçe koy: low temkinli, medium dengeli. Yüksek riskli seçim üretme. Aynı maçta "
-        "marketleri tekrar etme. Kesinlik veya kazanç garantisi verme. Her girişteki "
-        "match_id değerini aynen koru. Yalnızca bu JSON şemasını döndür: "
+        "analysis alanında Türkçe, sade, net ve tekrarsız Markdown yorum yaz; giriş veya "
+        "kapanış cümlesi ekleme. Tam olarak şu dört başlığı ve sırayı kullan: "
+        "**Özet:** (maçın ana senaryosu, en belirgin model olasılıkları ve yalnızca "
+        "eşleşen pazar/çizgi varsa model-oran kıyası; 1-2 cümle); "
+        "**Form ve Oyun Profili:** (iki takımın son 5 maç G/B/M toplamı, maç başı puanı, "
+        "attığı/yediği gol; mevcut ve anlamlıysa xG, xA, şut/isabetli şut, korner, "
+        "topa sahip olma, devre ve saha ayrımı verileri; örnek sayılarını gözet); "
+        "**Öne Çıkan Senaryolar ve Pazarlar:** (model skor dağılımı, 1X2, gol ve KG "
+        "olasılıkları; varsa devre/korner tahminleri ve aynı çizgi-yön için oran kıyası); "
+        "**Varyans ve Risk Notu:** (tekil skor olasılıklarının belirsizliğini, yeterli "
+        "veri varsa geçmiş doğrulama örneklemini ve veri sınırlamalarını kısaca belirt). "
+        "Her başlığın farklı işlevi olsun; aynı sayıyı farklı bölümlerde tekrarlama. "
+        "Eksik, null veya boş alanları bağlamdan çıkar; verisi bulunmayan xG, kadro, oran, "
+        "devre ya da korner için 'veri yok' diye ayrı cümle kurma. Ek metrikleri yalnızca "
+        "senaryoya katkı sağlıyorsa kullan. Bir istatistikten desteklenmeyen oyun planı, "
+        "baskı veya kırılma noktası uydurma. Modelin hesapladığı skor ve olasılıkları "
+        "değiştirme. En yüksek olasılıklı skoru kesin sonuç gibi sunma. Oran kıyasını "
+        "yalnızca aynı market ve aynı çizgi için yap; oran zamanı eskiyse bunu belirt. "
+        "Kadro verisi önceki maça aitse bugünkü kesin ilk 11 gibi sunma. 'Kesin', 'banko', "
+        "'garanti' veya kazanç vaadi kullanma. Pazar seçimlerini analysis içinde "
+        "tekrarlama; bunları ayrıca risk_selections alanına yaz. Her risk grubuna farklı "
+        "market türlerinden iki geçerli seçim koy: low temkinli, medium dengeli; yüksek "
+        "riskli seçim üretme ve market olasılıklarını değiştirme. Her girişteki match_id "
+        "değerini aynen koru. Yalnızca bu JSON şemasını döndür: "
         "{\"matches\":[{\"match_id\":123,\"analysis\":\"...\","
         "\"risk_selections\":{\"low\":[{\"market\":\"...\",\"reason\":\"...\"}],"
         "\"medium\":[...]}}]}"
@@ -1562,8 +1612,14 @@ def generate_match_ai_packages(
                 "bunun yalnızca tekil skorlar içindeki en yüksek olasılık olduğunu, garanti "
                 "olmadığını açıkla. Beklenen golün kesin skor olmadığını belirt. Veriler "
                 "birbiriyle çelişiyorsa çelişkiyi ve veri sınırını açıkça söyle. Analizi "
-                "100–140 kelime tut ve tam olarak şu dört kısa Markdown başlığını kullan: "
-                "Maçın özeti, Takımların formu, Olası senaryolar, Belirsizlikler. AI seçimlerini "
+                "sade, ayrıntılı ama tekrarsız tut ve tam olarak şu dört Markdown başlığını "
+                "bu sırayla kullan: Özet, Form ve Oyun Profili, Öne Çıkan Senaryolar ve "
+                "Pazarlar, Varyans ve Risk Notu. Boş verilerden söz etme. Ana modelin skor "
+                "ve olasılık tahminlerini koru. Yalnızca mevcut ve senaryoya katkı sağlayan "
+                "istatistikleri kullan; oranı yalnızca aynı market ve aynı çizgiyle kıyasla. "
+                "Devre/korner tahminlerini varsa bağlamıyla açıkla; önceki maç kadrosunu "
+                "bugünün kesin ilk 11'i gibi sunma. Örneklem ve doğrulama sınırlarını risk "
+                "bölümünde belirt. Giriş/kapanış cümlesi ve tekrar ekleme. AI seçimlerini "
                 "analiz metnine tekrar yazma; bunlar risk_selections alanında ayrı gösterilir. "
                 "Sadece candidate_markets içindeki tam adları seç; low ve medium gruplarına "
                 "farklı market türlerinden birer kısa gerekçeli seçim yaz. Kesinlik veya kazanç "
@@ -1662,6 +1718,11 @@ def _compact_fallback_match_context(context: dict[str, Any]) -> dict[str, Any]:
             "match",
             "model",
             "match_id",
+            "iddaa_odds",
+            "confirmed_lineups",
+            "likely_lineups_from_previous_match",
+            "previous_match_lineup_reference",
+            "available_lineup_or_injury_information",
         )
         if key in context
     }
@@ -1671,9 +1732,17 @@ def _compact_fallback_match_context(context: dict[str, Any]) -> dict[str, Any]:
         "expected_goals",
         "probabilities",
         "candidate_markets",
+        "score_distribution",
+        "period_forecasts",
         "league_history_matches",
         "home_recent_summary",
         "away_recent_summary",
+        "home_venue_summary",
+        "away_venue_summary",
+        "recent_form_comparisons",
+        "venue_form_comparisons",
+        "expected_goals_comparison",
+        "historical_model_evaluation",
         "recent_data_recency_days",
     )
     compact["model"] = {
@@ -1682,23 +1751,8 @@ def _compact_fallback_match_context(context: dict[str, Any]) -> dict[str, Any]:
     for summary_key in ("home_recent_summary", "away_recent_summary"):
         summary = source_model.get(summary_key)
         if isinstance(summary, dict):
-            compact["model"][summary_key] = {
-                key: summary[key]
-                for key in (
-                    "matches",
-                    "points_per_match",
-                    "goals_for_per_match",
-                    "goals_against_per_match",
-                    "xg_for_per_match",
-                    "xg_against_per_match",
-                    "scored_sample_size",
-                    "conceded_sample_size",
-                    "xg_for_sample_size",
-                    "xg_against_sample_size",
-                )
-                if key in summary
-            }
-    return compact
+            compact["model"][summary_key] = summary
+    return _without_empty_context(compact) or {}
 
 
 def _validate_risk_selections(
