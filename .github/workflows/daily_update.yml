@@ -50,7 +50,7 @@ jobs:
         run: python -m data_pipeline.fetch_iddaa_fixtures
       - name: Pull IdDaa daily fixtures and all listed markets
         id: refresh_odds
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 3 * * *' || github.event.schedule == '30 20 * * *'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

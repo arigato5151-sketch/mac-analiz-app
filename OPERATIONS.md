@@ -5,13 +5,21 @@
 - Windows Görev Zamanlayıcısı fikstür ve sonuçları her gün 00:05'te yeniler.
 - Windows IdDaa oran işi 00:17'den başlayarak iki saatte bir çalışır (son
   çalışma 22:17). Sunucu kapalı veya internetsizse bu işler çalışamaz.
-- GitHub Actions fikstür ve sonuçları her gün 03:17 UTC ve 20:30 UTC'de
-  uzlaştırır; her iki çalışmada da IdDaa oranlarını alır. Bu, Windows işine
-  ek bir yedek çalışmadır.
+- GitHub Actions `Match statistics sync` iş akışı her gün 22:18 UTC'de
+  (Türkiye saatiyle 01:18) çalışır. Fikstür, IdDaa oranı ve sonuç verisini
+  günceller; bu, Windows işlerine ek bir yedek çalışmadır. İş akışı ayrıca
+  GitHub Actions içinden elle başlatılabilir.
+- Gece AI işi bütün yakın fikstürlerin Poisson tahminlerini önbelleğe yazar,
+  ancak AI yorumlarını yalnızca Türkiye saatine göre o gün oynanacak maçlar
+  için üretir. Groq, NVIDIA NIM ve Google Gemini sırasıyla yedeklenir. Kota veya
+  sağlayıcı hatası olursa tahminler korunur; eksik yorum sayısı Actions
+  günlüğüne yazılır.
 
-GitHub Actions secrets alanında `API_FOOTBALL_KEY`, `SUPABASE_URL` ve
-`SUPABASE_SERVICE_ROLE_KEY` tanımlı olmalıdır. Streamlit arayüzünde yalnızca
-`SUPABASE_URL` ile `SUPABASE_ANON_KEY` gerekir.
+GitHub Actions secrets alanında `API_FOOTBALL_KEY`, `SUPABASE_URL`,
+`SUPABASE_SERVICE_ROLE_KEY` ve AI sağlayıcılarından en az birinin anahtarı
+(`GROQ_API_KEY`, `NVIDIA_API_KEY` veya `GOOGLE_API_KEY`) tanımlı olmalıdır.
+Streamlit arayüzünde `SUPABASE_URL` ile `SUPABASE_ANON_KEY` gerekir; AI
+anahtarlarını arayüzde kullanmak zorunlu değildir.
 
 Hata bildirimi için isteğe bağlı `TELEGRAM_BOT_TOKEN` ve `TELEGRAM_CHAT_ID`
 değerlerini Windows sunucusunun `.env` dosyasına ve GitHub Actions secrets

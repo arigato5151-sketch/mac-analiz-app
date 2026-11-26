@@ -1,25 +1,37 @@
 # Maç Merkezi
 
-Streamlit uygulaması, günlük fikstürleri ve IdDaa oranlarını Supabase'den okur;
-geçmiş maç sonuçları ve istatistiklerinden Poisson tabanlı tahminler üretir.
-Maç analizlerinde isteğe bağlı Google Gemini yorumu da oluşturulabilir.
-İstatistik arşivinde tamamlanmış maçların skor, xG, xA ve korner verileri
-gösterilir. Uygulama ekranı veritabanına yazma yapmaz.
+Maç Merkezi, Streamlit arayüzünde günlük futbol fikstürünü, IdDaa oranlarını,
+geçmiş maç verilerini ve Poisson tabanlı maç tahminlerini gösterir. Tahminler ve
+önceden hazırlanmış yapay zekâ yorumları Supabase önbelleğinden yüklenir; maç
+kartını açarken AI isteği beklenmez.
+
+Gece iş akışı tüm yakın tarihli maçların tahminlerini önbelleğe alır, ancak AI
+yorumlarını yalnızca Türkiye saatine göre o gün oynanacak maçlar için üretir.
+Diğer günlerin tahminleri kullanılabilir; bu maçların AI yorumları günlük AI
+işine girmez. Sağlayıcı kotası veya geçici servis hatası bazı AI yorumlarını
+engelleyebilir; temel model tahmini yine önbelleğe yazılır.
 
 ## Yerel çalıştırma
 
-`.env` dosyasına aşağıdaki ayarları ekleyin:
+`.env` dosyasına uygulama ve veri erişimi için gereken ayarları ekleyin:
 
 ```dotenv
 API_FOOTBALL_KEY=...
 SUPABASE_URL=https://<project>.supabase.co
 SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
-GOOGLE_API_KEY=...       # İsteğe bağlı Gemini maç yorumu
-GOOGLE_MODEL=gemini-3.8-flash  # İsteğe bağlı model seçimi
-TELEGRAM_BOT_TOKEN=...  # İsteğe bağlı hata bildirimi
-TELEGRAM_CHAT_ID=...    # İsteğe bağlı hata bildirimi
-ODDS_HISTORY_ALERT_ROWS=...  # İsteğe bağlı satır sayısı uyarı eşiği
+
+# AI sağlayıcıları; en az bir anahtar gerekir, tümü isteğe bağlıdır.
+GROQ_API_KEY=...
+GROQ_MODEL=openai/gpt-oss-20b
+NVIDIA_API_KEY=...
+NVIDIA_MODEL=nvidia/nemotron-3-ultra-550b-a55b
+GOOGLE_API_KEY=...
+GOOGLE_MODEL=gemini-3.8-flash
+
+TELEGRAM_BOT_TOKEN=...       # İsteğe bağlı hata bildirimi
+TELEGRAM_CHAT_ID=...         # İsteğe bağlı hata bildirimi
+ODDS_HISTORY_ALERT_ROWS=... # İsteğe bağlı satır sayısı uyarı eşiği
 ```
 
 Ardından:
@@ -29,41 +41,50 @@ python -m pip install -r requirements.txt
 streamlit run app/main.py
 ```
 
-Arayüz Supabase anon anahtarıyla salt okunur erişim kullanır. Yerel Gemini
-yorumları için `GOOGLE_API_KEY` gerekir; Streamlit Cloud dağıtımında bu anahtarı
-uygulamanın Secrets ayarına ekleyin. `GEMINI_API_KEY` ve `GEMINI_MODEL` adları da
-geriye dönük uyumluluk için okunur. Servis rolü ve API anahtarı değerlerini
-herkese açık depoya koymayın.
+Arayüz Supabase anon anahtarıyla salt okunur maç verisi kullanır. Anonim AI
+yorum geri bildirimi gönderildiğinde yalnızca oy ve seçilen sorun etiketleri
+kaydedilir. Servis rolü ve AI API anahtarlarını herkese açık depoya koymayın.
 
-GitHub Actions gecelik maç önü analizlerini ve yapay zekâ yorumlarını önceden
-üretir. Bunun çalışması için aynı `GOOGLE_API_KEY` değerini depo ayarlarında
-**Settings → Secrets and variables → Actions** altında repository secret olarak
-tanımlayın. Gece önbelleği, takip eden 36 saatte başlayacak maçları hazırlar.
+## Otomatik AI ve veri güncellemesi
+
+GitHub Actions `Match statistics sync` iş akışı her gün Türkiye saatiyle
+**01.18'de** çalışır (GitHub cron: `18 22 * * *`, UTC). İş akışı fikstürleri,
+oranları ve sonuçları günceller; bugünün tahminlerini ve AI yorumlarını
+Supabase'e yazar. GitHub Actions'ta ayrıca `workflow_dispatch` ile elle
+çalıştırma seçeneği vardır.
+
+İş akışının çalışması için repository secrets altında şu değerleri tanımlayın:
+
+- `API_FOOTBALL_KEY`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- AI sağlayıcılarından en az birinin anahtarı: `GROQ_API_KEY`, `NVIDIA_API_KEY`
+  veya `GOOGLE_API_KEY`
+
+Sağlayıcı sırası Groq, NVIDIA NIM ve Google Gemini şeklindedir. İsteklerde
+sağlayıcıya özel kota ve zaman aşımı sınırları uygulanır. Bir sağlayıcı
+başarısız olursa sıradaki denenir. Tümü başarısız olursa temel tahminler
+korunur, eksik AI yorumları Actions çalışma günlüğünde raporlanır.
 
 ## Veri akışı
 
-- API-Football fikstür ve sonuçları toplar.
-- Sonuç yenilemesi tamamlanan maçların saklanmış maç önü tahminlerini de
-  değerlendirir; daha önce işlenmiş tahminleri atlayarak son 14 günü uzlaştırır.
+- API-Football fikstürleri, tamamlanan maç sonuçlarını ve desteklenen maç
+  istatistiklerini sağlar.
 - IdDaa günlük bültenindeki maçlar lig, takım adları ve başlama saatiyle
-  uygulama fikstürlerine eşleştirilir; oran geçmişine yeni kayıt eklenir.
-- Gece iş akışı Poisson tahminlerini, AI destekli maç yorumunu ve risk profili
-  seçimlerini maç başlamadan Supabase önbelleğine yazar. Maç kartı açılırken bu
-  içerik önceden hazır olduğu için Gemini isteği beklenmez.
+  uygulama fikstürlerine eşleştirilir; bulunan oranlar geçmişe eklenir.
+- Gece iş akışı yaklaşan maçların Poisson tahminlerini önbelleğe yazar; AI
+  yorumlarını yalnızca İstanbul takvim günündeki maçlar için üretir.
+- Oranlar AI yorumu yazıldıktan sonra değişmişse yorum görünmeye devam eder.
+  İlgili AI seçimleri, eski oranlara dayandığı uyarısıyla gösterilir.
 - Eşleşmeyen hedef maç varsa çekim kısmi başarısızlık koduyla biter ve görev
   günlüklerinde sayıları gösterir. Kaydedilmiş maçların tekrar yazılmaması
   için rutin çalıştırmada kısmi sonuç yeniden denenmez. Eşleştirme düzeltmesi
   sonrası eksik event'leri tamamlamak için `python -m
   data_pipeline.fetch_iddaa_odds --date YYYY-MM-DD --allow-partial-retry`
-  kullanılabilir; mevcut kayıtlar korunur ve yalnızca eşleşmemiş maçlara yeni
-  oran anlığı eklenir.
-- Windows görev zamanlayıcısı hata bildirimlerinde ASCII mesaj kullanır ve
-  Python çıktısını UTF-8'e sabitler; Türkçe Windows kod sayfası kaynaklı bozuk
-  karakterleri önler.
-- Günlük oran toplaması Windows Görev Zamanlayıcısı'nda; yedek fikstür,
-  sonuç ve oran uzlaştırması GitHub Actions'ta çalışır. Ayrıntılar
-  [`OPERATIONS.md`](OPERATIONS.md) dosyasındadır.
+  kullanılabilir.
+- Oranlar yalnızca IdDaa'nın sunduğu maç ve market kapsamı için gösterilir.
+  Kaynakta bulunmayan veya güvenli biçimde eşleştirilemeyen bir maçın oranı
+  uydurulmaz.
 
-Oranlar yalnızca IdDaa'nın sunduğu maç ve market kapsamı için gösterilir.
-Kaynakta bulunmayan veya güvenli biçimde eşleştirilemeyen bir maçın oranı
-uydurulmaz.
+Windows tarafındaki zamanlanmış görevler, hata takibi ve veri saklama ayrıntıları
+[`OPERATIONS.md`](OPERATIONS.md) dosyasındadır.
