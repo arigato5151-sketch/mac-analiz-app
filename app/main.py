@@ -852,6 +852,10 @@ def render_tactical_match_readout(
             st.markdown(f"**{title}**")
             st.caption(explanation)
             selections = ai_risks.get(profile, [])
+            if ai_risks_stale and selections:
+                st.caption(
+                    "Bu AI seçimleri yorum hazırlanırken kayıtlı olan oranlara dayanır; oranlar değişmiş olabilir."
+                )
             if not selections:
                 if ai_risks_stale:
                     st.caption(
@@ -1076,8 +1080,6 @@ def render_analysis(
                 model_forecast,
                 precomputed_risks=(
                     (cached_analysis or {}).get("ai_risk_selections")
-                    if commentary_has_current_odds
-                    else None
                 ),
                 ai_risks_stale=(
                     cached_analysis is not None
