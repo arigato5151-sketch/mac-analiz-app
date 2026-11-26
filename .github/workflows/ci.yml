@@ -1,4 +1,4 @@
-name: Continuous integration
+name: Sürekli bütünleştirme denetimi
 
 on:
   push:
@@ -16,24 +16,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - name: Depoyu hazırla
+        uses: actions/checkout@v5
+      - name: Python 3.12 ortamını kur
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install dependencies
+      - name: Bağımlılık ve denetim araçlarını kur
         run: |
           python -m pip install --disable-pip-version-check -r requirements.txt
           python -m pip install --disable-pip-version-check ruff pytest
-      - name: Compile Python modules
+      - name: Python dosyalarını derle
         run: python -m compileall -q app config data_pipeline db tests
-      - name: Ruff lint
+      - name: Ruff kod denetimini çalıştır
         run: python -m ruff check .
-      - name: Run tests
+      - name: Python testlerini çalıştır
         run: python -m pytest -q
-      - name: Validate SQL migrations
+      - name: SQL geçişlerini doğrula
         run: python -m db.migrations --validate
-      - name: Send detailed Telegram workflow report
+      - name: Ayrıntılı Telegram raporunu gönder
         if: always()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

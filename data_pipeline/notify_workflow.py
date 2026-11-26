@@ -19,6 +19,88 @@ ERROR_LINE = re.compile(
     r"(error|exception|traceback|failed|failure|timed? ?out|quota|429|500|503|denied)",
     re.IGNORECASE,
 )
+STATUS_TR = {
+    "success": "başarılı",
+    "failure": "başarısız",
+    "timed_out": "zaman aşımına uğradı",
+    "action_required": "işlem gerekiyor",
+    "skipped": "atlandı",
+    "cancelled": "iptal edildi",
+    "in_progress": "sürüyor",
+    "queued": "sırada",
+    "unknown": "bilinmiyor",
+}
+EVENT_TR = {
+    "schedule": "zamanlanmış çalışma",
+    "workflow_dispatch": "elle başlatma",
+    "push": "koda gönderim",
+    "pull_request": "pull request",
+}
+NAME_TR = {
+    "Match statistics sync": "Maç verileri eşitleme",
+    "Confirmed lineups refresh": "Kesinleşen kadroları yenileme",
+    "Verify AI provider keys": "Yapay zekâ sağlayıcı anahtarlarını doğrulama",
+    "Continuous integration": "Sürekli bütünleştirme denetimi",
+    "sync": "Senkronizasyon işi",
+    "refresh": "Kadro yenileme işi",
+    "verify": "Anahtar doğrulama işi",
+    "checks": "Kod denetimi işi",
+    "Set up job": "İşi başlat",
+    "Complete job": "İşi tamamla",
+    "Checkout": "Depoyu hazırla",
+    "Set up Python": "Python ortamını kur",
+    "Install dependencies": "Bağımlılıkları kur",
+    "Install dependencies and check tools": "Bağımlılıkları ve denetim araçlarını kur",
+    "Compile Python modules": "Python dosyalarını derle",
+    "Ruff lint": "Ruff kod denetimi",
+    "Run tests": "Testleri çalıştır",
+    "Validate SQL migrations": "SQL geçişlerini doğrula",
+    "Verify production migration ledger": "Canlı veritabanı geçiş kaydını doğrula",
+    "Verify production public table ACLs": "Canlı tablo erişim izinlerini doğrula",
+    "Refresh fixtures from IdDaa bulletin": "IdDaa fikstürlerini yenile",
+    "Pull IdDaa daily fixtures and all listed markets": "Günlük IdDaa fikstür ve oranlarını al",
+    "Refresh completed match scores and statistics": "Tamamlanan maçların skor ve istatistiklerini yenile",
+    "Verify AI commentary key for scheduled run": "Zamanlanmış çalışma için yapay zekâ anahtarını doğrula",
+    "Generate and save scheduled AI match commentary": "Yapay zekâ maç yorumlarını üret ve kaydet",
+    "Report retained odds history size": "Oran geçmişi boyutunu raporla",
+    "Report upcoming fixture coverage and odds freshness": "Yaklaşan maç ve oran güncelliğini raporla",
+    "Fetch confirmed lineups for imminent matches": "Yaklaşan maçların kesinleşen kadrolarını al",
+    "Backfill recent teams' previous-match lineups on manual runs": "Takımların önceki maç kadrolarını tamamla",
+    "Refresh AI analysis on explicit manual runs": "Yapay zekâ analizlerini yenile",
+    "Check AI provider credentials": "Yapay zekâ sağlayıcı anahtarlarını denetle",
+    "Send detailed Telegram workflow report": "Ayrıntılı Telegram raporunu gönder",
+}
+
+
+def _translated_name(value: object) -> str:
+    text = str(value)
+    return NAME_TR.get(text, text)
+
+
+def _translated_status(value: object) -> str:
+    text = str(value or "unknown")
+    return STATUS_TR.get(text, text)
+
+
+def _explain_error_line(line: str) -> str:
+    lowered = line.casefold()
+    if "429" in lowered or "quota" in lowered or "rate limit" in lowered:
+        return "Servis kullanım kotası veya istek sınırı aşılmış olabilir."
+    if "503" in lowered or "service unavailable" in lowered:
+        return "Uzak servis geçici olarak yanıt verememiş."
+    if "timeout" in lowered or "timed out" in lowered:
+        return "İstek belirlenen süre içinde tamamlanamamış."
+    if "401" in lowered or "403" in lowered or "unauthorized" in lowered:
+        return "Kimlik doğrulama veya erişim izni reddedilmiş."
+    if "importerror" in lowered or "cannot import name" in lowered:
+        return "Python modülünden gerekli ad içe aktarılamamış."
+    if "modulenotfounderror" in lowered or "no module named" in lowered:
+        return "Gerekli Python modülü ortamda bulunamamış."
+    if "traceback" in lowered or "exception" in lowered:
+        return "Python adımı bir istisna nedeniyle durmuş."
+    if "500" in lowered or "internal server error" in lowered:
+        return "Uzak servis sunucu hatası döndürmüş."
+    return "Bu hata satırı başarısız adımın günlük kaydından alındı."
 
 
 def _github_headers(token: str) -> dict[str, str]:
@@ -81,10 +163,16 @@ def _failure_details(repo: str, run_id: str, token: str) -> list[str]:
         except (requests.RequestException, KeyError, OSError, zipfile.BadZipFile) as exc:
             LOG.warning("Could not retrieve logs for failed job: %s", exc)
 
-        heading = f"{job.get('name', 'İş')} — başarısız adım: "
-        heading += ", ".join(failed_steps) if failed_steps else str(job.get("conclusion"))
+        heading = f"{_translated_name(job.get('name', 'İş'))} — başarısız adım: "
+        heading += ", ".join(_translated_name(name) for name in failed_steps)
+        if not failed_steps:
+            heading += _translated_status(job.get("conclusion"))
         excerpts.append(heading)
-        excerpts.extend(f"• {line}" for line in excerpt_lines)
+        if excerpt_lines:
+            excerpts.append("Olası açıklama ve hata günlüğündeki özgün kayıt:")
+        for line in excerpt_lines:
+            excerpts.append(f"• Açıklama: {_explain_error_line(line)}")
+            excerpts.append(f"  Günlük kaydı: {line}")
     return excerpts
 
 
@@ -106,13 +194,17 @@ def _api_step_statuses(repo: str, run_id: str, token: str) -> list[str]:
 
     result: list[str] = []
     for job in jobs:
-        result.append(f"{job.get('name', 'İş')}: {job.get('conclusion') or 'çalışıyor'}")
+        result.append(
+            f"{_translated_name(job.get('name', 'İş'))}: "
+            f"{_translated_status(job.get('conclusion') or 'in_progress')}"
+        )
         for step in job.get("steps", []):
-            conclusion = step.get("conclusion") or step.get("status") or "bekleniyor"
-            icon = "✅" if conclusion == "success" else "❌" if conclusion in {
+            raw_conclusion = step.get("conclusion") or step.get("status") or "queued"
+            conclusion = _translated_status(raw_conclusion)
+            icon = "✅" if raw_conclusion == "success" else "❌" if raw_conclusion in {
                 "failure", "timed_out", "action_required"
-            } else "⏭️" if conclusion == "skipped" else "⏳"
-            result.append(f"{icon} {step.get('name', 'Adım')}: {conclusion}")
+            } else "⏭️" if raw_conclusion == "skipped" else "⏳"
+            result.append(f"{icon} {_translated_name(step.get('name', 'Adım'))}: {conclusion}")
     return result
 
 
@@ -120,15 +212,15 @@ def build_report() -> str:
     status = os.getenv("WORKFLOW_STATUS", "unknown").strip().lower()
     successful = status == "success"
     title = "✅ İş akışı başarılı" if successful else "❌ İş akışı başarısız"
-    workflow = os.getenv("GITHUB_WORKFLOW", "GitHub Actions")
+    workflow = _translated_name(os.getenv("GITHUB_WORKFLOW", "GitHub Actions"))
     repo = os.getenv("GITHUB_REPOSITORY", "")
     run_id = os.getenv("GITHUB_RUN_ID", "")
     server = os.getenv("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
     run_url = f"{server}/{repo}/actions/runs/{run_id}" if repo and run_id else "Bağlantı yok"
     lines = [
         f"{title}: {workflow}",
-        f"Durum: {status}",
-        f"Tetikleyici: {os.getenv('GITHUB_EVENT_NAME', 'bilinmiyor')}",
+        f"Durum: {_translated_status(status)}",
+        f"Tetikleyici: {EVENT_TR.get(os.getenv('GITHUB_EVENT_NAME', ''), 'bilinmiyor')}",
         f"Dal/etiket: {os.getenv('GITHUB_REF_NAME', 'bilinmiyor')}",
         f"Başlatan: {os.getenv('GITHUB_ACTOR', 'bilinmiyor')}",
         f"Çalıştırma: {run_url}",
@@ -148,7 +240,7 @@ def build_report() -> str:
             for name, details in steps.items():
                 if isinstance(details, dict):
                     outcome = details.get("outcome") or details.get("conclusion") or "çalışmadı"
-                    step_lines.append(f"{name}: {outcome}")
+                    step_lines.append(f"{_translated_name(name)}: {_translated_status(outcome)}")
     if step_lines:
         lines.extend(["\nİş ve adım sonuçları:", *step_lines])
 

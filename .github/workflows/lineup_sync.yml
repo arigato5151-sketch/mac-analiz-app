@@ -1,4 +1,4 @@
-name: Confirmed lineups refresh
+name: Kesinleşen kadroları yenileme
 
 on:
   schedule:
@@ -19,26 +19,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - name: Depoyu hazırla
+        uses: actions/checkout@v5
+      - name: Python 3.12 ortamını kur
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
-      - run: python -m pip install --disable-pip-version-check -r requirements.txt
-      - name: Fetch confirmed lineups for imminent matches
+      - name: Python bağımlılıklarını kur
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Yaklaşan maçların kesinleşen kadrolarını al
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m data_pipeline.fetch_lineups
-      - name: Backfill recent teams' previous-match lineups on manual runs
+      - name: Takımların önceki maç kadrolarını tamamla
         if: github.event_name == 'workflow_dispatch'
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m data_pipeline.fetch_lineups --backfill-previous
-      - name: Refresh AI analysis on explicit manual runs
+      - name: Yapay zekâ analizlerini yenile
         if: success() && github.event_name == 'workflow_dispatch'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -50,7 +53,7 @@ jobs:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           NVIDIA_MODEL: nvidia/nemotron-3-ultra-550b-a55b
         run: python -m data_pipeline.precompute_match_analysis
-      - name: Send detailed Telegram workflow report
+      - name: Ayrıntılı Telegram raporunu gönder
         if: always()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

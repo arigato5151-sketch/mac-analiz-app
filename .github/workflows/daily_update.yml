@@ -1,4 +1,4 @@
-name: Match statistics sync
+name: Günlük maç verileri ve analiz eşitleme
 
 on:
   schedule:
@@ -17,39 +17,43 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - name: Depoyu hazırla
+        uses: actions/checkout@v5
+      - name: Python 3.12 ortamını kur
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
-      - run: python -m pip install --disable-pip-version-check -r requirements.txt
-      - run: python -m pip install --disable-pip-version-check ruff pytest
-      - name: Compile Python modules
+      - name: Python bağımlılıklarını kur
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Kod denetimi araçlarını kur
+        run: python -m pip install --disable-pip-version-check ruff pytest
+      - name: Python dosyalarını derle
         run: python -m compileall -q app config data_pipeline db tests
-      - name: Ruff lint
+      - name: Ruff kod denetimini çalıştır
         run: python -m ruff check .
-      - name: Run tests
+      - name: Python testlerini çalıştır
         run: python -m pytest -q
-      - name: Validate SQL migrations
+      - name: SQL geçişlerini doğrula
         run: python -m db.migrations --validate
-      - name: Verify production migration ledger
+      - name: Canlı veritabanı geçiş kaydını doğrula
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m db.migrations --verify-production
-      - name: Verify production public table ACLs
+      - name: Canlı tablo erişim izinlerini doğrula
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m db.verify_acl
-      - name: Refresh fixtures from IdDaa bulletin
+      - name: IdDaa fikstürlerini yenile
         id: refresh_fixtures
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m data_pipeline.fetch_iddaa_fixtures
-      - name: Pull IdDaa daily fixtures and all listed markets
+      - name: Günlük IdDaa fikstür ve oranlarını al
         id: refresh_odds
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
         env:
@@ -57,14 +61,14 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m data_pipeline.fetch_iddaa_odds --retries 3
-      - name: Refresh completed match scores and statistics
+      - name: Tamamlanan maçların skor ve istatistiklerini yenile
         id: refresh_results
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m data_pipeline.fetch_results --lookback-days 7
-      - name: Verify AI commentary key for scheduled run
+      - name: Zamanlanmış çalışma için yapay zekâ anahtarını doğrula
         if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && steps.refresh_fixtures.outcome == 'success' && steps.refresh_odds.outcome == 'success' && steps.refresh_results.outcome == 'success'
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
@@ -75,7 +79,7 @@ jobs:
             echo "No AI provider key is configured; scheduled AI commentary cannot be generated."
             exit 1
           fi
-      - name: Generate and save scheduled AI match commentary
+      - name: Yapay zekâ maç yorumlarını üret ve kaydet
         if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && steps.refresh_fixtures.outcome == 'success' && steps.refresh_odds.outcome == 'success' && steps.refresh_results.outcome == 'success'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -87,20 +91,20 @@ jobs:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           NVIDIA_MODEL: nvidia/nemotron-3-ultra-550b-a55b
         run: python -m data_pipeline.precompute_match_analysis
-      - name: Report retained odds history size
+      - name: Oran geçmişi boyutunu raporla
         if: always()
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m data_pipeline.monitor_odds_history
-      - name: Report upcoming fixture coverage and odds freshness
+      - name: Yaklaşan maç kapsamı ve oran güncelliğini raporla
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         if: always()
         run: python -m data_pipeline.monitor_data_freshness
-      - name: Send detailed Telegram workflow report
+      - name: Ayrıntılı Telegram raporunu gönder
         if: always()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
