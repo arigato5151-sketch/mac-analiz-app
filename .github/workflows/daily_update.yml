@@ -2,8 +2,7 @@ name: Match statistics sync
 
 on:
   schedule:
-    - cron: "17 3 * * *"
-    - cron: "30 20 * * *"
+    - cron: "18 22 * * *"
   workflow_dispatch:
 
 permissions:
