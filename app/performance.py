@@ -29,6 +29,7 @@ def load_evaluated_prediction_results() -> list[dict[str, Any]]:
         order="match_date.asc,match_id.asc",
     )
 
+@st.cache_data(ttl=900, max_entries=16, show_spinner=False)
 def market_performance_rows(records: list[dict[str, Any]]) -> pd.DataFrame:
     """Summarize accuracy and probability quality for each evaluated market."""
     observations: dict[str, list[tuple[float, bool, float | None, float | None]]] = {}

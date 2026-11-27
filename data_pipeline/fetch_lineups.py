@@ -179,6 +179,7 @@ def sync_upcoming_lineups(
                 "fixture_lineups",
                 columns="match_id,team_id,starters",
                 filters={"match_id": f"in.({','.join(map(str, chunk))})"},
+                order="match_id.asc,team_id.asc",
             )
         )
     completed_by_match: dict[int, set[int]] = defaultdict(set)

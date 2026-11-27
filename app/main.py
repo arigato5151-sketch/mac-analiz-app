@@ -1356,6 +1356,36 @@ def render_confirmed_lineups(row: dict[str, Any]) -> None:
                 )
 
 
+_UNSUPPORTED_VALIDATION_CLAIM = re.compile(
+    r"\b(?:log[\s-]*loss|brier(?:\s+(?:score|skoru))?|doğrulama|"
+    r"değerlendirme\s+örneklem\w*|historical\s+model\s+evaluation|"
+    r"held[_ -]?out|validation\s+matches|sample\s+size)\b",
+    re.IGNORECASE,
+)
+
+
+def _hide_unsupported_validation_claims(
+    analysis: str, *, validation_is_reportable: bool
+) -> str:
+    """Hide AI statements about historical scores when their sample is too small."""
+    if validation_is_reportable:
+        return analysis
+
+    cleaned_lines = []
+    for line in analysis.splitlines():
+        if line.lstrip().startswith("#"):
+            cleaned_lines.append(line)
+            continue
+        sentences = re.split(r"(?<=[.!?])\s+(?=[A-ZĞİÖŞÜ])", line)
+        supported = [
+            sentence
+            for sentence in sentences
+            if not _UNSUPPORTED_VALIDATION_CLAIM.search(sentence)
+        ]
+        cleaned_lines.append(" ".join(supported))
+    return "\n".join(cleaned_lines)
+
+
 def render_ai_match_analysis(
     row: dict[str, Any],
     history: pd.DataFrame,
@@ -1373,11 +1403,12 @@ def render_ai_match_analysis(
     validation_matches = int(forecast.get("tuning_matches") or 0)
     result_log_loss = forecast.get("tuning_log_loss")
     baseline_log_loss = forecast.get("tuning_baseline_log_loss")
-    if (
+    validation_is_reportable = (
         validation_matches >= 30
         and result_log_loss is not None
         and baseline_log_loss is not None
-    ):
+    )
+    if validation_is_reportable:
         st.caption(
             f"Geçmiş ayrılmış değerlendirme: {validation_matches} maç · "
             f"log-loss {float(result_log_loss):.3f} (sabit model: "
@@ -1388,8 +1419,11 @@ def render_ai_match_analysis(
         st.caption("Modelin geçmiş doğrulama örneği bu maç için güvenilir performans özeti vermeye yetmiyor.")
     if precomputed_analysis:
         st.caption("Yapay zekâ destekli maç yorumu önceden oluşturuldu.")
-        st.markdown(precomputed_analysis)
-        analysis_text = precomputed_analysis
+        analysis_text = _hide_unsupported_validation_claims(
+            precomputed_analysis,
+            validation_is_reportable=validation_is_reportable,
+        )
+        st.markdown(analysis_text)
     else:
         st.caption("Yapay zekâ yorumu gece iş akışında hazırlanacak; henüz hazır değil.")
         analysis_text = None
@@ -1690,11 +1724,11 @@ if __name__ == '__main__':
         teams, leagues = pd.DataFrame(), pd.DataFrame()
     section = st.radio(
         "Bölüm",
-        ["⚽  Maç Analizleri", "🧠  Günlük Taktik Analiz", "🎟️  Kupon Oluşturucu", "📊  İstatistik Arşivi", "📈  Tahmin Performansı"],
+        ["⚽  Maç Analizleri", "🎟️  Kupon Oluşturucu", "📊  İstatistik Arşivi", "📈  Tahmin Performansı"],
         horizontal=True,
         label_visibility="collapsed",
     )
-    if section in {"⚽  Maç Analizleri", "🧠  Günlük Taktik Analiz"}:
+    if section == "⚽  Maç Analizleri":
         try:
             match_records, quote_records, analyses = load_match_day(selected_day)
             render_analysis(
