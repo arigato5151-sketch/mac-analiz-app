@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from time import perf_counter
 from datetime import date, datetime, time, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -13,12 +15,19 @@ import streamlit as st
 from config.settings import get_public_supabase_settings
 from db.db_client import DatabaseError, PublicSupabaseRestClient
 
+LOG = logging.getLogger(__name__)
+
 
 @st.cache_resource(show_spinner=False)
 def get_db() -> PublicSupabaseRestClient:
     """Create a cached client that cannot write to Supabase."""
     settings = get_public_supabase_settings()
-    return PublicSupabaseRestClient(settings.supabase_url, settings.supabase_anon_key)
+    return PublicSupabaseRestClient(
+        settings.supabase_url,
+        settings.supabase_anon_key,
+        timeout=min(settings.request_timeout_seconds, 10.0),
+        retry_total=1,
+    )
 
 
 def submit_ai_analysis_feedback(
@@ -275,6 +284,7 @@ def load_match_day(
     match_day: date,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Read fixtures and IdDaa quotes for one Istanbul calendar day."""
+    started_at = perf_counter()
     istanbul = ZoneInfo("Europe/Istanbul")
     start = datetime.combine(match_day, time.min, tzinfo=istanbul).astimezone(timezone.utc)
     end = datetime.combine(date.fromordinal(match_day.toordinal() + 1), time.min, tzinfo=istanbul).astimezone(timezone.utc)
@@ -285,6 +295,7 @@ def load_match_day(
         filters={"match_date": f"gte.{start.isoformat()}", "and": f"(match_date.lt.{end.isoformat()})"},
         order="match_date.asc,id.asc",
     )
+    matches_loaded_at = perf_counter()
     # The odds collector may run before kickoff day (and retry later), so quote
     # capture time is not a reliable way to find quotes for a selected fixture.
     # Query by the fixture IDs and keep the latest capture in the UI instead.
@@ -302,16 +313,9 @@ def load_match_day(
         if not chunk:
             continue
         quotes.extend(
-            db.select_all(
-                "odds_quote_history",
-                columns="id,match_id,bookmaker,odds,captured_at,source_updated_at",
-                filters={
-                    "bookmaker": "eq.iddaa.com",
-                    "match_id": f"in.({','.join(map(str, chunk))})",
-                },
-                order="captured_at.asc,id.asc",
-            )
+            db.rpc("latest_iddaa_quotes", {"p_match_ids": chunk})
         )
+    quotes_loaded_at = perf_counter()
     analyses: list[dict[str, Any]] = []
     for offset in range(0, len(match_ids), 100):
         chunk = match_ids[offset : offset + 100]
@@ -361,6 +365,17 @@ def load_match_day(
             match["fixture_lineups"] = lineups_by_match.get(int(match["id"]), [])
         except (KeyError, TypeError, ValueError):
             match["fixture_lineups"] = []
+    LOG.info(
+        "Match-day data loaded: matches=%d quotes=%d analyses=%d total=%.3fs "
+        "(fixtures=%.3fs quotes=%.3fs related=%.3fs)",
+        len(matches),
+        len(quotes),
+        len(analyses),
+        perf_counter() - started_at,
+        matches_loaded_at - started_at,
+        quotes_loaded_at - matches_loaded_at,
+        perf_counter() - quotes_loaded_at,
+    )
     return matches, quotes, analyses
 
 

@@ -9,6 +9,7 @@ from app.components import data
 class FakeSupabase:
     def __init__(self) -> None:
         self.cache_query: dict[str, Any] | None = None
+        self.latest_quote_match_ids: list[int] | None = None
 
     def select_all(self, table: str, **kwargs: Any) -> list[dict[str, Any]]:
         if table == "matches":
@@ -27,6 +28,11 @@ class FakeSupabase:
             return [{"match_id": 17, "model_version": "test"}]
         return []
 
+    def rpc(self, function: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        assert function == "latest_iddaa_quotes"
+        self.latest_quote_match_ids = params["p_match_ids"]
+        return []
+
 
 def test_match_analysis_cache_query_orders_by_its_primary_key(monkeypatch) -> None:
     db = FakeSupabase()
@@ -38,4 +44,5 @@ def test_match_analysis_cache_query_orders_by_its_primary_key(monkeypatch) -> No
     assert analyses == [{"match_id": 17, "model_version": "test"}]
     assert db.cache_query is not None
     assert db.cache_query["order"] == "match_id.asc"
+    assert db.latest_quote_match_ids == [17]
     data.load_match_day.clear()

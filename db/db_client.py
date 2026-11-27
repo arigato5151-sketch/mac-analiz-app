@@ -14,9 +14,14 @@ class DatabaseError(RuntimeError):
     """Raised when Supabase rejects or cannot complete an operation."""
 
 
-def _build_session() -> requests.Session:
+def _build_session(*, retry_total: int = 4) -> requests.Session:
+    if retry_total < 0:
+        raise ValueError("retry_total cannot be negative")
     retry = Retry(
-        total=4,
+        total=retry_total,
+        connect=retry_total,
+        read=retry_total,
+        status=retry_total,
         backoff_factor=0.5,
         status_forcelist=(429, 500, 502, 503, 504),
         # POST is intentionally excluded: insert/upsert callers do not have a
@@ -36,6 +41,7 @@ class SupabaseRestClient:
         service_key: str,
         *,
         timeout: float = 30.0,
+        retry_total: int = 4,
         session: requests.Session | None = None,
     ) -> None:
         if not url or not service_key:
@@ -43,7 +49,7 @@ class SupabaseRestClient:
 
         self._base_url = f"{url.rstrip('/')}/rest/v1"
         self._timeout = timeout
-        self._session = session or _build_session()
+        self._session = session or _build_session(retry_total=retry_total)
         self._headers = {
             "apikey": service_key,
             "Content-Type": "application/json",

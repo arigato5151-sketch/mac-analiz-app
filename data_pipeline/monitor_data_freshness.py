@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from time import perf_counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -32,20 +33,11 @@ def collect_data_health(
         order="match_date.asc,id.asc",
     )
     match_ids = [int(row["id"]) for row in matches]
-    quotes: list[dict[str, Any]] = []
-    for offset in range(0, len(match_ids), 100):
-        chunk = match_ids[offset : offset + 100]
-        quotes.extend(
-            db.select_all(
-                "odds_quote_history",
-                columns="id,match_id,captured_at",
-                filters={
-                    "bookmaker": "eq.iddaa.com",
-                    "match_id": f"in.({','.join(map(str, chunk))})",
-                },
-                order="captured_at.desc,id.desc",
-            )
-        )
+    quotes = (
+        db.rpc("latest_iddaa_quote_times", {"p_match_ids": match_ids})
+        if match_ids
+        else []
+    )
 
     covered_ids = {int(row["match_id"]) for row in quotes}
     latest_values = [
@@ -70,9 +62,11 @@ def collect_data_health(
 
 
 def main() -> None:
+    started_at = perf_counter()
     settings = get_settings()
     db = SupabaseRestClient(settings.supabase_url, settings.supabase_service_role_key)
     health = collect_data_health(db)
+    health["elapsed_seconds"] = round(perf_counter() - started_at, 3)
     start = health["window_start"].astimezone(ISTANBUL).strftime("%d.%m.%Y")
     end = (health["window_end"] - timedelta(seconds=1)).astimezone(ISTANBUL).strftime("%d.%m.%Y")
     latest = health["latest_iddaa_quote_at"]
@@ -97,6 +91,7 @@ def main() -> None:
                 f"- IdDaa oranı bulunmayan maç: {health['matches_without_iddaa_odds']}\n"
                 f"- Son oran kaydı: {latest_text} (İstanbul)\n"
                 f"- Son oran kaydının yaşı: {health['quote_age_hours']} saat\n"
+                f"- Kontrol süresi: {health['elapsed_seconds']} saniye\n"
             )
 
 
