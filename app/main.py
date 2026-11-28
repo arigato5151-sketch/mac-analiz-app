@@ -847,35 +847,71 @@ def render_tactical_match_readout(
     )
     candidate_probabilities = {label: chance for label, chance, _ in candidates}
     ai_risks = precomputed_risks or {}
-    low, medium = st.columns(2)
-    for column, title, profile, explanation in (
-        (low, "Görece daha olası", "low", "Yapay zekânın temkinli bulduğu, model olasılığı yüksek seçimler:"),
-        (medium, "Dengeli risk", "medium", "Yapay zekânın olasılık ve maç senaryosu bakımından dengeli bulduğu seçimler:"),
-    ):
-        with column:
+    profiles = (
+        (
+            "Görece daha olası",
+            "low",
+            "Temkinli profil · model olasılığı görece yüksek seçimler",
+        ),
+        (
+            "Dengeli risk",
+            "medium",
+            "Dengeli profil · olasılık ve maç senaryosu birlikte değerlendirilir",
+        ),
+    )
+
+    def render_risk_profile(
+        title: str, profile: str, explanation: str
+    ) -> None:
+        selections = ai_risks.get(profile, [])
+        with st.container(border=True):
             st.markdown(f"**{title}**")
             st.caption(explanation)
-            selections = ai_risks.get(profile, [])
             if ai_risks_stale and selections:
-                st.caption(
-                    "Bu AI seçimleri yorum hazırlanırken kayıtlı olan oranlara dayanır; oranlar değişmiş olabilir."
+                st.warning(
+                    "Bu seçimler yorum hazırlanırken kayıtlı oranlara dayanıyor; oranlar değişmiş olabilir.",
+                    icon="⚠️",
                 )
-            if not selections:
-                if ai_risks_stale:
-                    st.caption(
-                        "Oranlar AI yorumundan sonra değiştiği için önceki seçimler güncellenene kadar gösterilmiyor."
-                    )
-                elif precomputed_risks is not None:
-                    st.caption("Bu profil için doğrulanmış bir AI seçimi üretilemedi.")
-                else:
-                    st.caption("Yapay zekâ seçimi gece iş akışında hazırlanacak; henüz hazır değil.")
             for selection in selections:
                 label = selection["market"]
                 chance = selection.get(
                     "model_probability", candidate_probabilities.get(label)
                 )
-                if chance is not None:
-                    st.markdown(f"**{label} · %{chance * 100:.1f}**  \n{selection['reason']}")
+                st.markdown(
+                    f"**{label}**"
+                    + (f" · `%{chance * 100:.1f}`" if chance is not None else "")
+                )
+                st.write(selection["reason"])
+
+    populated_profiles = [
+        profile
+        for profile in profiles
+        if ai_risks.get(profile[1], [])
+    ]
+    if len(populated_profiles) == 2:
+        risk_columns = st.columns(2)
+        for column, profile in zip(risk_columns, populated_profiles):
+            with column:
+                render_risk_profile(*profile)
+    elif populated_profiles:
+        render_risk_profile(*populated_profiles[0])
+
+    empty_profiles = [
+        profile for profile in profiles if not ai_risks.get(profile[1], [])
+    ]
+    if empty_profiles:
+        empty_messages = []
+        for title, profile, _ in empty_profiles:
+            if ai_risks_stale:
+                message = (
+                    f"{title}: oranlar yorumdan sonra değişti; eski seçimler güncellenene kadar gizli."
+                )
+            elif precomputed_risks is not None:
+                message = f"{title}: doğrulanmış AI seçimi üretilemedi."
+            else:
+                message = f"{title}: AI seçimi henüz hazırlanmadı."
+            empty_messages.append(message)
+        st.caption(" · ".join(empty_messages))
     st.caption("Senaryolar tahmin garantisi veya bahis tavsiyesi değildir. Birleşik koşulların gerçekleşme olasılığı daha düşüktür; maç önü kadro ve sakatlık bilgileri bu model özetinde yer almaz.")
 
 
@@ -1427,7 +1463,25 @@ def render_ai_match_analysis(
             precomputed_analysis,
             validation_is_reportable=validation_is_reportable,
         )
-        st.markdown(analysis_text)
+        sections = _split_ai_analysis_sections(analysis_text)
+        if sections is None:
+            st.markdown(analysis_text)
+        else:
+            summary = sections.pop("Özet", "")
+            if summary:
+                with st.container(border=True):
+                    st.markdown("**Maç özeti**")
+                    st.markdown(summary)
+            section_order = (
+                "Form ve Oyun Profili",
+                "Öne Çıkan Senaryolar ve Pazarlar",
+                "Varyans ve Risk Notu",
+            )
+            for heading in section_order:
+                section_text = sections.get(heading)
+                if section_text:
+                    with st.expander(heading, expanded=False):
+                        st.markdown(section_text)
     else:
         st.caption("Yapay zekâ yorumu gece iş akışında hazırlanacak; henüz hazır değil.")
         analysis_text = None
@@ -1435,6 +1489,41 @@ def render_ai_match_analysis(
         if not precomputed_analysis:
             st.markdown(analysis_text)
         render_ai_analysis_feedback(match_id, analysis_text)
+
+
+_AI_ANALYSIS_HEADINGS = (
+    "Özet",
+    "Form ve Oyun Profili",
+    "Öne Çıkan Senaryolar ve Pazarlar",
+    "Varyans ve Risk Notu",
+)
+
+
+def _split_ai_analysis_sections(analysis: str) -> dict[str, str] | None:
+    """Split current and legacy AI Markdown into known sections without losing text."""
+    heading_pattern = re.compile(
+        r"(?<!\S)(?:#{1,4}\s*)?(?:\*\*)?("
+        + "|".join(re.escape(heading) for heading in _AI_ANALYSIS_HEADINGS)
+        + r")(?:\*\*)?\s*:?\s*(?:\*\*)?\s*",
+        flags=re.IGNORECASE,
+    )
+    matches = list(heading_pattern.finditer(analysis))
+    if len(matches) < 2 or analysis[: matches[0].start()].strip():
+        return None
+
+    sections: dict[str, str] = {}
+    canonical_headings = {heading.casefold(): heading for heading in _AI_ANALYSIS_HEADINGS}
+    for index, match in enumerate(matches):
+        canonical_heading = canonical_headings[match.group(1).casefold()]
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(analysis)
+        body = analysis[match.end() : end].strip()
+        body = re.sub(r"(?:\s*\*\*)+$", "", body).strip()
+        if body:
+            existing = sections.get(canonical_heading)
+            sections[canonical_heading] = (
+                f"{existing}\n\n{body}" if existing else body
+            )
+    return sections or None
 
 
 def render_ai_analysis_feedback(match_id: int, analysis: str) -> None:
