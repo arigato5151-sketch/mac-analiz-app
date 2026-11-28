@@ -297,7 +297,7 @@ def collect_match_analysis_cache(
             "model": get_optional_setting("GROQ_MODEL", "openai/gpt-oss-20b"),
             "strict_json_schema": "true",
             "reasoning_effort": "low",
-            "max_output_tokens": 1600,
+            "max_output_tokens": 2400,
             "request_timeout_seconds": 20,
             "request_delay_seconds": 15,
         },
@@ -310,7 +310,7 @@ def collect_match_analysis_cache(
                 "NVIDIA_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"
             ),
             "strict_json_schema": False,
-            "max_output_tokens": 1800,
+            "max_output_tokens": 2600,
             "extra_body": {
                 "chat_template_kwargs": {
                     "enable_thinking": False,

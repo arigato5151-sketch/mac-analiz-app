@@ -156,7 +156,7 @@ def _provider_configs() -> tuple[dict[str, Any], ...]:
             "base_url": "https://api.groq.com/openai/v1",
             "strict_json_schema": True,
             "reasoning_effort": "low",
-            "max_output_tokens": 1600,
+            "max_output_tokens": 2400,
             "request_timeout_seconds": 20,
         },
         {
@@ -168,7 +168,7 @@ def _provider_configs() -> tuple[dict[str, Any], ...]:
             ),
             "base_url": "https://integrate.api.nvidia.com/v1",
             "strict_json_schema": False,
-            "max_output_tokens": 1800,
+            "max_output_tokens": 2600,
             "extra_body": {
                 "chat_template_kwargs": {
                     "enable_thinking": False,

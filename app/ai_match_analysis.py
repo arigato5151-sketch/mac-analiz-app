@@ -1006,9 +1006,9 @@ def generate_match_analysis(
         "ayrı gösterilir. Sadece candidate_markets içindeki tam adları seç; low ve "
         "medium gruplarına farklı market türlerinden birer kısa gerekçeli seçim yaz. "
         "Her maçta analysis ve risk_selections alanları zorunludur; çıktı yalnızca "
-        'istenen JSON nesnesi olsun: {"matches":[{"match_id":123,"analysis":"...",'
+        'istenen JSON nesnesi olsun: {"matches":[{"match_id":123,'
         '"risk_selections":{"low":[{"market":"...","reason":"..."}],'
-        '"medium":[{"market":"...","reason":"..."}]}}]}.'
+        '"medium":[{"market":"...","reason":"..."}]},"analysis":"..."}]}.'
     )
     if instructions_override:
         instructions = instructions_override
@@ -1532,10 +1532,11 @@ def generate_match_ai_packages(
         "tekrarlama; bunları ayrıca risk_selections alanına yaz. Her risk grubuna farklı "
         "market türlerinden iki geçerli seçim koy: low temkinli, medium dengeli; yüksek "
         "riskli seçim üretme ve market olasılıklarını değiştirme. Her girişteki match_id "
-        "değerini aynen koru. Yalnızca bu JSON şemasını döndür: "
-        "{\"matches\":[{\"match_id\":123,\"analysis\":\"...\","
+        "değerini aynen koru. JSON nesnesinde önce risk_selections, sonra analysis "
+        "alanını üret. Yalnızca bu JSON şemasını döndür: "
+        "{\"matches\":[{\"match_id\":123,"
         "\"risk_selections\":{\"low\":[{\"market\":\"...\",\"reason\":\"...\"}],"
-        "\"medium\":[...]}}]}"
+        "\"medium\":[...]},\"analysis\":\"...\"}]}"
     )
     selection_schema = {
         "type": "ARRAY",
@@ -1557,7 +1558,6 @@ def generate_match_ai_packages(
                     "type": "OBJECT",
                     "properties": {
                         "match_id": {"type": "INTEGER"},
-                        "analysis": {"type": "STRING"},
                         "risk_selections": {
                             "type": "OBJECT",
                             "properties": {
@@ -1566,8 +1566,9 @@ def generate_match_ai_packages(
                             },
                             "required": ["low", "medium"],
                         },
+                        "analysis": {"type": "STRING"},
                     },
-                    "required": ["match_id", "analysis", "risk_selections"],
+                    "required": ["match_id", "risk_selections", "analysis"],
                 },
             },
         },
@@ -1664,11 +1665,12 @@ def generate_match_ai_packages(
                 "Sadece candidate_markets içindeki tam adları seç; low ve medium gruplarına "
                 "farklı market türlerinden birer kısa gerekçeli seçim yaz. Kesinlik veya kazanç "
                 "garantisi verme. Girdi match_id değerlerini koru. "
-                "Her maçta analysis ve risk_selections alanları zorunludur; risk_selections "
-                "içinde low ve medium dizileri bulunmalıdır. "
-                'JSON biçimi: {"matches":[{"match_id":123,"analysis":"...",'
+                "Her maçta risk_selections ve analysis alanları zorunludur. JSON nesnesinde "
+                "risk_selections alanını analysis alanından önce yaz; low ve medium "
+                "dizilerinin ikisi de bulunmalıdır. "
+                'JSON biçimi: {"matches":[{"match_id":123,'
                 '"risk_selections":{"low":[{"market":"...","reason":"..."}],'
-                '"medium":[{"market":"...","reason":"..."}]}}]}. '
+                '"medium":[{"market":"...","reason":"..."}]},"analysis":"..."}]}. '
                 "Yalnızca bu JSON nesnesini döndür."
             )
             provider_output_tokens = 1200
