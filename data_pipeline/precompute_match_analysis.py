@@ -492,6 +492,8 @@ def collect_match_analysis_cache(
             "match_analysis_cache",
             rows[offset : offset + 100],
             on_conflict="match_id",
+            return_representation=False,
+            retry_on_timeout=True,
         )
     # Process only today's fixture contexts in kickoff order; future forecasts
     # remain available without requiring an on-demand AI request in the card.
@@ -536,6 +538,8 @@ def collect_match_analysis_cache(
                     "match_analysis_cache",
                     updated_rows,
                     on_conflict="match_id",
+                    return_representation=False,
+                    retry_on_timeout=True,
                 )
             missing = {int(context["match_id"]) for context in batch} - packages.keys()
             ai_failures += len(missing)
@@ -578,6 +582,8 @@ def main() -> None:
             "match_analysis_cache",
             rows[offset : offset + 100],
             on_conflict="match_id",
+            return_representation=False,
+            retry_on_timeout=True,
         )
     summary = {
         "fixtures_cached": len(rows),

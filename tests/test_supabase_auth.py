@@ -115,6 +115,49 @@ def test_rpc_rejects_invalid_function_path() -> None:
         client.rpc("schema/function")
 
 
+def test_upsert_can_skip_large_representation_response() -> None:
+    session = FakeSession(FakeResponse(payload=[]))
+    client = SupabaseRestClient(
+        "https://example.supabase.co", "test-service-key", session=session
+    )
+
+    assert client.upsert(
+        "match_analysis_cache",
+        [{"match_id": 1, "analysis_json": {"ai_analysis": "sample"}}],
+        on_conflict="match_id",
+        return_representation=False,
+        retry_on_timeout=True,
+    ) == []
+    assert session.calls[-1]["headers"]["Prefer"] == (
+        "resolution=merge-duplicates,return=minimal"
+    )
+
+
+def test_idempotent_upsert_retries_one_transport_timeout() -> None:
+    class TimeoutOnceSession(FakeSession):
+        def request(self, method: str, url: str, **kwargs: Any) -> FakeResponse:
+            self.calls.append({"method": method, "url": url, **kwargs})
+            if len(self.calls) == 1:
+                import requests
+
+                raise requests.ReadTimeout("timed out")
+            return FakeResponse(payload=[])
+
+    session = TimeoutOnceSession()
+    client = SupabaseRestClient(
+        "https://example.supabase.co", "test-service-key", session=session
+    )
+
+    assert client.upsert(
+        "match_analysis_cache",
+        [{"match_id": 1, "analysis_json": {"ai_analysis": "sample"}}],
+        on_conflict="match_id",
+        return_representation=False,
+        retry_on_timeout=True,
+    ) == []
+    assert len(session.calls) == 2
+
+
 def test_database_errors_do_not_expose_body_or_credentials_in_logs(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

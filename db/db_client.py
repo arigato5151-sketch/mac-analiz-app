@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from time import perf_counter
+from time import perf_counter, sleep
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -131,18 +131,39 @@ class SupabaseRestClient:
         records: Sequence[Mapping[str, Any]],
         *,
         on_conflict: str | None = None,
+        return_representation: bool = True,
+        retry_on_timeout: bool = False,
     ) -> list[dict[str, Any]]:
         if not records:
             return []
+        if retry_on_timeout and not on_conflict:
+            raise ValueError("Timeout retries require an idempotent conflict key")
 
         params = {"on_conflict": on_conflict} if on_conflict else None
-        return self._request(
-            "POST",
-            table,
-            params=params,
-            json=list(records),
-            headers={"Prefer": "resolution=merge-duplicates,return=representation"},
-        )
+        return_preference = "representation" if return_representation else "minimal"
+        headers = {
+            "Prefer": f"resolution=merge-duplicates,return={return_preference}"
+        }
+        attempts = 2 if retry_on_timeout else 1
+        for attempt in range(attempts):
+            try:
+                return self._request(
+                    "POST",
+                    table,
+                    params=params,
+                    json=list(records),
+                    headers=headers,
+                )
+            except (requests.Timeout, requests.ConnectionError):
+                if attempt + 1 >= attempts:
+                    raise
+                LOG.warning(
+                    "Retrying timed-out Supabase upsert for %s with conflict key %s",
+                    table,
+                    on_conflict,
+                )
+                sleep(1)
+        return []
 
     def insert(
         self,
