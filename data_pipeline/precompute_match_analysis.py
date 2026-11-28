@@ -309,6 +309,14 @@ def collect_match_analysis_cache(
             "model": get_optional_setting(
                 "NVIDIA_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"
             ),
+            "strict_json_schema": False,
+            "max_output_tokens": 1800,
+            "extra_body": {
+                "chat_template_kwargs": {
+                    "enable_thinking": False,
+                    "force_nonempty_content": True,
+                }
+            },
             "request_timeout_seconds": 60,
             "request_delay_seconds": 5,
         },

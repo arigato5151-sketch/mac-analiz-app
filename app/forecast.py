@@ -3,18 +3,43 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+import logging
+from bisect import bisect_left
+from functools import wraps
+from time import perf_counter
+from typing import Any, Callable, ParamSpec, TypeVar
 
 import pandas as pd
 import streamlit as st
 
 from app.metrics import _expected_calibration_error
 
+LOG = logging.getLogger(__name__)
+P = ParamSpec("P")
+R = TypeVar("R")
+
 DEFAULT_RECENT_FORM_PRIOR = 5.0
 MIN_LOG_LOSS_IMPROVEMENT = 0.005
 MIN_TUNING_HISTORY = 160
 RECENT_FORM_PRIORS = (2.5, 5.0, 8.0, 12.0, 20.0)
 TUNING_VALIDATION_MATCHES = 100
+
+
+def _log_calculation_duration(function: Callable[P, R]) -> Callable[P, R]:
+    """Log uncached forecast calculation time without changing its result."""
+    @wraps(function)
+    def wrapped(*args: P.args, **kwargs: P.kwargs) -> R:
+        started_at = perf_counter()
+        try:
+            return function(*args, **kwargs)
+        finally:
+            LOG.info(
+                "Forecast calculation: function=%s elapsed_seconds=%.3f",
+                function.__name__,
+                perf_counter() - started_at,
+            )
+
+    return wrapped
 
 
 def team_recent_matches(history: pd.DataFrame, team_id: Any, before: pd.Timestamp, league_id: Any, limit: int = 5) -> pd.DataFrame:
@@ -154,6 +179,7 @@ def _match_outcome_probabilities(expected_home: float, expected_away: float) -> 
     return tuple(outcome_probabilities)
 
 @st.cache_data(ttl=86_400, max_entries=32, show_spinner=False)
+@_log_calculation_duration
 def tune_recent_form_prior(league_history: pd.DataFrame) -> dict[str, Any]:
     """Select a form prior on earlier matches and report later holdout performance."""
     ordered = league_history.sort_values(["match_date", "id"], ascending=True).reset_index(drop=True)
@@ -175,6 +201,96 @@ def tune_recent_form_prior(league_history: pd.DataFrame) -> dict[str, Any]:
     }
     actual_outcomes: list[int] = []
     rows = ordered.to_dict("records")
+
+    league_rows: dict[int, list[dict[str, Any]]] = {}
+    team_rows: dict[tuple[int, int], list[tuple[Any, Any, Any, bool]]] = {}
+    for history_match in rows:
+        kickoff = history_match.get("match_date")
+        league_value = pd.to_numeric(
+            pd.Series([history_match.get("league_id")]), errors="coerce"
+        ).iloc[0]
+        if pd.isna(kickoff) or pd.isna(league_value):
+            continue
+        league_id = int(league_value)
+        league_rows.setdefault(league_id, []).append(history_match)
+        for team_key, is_home in (
+            (history_match.get("home_team_id"), True),
+            (history_match.get("away_team_id"), False),
+        ):
+            team_value = pd.to_numeric(pd.Series([team_key]), errors="coerce").iloc[0]
+            if pd.isna(team_value):
+                continue
+            team_rows.setdefault((league_id, int(team_value)), []).append(
+                (
+                    kickoff,
+                    history_match.get("home_score"),
+                    history_match.get("away_score"),
+                    is_home,
+                )
+            )
+
+    league_indexes: dict[int, tuple[list[Any], list[float], list[float], list[int], list[int]]] = {}
+    for league_id, matches in league_rows.items():
+        dates: list[Any] = []
+        home_sums, away_sums = [0.0], [0.0]
+        home_counts, away_counts = [0], [0]
+        for history_match in matches:
+            dates.append(history_match["match_date"])
+            previous_home, previous_away = home_sums[-1], away_sums[-1]
+            previous_home_count, previous_away_count = home_counts[-1], away_counts[-1]
+            try:
+                home_score = float(history_match["home_score"])
+                if not math.isfinite(home_score):
+                    raise ValueError
+            except (TypeError, ValueError):
+                home_score = None
+            try:
+                away_score = float(history_match["away_score"])
+                if not math.isfinite(away_score):
+                    raise ValueError
+            except (TypeError, ValueError):
+                away_score = None
+            home_sums.append(previous_home + (home_score or 0.0))
+            away_sums.append(previous_away + (away_score or 0.0))
+            home_counts.append(previous_home_count + (home_score is not None))
+            away_counts.append(previous_away_count + (away_score is not None))
+        league_indexes[league_id] = (
+            dates,
+            home_sums,
+            away_sums,
+            home_counts,
+            away_counts,
+        )
+
+    team_dates = {
+        team_key: [entry[0] for entry in matches]
+        for team_key, matches in team_rows.items()
+    }
+
+    def recent_strength(
+        league_id: int, team_id: int, kickoff: Any, baseline: float, prior: float
+    ) -> tuple[float, float]:
+        key = (league_id, team_id)
+        matches = team_rows.get(key, [])
+        before = bisect_left(team_dates.get(key, []), kickoff)
+        recent = matches[max(0, before - 5):before]
+        if not recent:
+            return 1.0, 1.0
+        goals_for = [
+            int(home_score if is_home else away_score)
+            for _, home_score, away_score, is_home in recent
+        ]
+        goals_against = [
+            int(away_score if is_home else home_score)
+            for _, home_score, away_score, is_home in recent
+        ]
+        shrink = len(recent) / (len(recent) + prior)
+        attack = 1 + shrink * (sum(goals_for) / len(goals_for) / baseline - 1)
+        defense_weakness = 1 + shrink * (
+            sum(goals_against) / len(goals_against) / baseline - 1
+        )
+        return max(0.25, attack), max(0.25, defense_weakness)
+
     for index in range(first_validation, len(rows)):
         match = rows[index]
         if match.get("home_score") is None or match.get("away_score") is None:
@@ -182,15 +298,57 @@ def tune_recent_form_prior(league_history: pd.DataFrame) -> dict[str, Any]:
         home_score, away_score = int(match["home_score"]), int(match["away_score"])
         outcome = 0 if home_score > away_score else 1 if home_score == away_score else 2
         actual_outcomes.append(outcome)
-        prior_history = ordered.iloc[:index]
+        kickoff = match["match_date"]
+        league_value = pd.to_numeric(
+            pd.Series([match.get("league_id")]), errors="coerce"
+        ).iloc[0]
+        league_id = int(league_value) if pd.notna(league_value) else None
+        league_index = league_indexes.get(league_id) if league_id is not None else None
+        league_count = 0
+        baseline = None
+        home_mean = away_mean = 0.0
+        if league_index is not None and pd.notna(kickoff):
+            dates, home_sums, away_sums, home_counts, away_counts = league_index
+            league_count = bisect_left(dates, kickoff)
+            if league_count >= 10 and home_counts[league_count] and away_counts[league_count]:
+                home_mean = home_sums[league_count] / home_counts[league_count]
+                away_mean = away_sums[league_count] / away_counts[league_count]
+                baseline = (home_mean + away_mean) / 2
+                if baseline <= 0:
+                    baseline = None
         row = {
-            "kickoff": match["match_date"],
-            "league_id": match["league_id"],
+            "kickoff": kickoff,
+            "league_id": league_id,
             "home_team_id": match["home_team_id"],
             "away_team_id": match["away_team_id"],
         }
+        home_value = pd.to_numeric(
+            pd.Series([row["home_team_id"]]), errors="coerce"
+        ).iloc[0]
+        away_value = pd.to_numeric(
+            pd.Series([row["away_team_id"]]), errors="coerce"
+        ).iloc[0]
         for prior in RECENT_FORM_PRIORS:
-            means = _expected_goal_means(row, prior_history, prior)
+            means = None
+            if baseline is not None:
+                home_attack, home_defense = (
+                    recent_strength(
+                        league_id, int(home_value), kickoff, baseline, prior
+                    )
+                    if pd.notna(home_value)
+                    else (1.0, 1.0)
+                )
+                away_attack, away_defense = (
+                    recent_strength(
+                        league_id, int(away_value), kickoff, baseline, prior
+                    )
+                    if pd.notna(away_value)
+                    else (1.0, 1.0)
+                )
+                means = (
+                    home_mean * math.sqrt(home_attack * away_defense),
+                    away_mean * math.sqrt(away_attack * home_defense),
+                )
             if means is None:
                 predictions[prior].append(
                     {
@@ -388,6 +546,7 @@ def tune_recent_form_prior(league_history: pd.DataFrame) -> dict[str, Any]:
     }
 
 @st.cache_data(ttl=86_400, max_entries=256, show_spinner=False)
+@_log_calculation_duration
 def model_match_forecast(
     row: dict[str, Any],
     history: pd.DataFrame,
@@ -453,6 +612,7 @@ def model_match_forecast(
     }
 
 @st.cache_data(ttl=86_400, max_entries=256, show_spinner=False)
+@_log_calculation_duration
 def model_half_forecast(
     row: dict[str, Any], history: pd.DataFrame, *, half: int
 ) -> dict[str, Any] | None:
@@ -527,6 +687,7 @@ def model_half_forecast(
     }
 
 @st.cache_data(ttl=86_400, max_entries=256, show_spinner=False)
+@_log_calculation_duration
 def model_corner_forecast(row: dict[str, Any], history: pd.DataFrame) -> dict[str, Any] | None:
     """Estimate full-time corners from historical corner counts in this league."""
     kickoff = row["kickoff"]

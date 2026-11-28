@@ -1114,11 +1114,26 @@ def generate_match_analysis(
         try:
             compatible_payload = compatible_response.json()
             choices = compatible_payload.get("choices") or []
-            output = str(choices[0].get("message", {}).get("content") or "").strip()
+            choice = choices[0]
+            message = choice.get("message", {})
+            output = str(message.get("content") or "").strip()
         except (ValueError, AttributeError, IndexError, TypeError) as exc:
             raise MatchAnalysisAIError(f"{provider} API yanıtı okunamadı.") from exc
         if not output:
-            raise MatchAnalysisAIError(f"{provider} boş bir analiz döndürdü.")
+            usage = compatible_payload.get("usage") or {}
+            completion_tokens = (
+                usage.get("completion_tokens") if isinstance(usage, dict) else None
+            )
+            finish_reason = str(choice.get("finish_reason") or "unknown")
+            reasoning_present = bool(message.get("reasoning_content"))
+            response_id = str(compatible_payload.get("id") or "unknown")[:80]
+            raise MatchAnalysisAIError(
+                f"{provider} boş bir analiz döndürdü "
+                f"(finish_reason={finish_reason[:40]}, "
+                f"completion_tokens={completion_tokens}, "
+                f"reasoning_content_present={reasoning_present}, "
+                f"response_id={response_id})."
+            )
         return output
     request_url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -1414,7 +1429,7 @@ def generate_match_ai_package(
 
 def generate_match_ai_packages(
     contexts: list[dict[str, Any]], *, api_key: str = "", model: str = "gemini-3.8-flash",
-    fallback_providers: list[dict[str, str]] | None = None,
+    fallback_providers: list[dict[str, Any]] | None = None,
     request_timeout_seconds: int = 90,
     fallback_delay_seconds: int = 20,
 ) -> dict[int, dict[str, Any]]:
