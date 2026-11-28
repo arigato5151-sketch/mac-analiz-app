@@ -297,7 +297,7 @@ def collect_match_analysis_cache(
             "model": get_optional_setting("GROQ_MODEL", "openai/gpt-oss-20b"),
             "strict_json_schema": "true",
             "reasoning_effort": "low",
-            "max_output_tokens": 800,
+            "max_output_tokens": 1600,
             "request_timeout_seconds": 20,
             "request_delay_seconds": 15,
         },
@@ -317,7 +317,7 @@ def collect_match_analysis_cache(
                     "force_nonempty_content": True,
                 }
             },
-            "request_timeout_seconds": 60,
+            "request_timeout_seconds": 90,
             "request_delay_seconds": 5,
         },
         {

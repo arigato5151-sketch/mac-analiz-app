@@ -1065,7 +1065,9 @@ def generate_match_analysis(
                         "Content-Type": "application/json",
                     },
                     json=compatible_body,
-                    timeout=request_timeout_seconds,
+                    # Keep connection establishment bounded while allowing the
+                    # provider's model generation its configured read window.
+                    timeout=(10, request_timeout_seconds),
                 )
                 if compatible_response.status_code != 429 or attempt:
                     break
@@ -1101,11 +1103,24 @@ def generate_match_analysis(
                     if isinstance(error_data, dict)
                     else str(error_data)
                 )
+                failed_generation = (
+                    error_data.get("failed_generation", "")
+                    if isinstance(error_data, dict)
+                    else ""
+                )
             except (ValueError, AttributeError):
                 diagnostic = compatible_response.text[:300]
+                failed_generation = ""
             if not diagnostic:
                 diagnostic = compatible_response.text[:300]
             diagnostic = str(diagnostic).strip()[:300]
+            if failed_generation:
+                failed_generation_summary = re.sub(
+                    r"\s+", " ", str(failed_generation)
+                ).strip()[:180]
+                diagnostic = (
+                    f"{diagnostic}; failed_generation={failed_generation_summary}"
+                )[:500]
             suffix = f": {diagnostic}" if diagnostic else ""
             raise MatchAnalysisAIError(
                 f"{provider} API isteği başarısız oldu "
@@ -1117,8 +1132,18 @@ def generate_match_analysis(
             choice = choices[0]
             message = choice.get("message", {})
             output = str(message.get("content") or "").strip()
+            finish_reason = str(choice.get("finish_reason") or "unknown")
         except (ValueError, AttributeError, IndexError, TypeError) as exc:
             raise MatchAnalysisAIError(f"{provider} API yanıtı okunamadı.") from exc
+        if finish_reason == "length":
+            usage = compatible_payload.get("usage") or {}
+            completion_tokens = (
+                usage.get("completion_tokens") if isinstance(usage, dict) else None
+            )
+            raise MatchAnalysisAIError(
+                f"{provider} çıktıyı token sınırında kesti "
+                f"(completion_tokens={completion_tokens})."
+            )
         if not output:
             usage = compatible_payload.get("usage") or {}
             completion_tokens = (

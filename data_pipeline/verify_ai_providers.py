@@ -15,6 +15,10 @@ def main() -> None:
             "key": get_optional_setting("GROQ_API_KEY"),
             "model": get_optional_setting("GROQ_MODEL", "openai/gpt-oss-20b"),
             "base_url": "https://api.groq.com/openai/v1",
+            "strict_json_schema": True,
+            "reasoning_effort": "low",
+            "max_output_tokens": 1600,
+            "request_timeout_seconds": 20,
         },
         {
             "name": "NVIDIA NIM",
@@ -24,6 +28,14 @@ def main() -> None:
             ),
             "base_url": "https://integrate.api.nvidia.com/v1",
             "strict_json_schema": False,
+            "extra_body": {
+                "chat_template_kwargs": {
+                    "enable_thinking": False,
+                    "force_nonempty_content": True,
+                }
+            },
+            "max_output_tokens": 1800,
+            "request_timeout_seconds": 90,
         },
     )
     failures = 0
@@ -40,11 +52,13 @@ def main() -> None:
                 model=provider["model"],
                 instructions_override='Return exactly this JSON: {"ok":true}',
                 json_mode=True,
-                max_output_tokens=512,
+                max_output_tokens=provider["max_output_tokens"],
                 provider="openai_compatible",
                 base_url=provider["base_url"],
-                strict_json_schema=bool(provider.get("strict_json_schema", True)),
+                strict_json_schema=bool(provider["strict_json_schema"]),
+                reasoning_effort=provider.get("reasoning_effort"),
                 extra_body=provider.get("extra_body"),
+                request_timeout_seconds=provider["request_timeout_seconds"],
                 response_schema={
                     "type": "OBJECT",
                     "properties": {"ok": {"type": "BOOLEAN"}},

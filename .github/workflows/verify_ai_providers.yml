@@ -2,6 +2,12 @@ name: Yapay zekâ sağlayıcı anahtarlarını doğrulama
 
 on:
   workflow_dispatch:
+    inputs:
+      notify:
+        description: Send a Telegram summary after provider validation
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   actions: read
@@ -29,7 +35,7 @@ jobs:
           NVIDIA_MODEL: nvidia/nemotron-3-ultra-550b-a55b
         run: python -m data_pipeline.verify_ai_providers
       - name: Ayrıntılı Telegram raporunu gönder
-        if: always()
+        if: always() && inputs.notify == true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
