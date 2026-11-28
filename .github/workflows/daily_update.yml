@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "18 22 * * *"
   workflow_dispatch:
+    inputs:
+      ai_only:
+        description: Regenerate AI commentary without refreshing fixtures, odds, results, or sending a Telegram report
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -48,6 +54,7 @@ jobs:
         run: python -m db.verify_acl
       - name: IdDaa fikstürlerini yenile
         id: refresh_fixtures
+        if: inputs.ai_only != true
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -55,7 +62,7 @@ jobs:
         run: python -m data_pipeline.fetch_iddaa_fixtures
       - name: Günlük IdDaa fikstür ve oranlarını al
         id: refresh_odds
-        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+        if: (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && inputs.ai_only != true
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -63,13 +70,14 @@ jobs:
         run: python -m data_pipeline.fetch_iddaa_odds --retries 3
       - name: Tamamlanan maçların skor ve istatistiklerini yenile
         id: refresh_results
+        if: inputs.ai_only != true
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m data_pipeline.fetch_results --lookback-days 7
       - name: Zamanlanmış çalışma için yapay zekâ anahtarını doğrula
-        if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && steps.refresh_fixtures.outcome == 'success' && steps.refresh_odds.outcome == 'success' && steps.refresh_results.outcome == 'success'
+        if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && (inputs.ai_only == true || (steps.refresh_fixtures.outcome == 'success' && steps.refresh_odds.outcome == 'success' && steps.refresh_results.outcome == 'success'))
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -80,7 +88,7 @@ jobs:
             exit 1
           fi
       - name: Yapay zekâ maç yorumlarını üret ve kaydet
-        if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && steps.refresh_fixtures.outcome == 'success' && steps.refresh_odds.outcome == 'success' && steps.refresh_results.outcome == 'success'
+        if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && (inputs.ai_only == true || (steps.refresh_fixtures.outcome == 'success' && steps.refresh_odds.outcome == 'success' && steps.refresh_results.outcome == 'success'))
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -92,7 +100,7 @@ jobs:
           NVIDIA_MODEL: nvidia/nemotron-3-ultra-550b-a55b
         run: python -m data_pipeline.precompute_match_analysis
       - name: Oran geçmişi boyutunu raporla
-        if: always()
+        if: always() && inputs.ai_only != true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -102,10 +110,10 @@ jobs:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        if: always()
+        if: always() && inputs.ai_only != true
         run: python -m data_pipeline.monitor_data_freshness
       - name: Ayrıntılı Telegram raporunu gönder
-        if: always()
+        if: always() && inputs.ai_only != true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
