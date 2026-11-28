@@ -205,6 +205,9 @@ def collect_match_analysis_cache(
             f"{commentary_feedback['sample_size']} votes; aggregate style guidance enabled."
         )
     cached_ai: dict[int, dict[str, Any]] = {}
+    preserve_existing_ai = (
+        get_optional_setting("AI_MISSING_ONLY").lower() == "true"
+    )
     fixture_ids = [str(item["id"]) for item in fixtures if item.get("id") is not None]
     latest_odds: dict[int, dict[str, Any]] = {}
     for offset in range(0, len(fixture_ids), 100):
@@ -261,7 +264,11 @@ def collect_match_analysis_cache(
                 cached.get("model_version") == ANALYSIS_MODEL_VERSION
                 and isinstance(cached_analysis, dict)
                 and cached_analysis.get("ai_analysis")
-                and cached_analysis.get("commentary_feedback_revision") == feedback_revision
+                and (
+                    preserve_existing_ai
+                    or cached_analysis.get("commentary_feedback_revision")
+                    == feedback_revision
+                )
             ):
                 cached_ai[int(cached["match_id"])] = {
                     "analysis": cached_analysis["ai_analysis"],

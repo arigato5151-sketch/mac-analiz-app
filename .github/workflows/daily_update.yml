@@ -98,6 +98,7 @@ jobs:
           GROQ_MODEL: openai/gpt-oss-20b
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           NVIDIA_MODEL: nvidia/nemotron-3-ultra-550b-a55b
+          AI_MISSING_ONLY: ${{ inputs.ai_only }}
         run: python -m data_pipeline.precompute_match_analysis
       - name: Oran geçmişi boyutunu raporla
         if: always() && inputs.ai_only != true
