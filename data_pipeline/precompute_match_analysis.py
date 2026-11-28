@@ -448,8 +448,13 @@ def collect_match_analysis_cache(
             odds_revision = iddaa_odds_revision(latest_odds.get(match_id))
             if (
                 match_id in cached_ai
-                and cached_ai[match_id].get("lineup_revision") == lineup_revision
-                and cached_ai[match_id].get("odds_revision") == odds_revision
+                and (
+                    preserve_existing_ai
+                    or (
+                        cached_ai[match_id].get("lineup_revision") == lineup_revision
+                        and cached_ai[match_id].get("odds_revision") == odds_revision
+                    )
+                )
             ):
                 ai_package = cached_ai[match_id]
                 analysis["ai_analysis"] = ai_package["analysis"]
