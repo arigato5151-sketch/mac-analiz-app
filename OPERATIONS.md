@@ -59,6 +59,11 @@ için oranı olmayan maç sayısını ve en son kayıt zamanını gösterir; ger
 IdDaa kataloğunda bulunmayan ligler için oran gelmemesi kaynak kapsamı olabilir;
 bu durum takım adı alias'ı eklemekle çözülmez.
 
+HTTP süre günlükleri istek parametrelerini, yanıt gövdelerini veya kimlik bilgilerini
+yazmaz. Supabase kayıtlarında yöntem, tablo, süre ve dönen satır sayısı; API-Football
+iş özetlerinde mantıksal istek/hata sayısı ve son istek süresi görünür. HTTP
+adaptörünün kendi tekrarları bir mantıksal API-Football çağrısının içinde kalır.
+
 ## Veri saklama
 
 `odds_quote_history` her başarılı çekimden yeni bir oran anlık kaydı tutar.

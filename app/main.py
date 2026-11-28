@@ -31,7 +31,11 @@ from app.forecast import (
     summarize_team_form,
     team_recent_matches,
 )
-from app.performance import load_evaluated_prediction_results, render_performance
+from app.performance import (
+    load_evaluated_prediction_filter_options,
+    load_evaluated_prediction_results,
+    render_performance,
+)
 from app.localization import COUNTRY_NAMES_TR, LEAGUE_NAMES_TR
 from app.market_mapping import is_compound_selection, standard_market_price, total_goals_outcome
 from app.ai_match_analysis import (
@@ -1709,6 +1713,7 @@ if __name__ == '__main__':
             load_match_day.clear()
             count_completed_match_history.clear()
             load_completed_match_history.clear()
+            load_evaluated_prediction_filter_options.clear()
             load_evaluated_prediction_results.clear()
             load_league_match_history.clear()
             load_recent_team_matches.clear()

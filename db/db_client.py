@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from time import perf_counter
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -12,6 +14,9 @@ from urllib3.util.retry import Retry
 
 class DatabaseError(RuntimeError):
     """Raised when Supabase rejects or cannot complete an operation."""
+
+
+LOG = logging.getLogger(__name__)
 
 
 def _build_session(*, retry_total: int = 4) -> requests.Session:
@@ -68,19 +73,41 @@ class SupabaseRestClient:
         json: Any = None,
         headers: Mapping[str, str] | None = None,
     ) -> list[dict[str, Any]]:
-        response = self._session.request(
-            method,
-            f"{self._base_url}/{table}",
-            params=params,
-            json=json,
-            headers={**self._headers, **(headers or {})},
-            timeout=self._timeout,
-        )
+        started_at = perf_counter()
+        try:
+            response = self._session.request(
+                method,
+                f"{self._base_url}/{table}",
+                params=params,
+                json=json,
+                headers={**self._headers, **(headers or {})},
+                timeout=self._timeout,
+            )
+        except requests.RequestException as exc:
+            LOG.warning(
+                "Supabase %s %s transport error after %.3fs (%s)",
+                method,
+                table,
+                perf_counter() - started_at,
+                type(exc).__name__,
+            )
+            raise
+        elapsed = perf_counter() - started_at
         if not response.ok:
+            LOG.warning(
+                "Supabase %s %s returned HTTP %d after %.3fs",
+                method,
+                table,
+                response.status_code,
+                elapsed,
+            )
             raise DatabaseError(
                 f"Supabase {method} {table} failed ({response.status_code})"
             )
         if not response.content:
+            LOG.info(
+                "Supabase %s %s completed in %.3fs (0 rows)", method, table, elapsed
+            )
             return []
         try:
             payload = response.json()
@@ -88,7 +115,15 @@ class SupabaseRestClient:
             raise DatabaseError(
                 f"Supabase {method} {table} returned invalid JSON"
             ) from exc
-        return payload if isinstance(payload, list) else [payload]
+        rows = payload if isinstance(payload, list) else [payload]
+        LOG.info(
+            "Supabase %s %s completed in %.3fs (%d rows)",
+            method,
+            table,
+            elapsed,
+            len(rows),
+        )
+        return rows
 
     def upsert(
         self,
@@ -177,14 +212,31 @@ class SupabaseRestClient:
         params: dict[str, Any] = {"select": "id"}
         if filters:
             params.update(filters)
-        response = self._session.request(
-            "GET",
-            f"{self._base_url}/{table}",
-            params=params,
-            headers={**self._headers, "Prefer": "count=exact", "Range": "0-0"},
-            timeout=self._timeout,
-        )
+        started_at = perf_counter()
+        try:
+            response = self._session.request(
+                "GET",
+                f"{self._base_url}/{table}",
+                params=params,
+                headers={**self._headers, "Prefer": "count=exact", "Range": "0-0"},
+                timeout=self._timeout,
+            )
+        except requests.RequestException as exc:
+            LOG.warning(
+                "Supabase GET %s count transport error after %.3fs (%s)",
+                table,
+                perf_counter() - started_at,
+                type(exc).__name__,
+            )
+            raise
+        elapsed = perf_counter() - started_at
         if not response.ok:
+            LOG.warning(
+                "Supabase GET %s count returned HTTP %d after %.3fs",
+                table,
+                response.status_code,
+                elapsed,
+            )
             raise DatabaseError(
                 f"Supabase GET {table} count failed ({response.status_code})"
             )
@@ -192,7 +244,14 @@ class SupabaseRestClient:
         _, separator, total = content_range.rpartition("/")
         if not separator or not total.isdigit():
             raise DatabaseError(f"Supabase GET {table} returned an invalid row count")
-        return int(total)
+        row_count = int(total)
+        LOG.info(
+            "Supabase GET %s count completed in %.3fs (%d rows)",
+            table,
+            elapsed,
+            row_count,
+        )
+        return row_count
 
     def rpc(
         self,

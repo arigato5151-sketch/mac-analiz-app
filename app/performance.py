@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -14,19 +15,56 @@ from app.metrics import _expected_calibration_error
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 
+
 @st.cache_data(ttl=900, show_spinner="Tahmin performansı yükleniyor…")
-def load_evaluated_prediction_results() -> list[dict[str, Any]]:
-    """Read evaluated forecasts without requiring a newly imported helper module."""
+def load_evaluated_prediction_filter_options() -> dict[str, Any]:
+    """Load compact date, model, and league options for the performance filters."""
+    rows = get_db().rpc("evaluated_prediction_filter_options")
+    return rows[0] if rows else {}
+
+
+@st.cache_data(ttl=900, show_spinner="Tahmin performansı yükleniyor…")
+def load_evaluated_prediction_results(
+    start_day: date,
+    end_day: date,
+    model_version: str | None = None,
+    league_ids: tuple[int, ...] | None = None,
+) -> list[dict[str, Any]]:
+    """Read only evaluated forecasts matching the selected filters."""
+    if start_day > end_day:
+        raise ValueError("Performance start date must not be after end date")
+    start = datetime.combine(start_day, time.min, tzinfo=ISTANBUL).astimezone(
+        timezone.utc
+    )
+    end = datetime.combine(
+        end_day + timedelta(days=1), time.min, tzinfo=ISTANBUL
+    ).astimezone(timezone.utc)
+    filters: dict[str, str | int] = {
+        "match_date": f"gte.{start.isoformat()}",
+        "and": f"(match_date.lt.{end.isoformat()})",
+    }
+    if model_version is not None:
+        filters["model_version"] = f"eq.{model_version}"
+    if league_ids is not None:
+        normalized_ids = tuple(sorted({int(value) for value in league_ids}))
+        if not normalized_ids:
+            return []
+        filters["league_id"] = (
+            f"eq.{normalized_ids[0]}"
+            if len(normalized_ids) == 1
+            else f"in.({','.join(map(str, normalized_ids))})"
+        )
     return get_db().select_all(
         "evaluated_prediction_results",
         columns=(
-            "match_id,match_date,predicted_at,model_version,actual_result,was_correct,brier_score,"
+            "prediction_id,match_id,match_date,predicted_at,model_version,actual_result,was_correct,brier_score,"
             "league_id,league_name,"
             "prob_home_win,prob_draw,prob_away_win,prob_over_2_5,over_2_5_actual,"
             "over_2_5_was_correct,over_2_5_brier_score,prob_btts,btts_actual,"
             "btts_was_correct,btts_brier_score,market_probabilities,market_performance"
         ),
-        order="match_date.asc,match_id.asc",
+        filters=filters,
+        order="match_date.asc,match_id.asc,predicted_at.asc,prediction_id.asc",
     )
 
 @st.cache_data(ttl=900, max_entries=16, show_spinner=False)
@@ -159,42 +197,76 @@ def market_performance_rows(records: list[dict[str, Any]]) -> pd.DataFrame:
 
 def render_performance() -> None:
     try:
-        records = load_evaluated_prediction_results()
+        filter_options = load_evaluated_prediction_filter_options()
     except Exception as exc:
-        st.error(f"Tahmin performansı yüklenemedi: {exc}")
+        st.error(f"Tahmin performansı filtreleri yüklenemedi: {exc}")
         return
-    if not records:
+    minimum = pd.to_datetime(filter_options.get("min_match_date"), utc=True, errors="coerce")
+    maximum = pd.to_datetime(filter_options.get("max_match_date"), utc=True, errors="coerce")
+    if pd.isna(minimum) or pd.isna(maximum):
         st.info("Henüz değerlendirilmiş tahmin bulunmuyor.")
         return
-    dates = pd.to_datetime([row.get("match_date") for row in records], utc=True, errors="coerce").dropna().tz_convert(ISTANBUL)
-    if dates.empty:
-        st.info("Tahmin kayıtlarında geçerli maç tarihi bulunamadı.")
-        return
-    versions = sorted({str(row.get("model_version")) for row in records if row.get("model_version")}, reverse=True)
+    minimum_day = minimum.tz_convert(ISTANBUL).date()
+    maximum_day = maximum.tz_convert(ISTANBUL).date()
+    versions = sorted(
+        {str(version) for version in filter_options.get("model_versions", []) if version},
+        reverse=True,
+    )
+    raw_leagues = filter_options.get("league_options") or []
+    league_ids_by_name: dict[str, set[int]] = {}
+    if isinstance(raw_leagues, list):
+        for league in raw_leagues:
+            if not isinstance(league, dict) or not league.get("name"):
+                continue
+            try:
+                league_ids_by_name.setdefault(str(league["name"]), set()).add(
+                    int(league["id"])
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+    league_options = sorted(league_ids_by_name)
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        start_day = st.date_input("Başlangıç", value=dates.min().date(), format="DD.MM.YYYY", key="performance_start")
+        start_day = st.date_input(
+            "Başlangıç",
+            value=minimum_day,
+            format="DD.MM.YYYY",
+            key="performance_start",
+        )
     with c2:
-        end_day = st.date_input("Bitiş", value=dates.max().date(), format="DD.MM.YYYY", key="performance_end")
+        end_day = st.date_input(
+            "Bitiş",
+            value=maximum_day,
+            format="DD.MM.YYYY",
+            key="performance_end",
+        )
     with c3:
         version_filter = st.selectbox("Model sürümü", ["Tüm sürümler", *versions])
     with c4:
-        league_options = sorted({
-            str(row.get("league_name")) for row in records if row.get("league_name")
-        })
         league_filter = st.selectbox("Lig", ["Tüm ligler", *league_options])
     if start_day > end_day:
         st.warning("Başlangıç tarihi bitiş tarihinden sonra olamaz.")
         return
-    start_ts = pd.Timestamp(start_day, tz=ISTANBUL)
-    end_ts = pd.Timestamp(end_day, tz=ISTANBUL) + pd.Timedelta(days=1)
-    selected = [
-        row for row in records
-        if pd.notna(pd.to_datetime(row.get("match_date"), utc=True, errors="coerce"))
-        and start_ts <= pd.to_datetime(row["match_date"], utc=True).tz_convert(ISTANBUL) < end_ts
-        and (version_filter == "Tüm sürümler" or str(row.get("model_version")) == version_filter)
-        and (league_filter == "Tüm ligler" or str(row.get("league_name")) == league_filter)
-    ]
+    selected_league_ids = (
+        tuple(sorted(league_ids_by_name[league_filter]))
+        if league_filter != "Tüm ligler"
+        else None
+    )
+    try:
+        selected = load_evaluated_prediction_results(
+            start_day,
+            end_day,
+            model_version=(
+                version_filter if version_filter != "Tüm sürümler" else None
+            ),
+            league_ids=selected_league_ids,
+        )
+    except Exception as exc:
+        st.error(f"Tahmin performansı yüklenemedi: {exc}")
+        return
+    if not selected:
+        st.info("Seçilen dönemde ölçülebilir pazar tahmini bulunamadı.")
+        return
     table = market_performance_rows(selected)
     if table.empty:
         st.info("Seçilen dönemde ölçülebilir pazar tahmini bulunamadı.")

@@ -134,6 +134,21 @@ def test_database_errors_do_not_expose_body_or_credentials_in_logs(
     assert fake_jwt not in caplog.text
 
 
+def test_successful_supabase_request_logs_duration_without_query_values(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("INFO")
+    session = FakeSession()
+    client = SupabaseRestClient(
+        "https://example.supabase.co", "test-service-key", session=session
+    )
+
+    client.select("matches", filters={"id": "eq.123"})
+
+    assert "Supabase GET matches completed in" in caplog.text
+    assert "eq.123" not in caplog.text
+
+
 def test_migration_ledger_comparison_is_exercised_with_source_checksums() -> None:
     from db.migrations import discover_migrations, verify_ledger
 
